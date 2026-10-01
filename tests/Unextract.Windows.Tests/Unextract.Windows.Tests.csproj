@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- 別プロセスのヘルパー (Helper/HelperProgram.cs) を、このテストアセンブリのビルド済み実行ファイルとして起動する。
+         テストの実行は従来どおり testhost が行う (Main はヘルパーとしてだけ使う)。 -->
+    <OutputType>Exe</OutputType>
+    <GenerateProgramFile>false</GenerateProgramFile>
+    <!-- ヘルパーが削除保留中の状態を作るための LibraryImport (テスト専用。製品コードではない)。 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Unextract.Windows\Unextract.Windows.csproj" />
+  </ItemGroup>
+
+  <!-- 段階 B のテスト専用 ZIP fixture 生成器を共有する (製品コードの ZIP パーサを兼ねない)。 -->
+  <ItemGroup>
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\ZipFixture.cs" Link="Fixtures\ZipFixture.cs" />
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\ZipPatcher.cs" Link="Fixtures\ZipPatcher.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

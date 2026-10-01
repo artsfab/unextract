@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyName>unextract</AssemblyName>
+    <!-- 製品のバージョンはここだけで定める (配布ビルドの設定は Properties/PublishProfiles/win-x64.pubxml)。 -->
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Unextract.Core\Unextract.Core.csproj" />
+    <ProjectReference Include="..\Unextract.Windows\Unextract.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Unextract.Cli.Tests" />
+  </ItemGroup>
+
+</Project>

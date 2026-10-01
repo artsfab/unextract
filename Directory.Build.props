@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- 全プロジェクト共通。LangVersion は SDK 既定のまま指定しない。 -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- unsafe は Unextract.Windows (LibraryImport のソース生成) だけが csproj で有効にする。 -->
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

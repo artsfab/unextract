@@ -1,0 +1,116 @@
+using Unextract.Core.Analysis;
+using Unextract.Core.Target;
+using Unextract.Core.Tests.Fixtures;
+using Unextract.Core.Zip;
+
+namespace Unextract.Core.Tests.Fakes;
+
+// ZIP 側の呼び出し記録。GetContent / Open / Crc32 の参照を記録する (内容を読まないことの確認、テスト C01〜C08)。
+internal sealed class RecordingContentProvider(IZipContentProvider inner) : IZipContentProvider
+{
+    public List<string> Calls { get; } = [];
+
+    public IZipEntryContent GetContent(int index)
+    {
+        Calls.Add($"GetContent {index}");
+        return new RecordingContent(inner.GetContent(index), index, Calls);
+    }
+
+    public bool Opened(int index) => Calls.Contains($"Open {index}");
+
+    public bool Touched(int index) => Calls.Any(c => c.EndsWith($" {index}", StringComparison.Ordinal));
+
+    private sealed class RecordingContent(IZipEntryContent inner, int index, List<string> calls) : IZipEntryContent
+    {
+        public bool IsEncrypted => inner.IsEncrypted;
+
+        public long Length => inner.Length;
+
+        public uint Crc32
+        {
+            get
+            {
+                calls.Add($"Crc32 {index}");
+                return inner.Crc32;
+            }
+        }
+
+        public Stream Open()
+        {
+            calls.Add($"Open {index}");
+            return inner.Open();
+        }
+    }
+}
+
+// 実 ZIP (ZipArchive で読む) と偽の target で初回分類を実行する。target は C:\target。
+internal sealed class PipelineHarness : IDisposable
+{
+    public const string TargetPath = @"C:\target";
+    public const string ArchivePath = @"C:\in\archive.zip";
+
+    private readonly ZipArchiveSource _source;
+
+    public PipelineHarness(byte[] zip, FakeFileSystem? fs = null)
+    {
+        Fs = fs ?? new FakeFileSystem();
+        if (Fs.Find(@"C:\target") is null)
+        {
+            Fs.AddDirectory(@"C:\target");
+        }
+
+        if (Fs.Find(@"C:\in") is null)
+        {
+            Fs.AddDirectory(@"C:\in");
+            Fs.AddFile(ArchivePath, zip);
+        }
+
+        var opened = ZipArchiveSource.Open(new MemoryStream(zip));
+        _source = opened.Source ?? throw new InvalidOperationException(opened.Fatal!.Describe());
+        Contents = new RecordingContentProvider(_source);
+    }
+
+    public FakeFileSystem Fs { get; }
+
+    public RecordingContentProvider Contents { get; }
+
+    public Limits Limits { get; set; } = Limits.Default;
+
+    public string ArchiveLocation { get; set; } = ArchivePath;
+
+    public ZipArchiveSource Source => _source;
+
+    // 実行に使った ClassificationRun (RealNameResolver の保持内容の確認用)。
+    public ClassificationRun? LastRun { get; private set; }
+
+    public List<(int Current, int Total)> Progress { get; } = [];
+
+    public AnalysisResult Run()
+    {
+        var prevalidation = ZipPrevalidator.Validate(_source.Entries, Limits);
+        Assert.True(prevalidation.Passed, prevalidation.Fatal?.Describe());
+
+        var opened = TargetRootValidator.Open(Fs, TargetPath, TargetLocationPolicy.None);
+        using var root = opened.Root ?? throw new InvalidOperationException(opened.Error!.Describe());
+        var identity = Fs.GetFileIdentity(ArchiveLocation);
+        Assert.True(identity.Succeeded);
+
+        var run = new ClassificationRun(new ClassificationRequest(
+            prevalidation.Entries, Contents, Fs, root, identity.Value, Limits, (c, t) => Progress.Add((c, t))));
+        LastRun = run;
+        var result = run.Execute();
+
+        // 判定が終わった時点で、保持している target ルート以外のハンドルは全て閉じている (テスト T12)。
+        Assert.Equal(1, Fs.OpenHandleCount);
+        Assert.Equal(Fs.ComparisonOpenCount, Fs.ComparisonCloseCount);
+        Assert.True(Fs.MaxConcurrentComparisons <= 1);
+        return result;
+    }
+
+    public void Dispose() => _source.Dispose();
+
+    public static byte[] MakeZip(params (string Name, byte[]? Content)[] entries) =>
+        ZipFixture.Create(entries.Select(e => new FixtureEntry(e.Name, e.Content)));
+
+    public static byte[] Bytes(string text) => System.Text.Encoding.UTF8.GetBytes(text);
+}
