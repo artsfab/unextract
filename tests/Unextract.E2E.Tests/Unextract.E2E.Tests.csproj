@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- E2E (X 系): ビルド済みの unextract.exe を別プロセスとして起動し、終了コード・stdout・stderr・ファイルシステムの結果を検証する。
+       起動する exe は環境変数 UNEXTRACT_E2E_EXE (publish 済みの単一ファイル exe など)、なければ Unextract.Cli のビルド出力。 -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ビルド順の保証だけ: このプロジェクトのビルド前に unextract.exe をビルドする。アセンブリは参照もコピーもしない
+         (テストはプロセス境界の外から exe を起動する)。 -->
+    <ProjectReference Include="..\..\src\Unextract.Cli\Unextract.Cli.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <!-- 領域外ガード (DeletionGuard) が、確認用ハンドルの最終パスと reparse 属性を得るために使う。 -->
+    <ProjectReference Include="..\..\src\Unextract.Windows\Unextract.Windows.csproj" />
+  </ItemGroup>
+
+  <!-- 段階 B のテスト専用 ZIP fixture 生成器と、Windows テストの領域外ガードを共有する (二重実装しない)。 -->
+  <ItemGroup>
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\ZipFixture.cs" Link="Fixtures\ZipFixture.cs" />
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\ZipPatcher.cs" Link="Fixtures\ZipPatcher.cs" />
+    <Compile Include="..\Unextract.Windows.Tests\DeletionGuard.cs" Link="Fixtures\DeletionGuard.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

@@ -1,151 +1,176 @@
-# unextract PLAN — テスト計画(SPEC §17 #1〜#54 と追加テスト)
+# unextract MVP テスト計画
 
-- 本書は `docs/PLAN.md` の分冊である。文書構成と節の所在は `PLAN.md`「文書構成と参照ガイド」。仕様上の正は `docs/SPEC.md` v4。本書は SPEC を変更しない
-- 内容は、分割前の `PLAN.md`(第4改訂、2026-10-01)の §11 を、節番号を維持して原文のまま移したもの
-- テストを完了条件とするタスク、その依存とゲートの正は `PLAN.md` §10.2。手動確認(M-xx)は `PLAN_VALIDATION.md` §6
+唯一の仕様基準は [`SPEC.md`](SPEC.md)。本書は仕様を検証するテストの観点と実施場所を定める。旧 v4 の #1〜#54 と X 番号は引き継がない (§10 の E2E の X 系は新しく付けた番号で、旧 v4 の X 番号とは無関係)。`Core` は副作用とエラーを注入できる偽ファイルシステムによる判定テスト、`Win` は一時 NTFS ディレクトリでの統合テスト、`E2E` はビルド済みの exe を別プロセスとして起動するテスト (§10)、`手動` は実環境での確認 ([`MANUAL_TESTS.md`](MANUAL_TESTS.md) の M 系) を表す。ZIP の異常 fixture はテスト専用の生成器で、正常な ZIP のヘッダー値やデータをバイト単位で書き換えて作る (`PLAN_VALIDATION.md` の V2 と同じ手法)。最初の依頼の必須12項目との対応は `PLAN_VALIDATION.md` の対応表にある。
 
----
+**dry-run 一致の原則**: P、C、Z、R、T、O の各テストは `--dry-run` と通常実行 (確認に `n` を入力) の両方で実行し、**確認・削除フェーズに入る前までの初回分類**、FATAL 判定、表示内容 (確認プロンプトの有無を除く) が一致することを確認する。削除直前再検証は dry-run では行わないため、一致の対象に含めない (Y02)。
 
-## 11. テスト計画
+## 1. 削除開始前の全件ゲート
 
-種別: **Core** = Fake の FS / Deleter での単体(OS 非依存)。**Win** = 実 Windows FS での統合。**手動** = §6 の手動確認。
-「Fake の保証」は判定ロジックが正しいことだけを示し、実 Windows の API 挙動は保証しない。「実 Win の保証」は API とファイルシステムの実挙動を含む。
-
-### 11.1 SPEC §17 #1〜#54 対応表
-
-| # | 対象 | 種別 | 必要なヘルパー | CI | Fake でのみ成立する保証 / 実 Win で確認する保証 |
-|---|---|---|---|---|---|
-| 1 | 完全一致 → MATCHED | Core+Win | RawZipBuilder、FakeFS、TempDir | 可 | Fake: 判定 / Win: 単一成分解決と実ハンドルからの読み取り |
-| 2 | 1byte 変更 → MODIFIED | Core+Win | 同上 | 可 | 同上 |
-| 3 | サイズ違い → MODIFIED | Core | 同上(展開呼び出しの記録) | 可 | Fake で十分(展開しないことはロジックの性質) |
-| 4 | target に無い → MISSING | Core+Win | 同上 | 可 | Win: 子が存在しない場合の戻り値を MISSING に写像すること |
-| 5 | 非対応・不一致ファイルを削除しない | Core+Win | RecordingDeleter、TempDir | 可 | P1-8: Fake で Deleter に渡らない / P3-4・P3-5: 実削除可能な経路で Win の実ファイルが残る |
-| 6 | 0 バイト(正常 MATCHED、CRC 不正 ERROR) | Core | RawZipBuilder(CRC 改ざん、空 Deflate、非最終ブロックのみ) | 可 | Core で十分 |
-| 7 | 暗号化・CRC 不整合・終端欠落 → 当該のみ ERROR、他の MATCHED は削除 | Core+Win | RawZipBuilder、RecordingDeleter | 可(Phase 1 は Core/Fake のみ。Win の削除部分は Phase 3、G3 の結果に依存。§11.4) | P1-4: Fake で entry-local の独立性 / P3-4・P3-5: Win で当該 ERROR が残り、他の MATCHED が実削除される |
-| 8 | 展開出力が宣言超過 → ERROR | Core | RawZipBuilder(Deflate/Stored 詐称) | 可 | Core で十分 |
-| 9 | 巨大宣言・サイズ不一致 → MODIFIED、展開せず、メモリ増加なし | Core | RawZipBuilder(Zip64 で 1 TiB 宣言、実データ KB 級) | 可 | 割り当て量の計測は実行環境依存のため閾値に余裕を持たせる |
-| 10 | エントリ総数上限超過 → archive-fatal | Core+Win(CLI) | 上限注入、EOCD 件数詐称 | 可 | Win: 終了コード 3、target・ZIP 不変 |
-| 11 | 空になったディレクトリ → 削除 | Core+Win | TempDir | 可(Win の削除手段は G3 依存。ディレクトリ削除自体は disposition) | Fake: 計画 / Win: ハンドル保持と削除順序 |
-| 12 | ユーザーファイルが残る → 削除しない | Core+Win | TempDir | 可 | Win: 空でない場合の失敗を残すこと |
-| 13 | 既存の空ディレクトリ・明示エントリ → 削除しない | Core+Win | RawZipBuilder(`d/`)、TempDir | 可 | |
-| 14 | target を削除しない | Core+Win | TempDir | 可 | |
-| 15 | `../` → target 外にアクセスしない | Core | FakeFS(アクセスログ) | 可 | Core で十分(FS に到達しないことはロジックの性質) |
-| 16 | `a/../b` → UNSAFE_PATH | Core | RawZipBuilder | 可 | |
-| 17 | 絶対パス等 → UNSAFE_PATH | Core | RawZipBuilder(生の名前バイト) | 可 | |
-| 18 | 兄弟の接頭辞一致 → target 外 | Core+Win | TempDir(`x`、`x2`) | 可 | Fake: 文字列比較を使わない構造 / Win: 実解決 |
-| 19 | 親が junction → SKIPPED | Win | FsFixture.CreateJunction | 可(junction は管理者不要 [過去実機]) | 実 Win のみ意味がある |
-| 20 | symlink / reparse / ハードリンク → スキップ | Win(+手動 M-13) | FsFixture(Junction、HardLink、Symlink) | 一部(symlink は権限依存。CI ランナーの権限は [未確認]。権限がなければ理由を出してスキップ) | 実 Win のみ |
-| 21 | AMBIGUOUS | Core | RawZipBuilder | 可 | |
-| 22 | dry-run で target 不変 | Win | Snapshot(パス、サイズ、ハッシュ、更新日時) | 可 | 実 Win のみ。属性の比較は追加テスト X-14 |
-| 23 | ZIP 不変 | Win | Snapshot(存在、ハッシュ、更新日時) | 可 | P2-5: dry-run で ZIP 自身を削除候補にしない / P3-4・P3-5: Recycle と `--delete-permanently` の各実削除経路の後も元 ZIP が存在し、ハッシュ・更新日時が不変(X-22) |
-| 24 | 検証後の書き換え → 削除しない | Core+Win | 削除フェーズ前のフック | 可 | |
-| 25 | 検証後の置換 → ID 確認で削除しない | Core+Win | フック(リネーム置換) | 可 | Fake: 判定 / Win: 実 ID |
-| 26 | 読み取り不能・ロック中 → 削除しない | Win | FsFixture.LockExclusive、ACL(自作ファイルのみ) | 可 | P2-3: 実 Win の解決レイヤーで検査 / P3-4・P3-5: 実削除可能な経路でも対象が残る |
-| 27 | ごみ箱不可・保証不可 → 既定は ERROR、`--delete-permanently` のみ削除 | Core+Win+手動 | ScriptedDeleter、診断手段 | 一部(本物の「ごみ箱不可」環境は CI で再現困難: ドライブ種別・ごみ箱設定の変更が必要。M-01〜M-06、M-16) | Fake: 「保証できない → ERROR」のロジック / 実 Win: 保証条件そのもの(G3)。`--delete-permanently` 部分は P3-5(SPEC どおり MVP に含める) |
-| 28 | 非 TTY・`--yes` なし → 2 | Win | プロセス起動(stdin リダイレクト) | 可 | |
-| 29 | 拒否 target(配下を含む)→ 3 | Core+Win | 拒否判定は注入パスで Core、解決は Win(システムディレクトリは読み取りなしで解決のみ) | 可 | |
-| 30 | `%USERPROFILE%` 配下 → 許可 | Core+Win | 注入プロファイルパス / 実ディレクトリ | 可(ローカルはオプトイン) | 開発機のホームに書き込むため、ローカル実行は環境変数で明示した場合のみ |
-| 31 | ハードリミット超過 → 展開前に ERROR | Core | 上限注入 | 可 | |
-| 32 | 構造異常 → archive-fatal、不変 | Core+Win(CLI) | RawZipBuilder(F1〜F8) | 可 | Win: target・ZIP 不変 |
-| 33 | 先頭 MATCHED、後続 CRC 不一致 → 先頭のみ削除、終了コード 1 | Core+Win | RawZipBuilder、RecordingDeleter | 可(Phase 1 は Core/Fake のみ。Win の削除部分は Phase 3、G3 依存。§11.4) | P1-4: Fake で削除対象として渡るのが先頭のみ / P3-4・P3-5: Win で先頭 MATCHED のみ実削除、後続 CRC 不一致は ERROR、終了コード 1 |
-| 34 | 終端欠落(出力・CRC 一致)→ ERROR | Core | RawZipBuilder(最終ブロックを欠く Deflate。非最終 Stored ブロックで全内容を表現する等) | 可 | G1 の中心。採用方式の実装(公開 `DeflateStream` 等)そのものを通すこと |
-| 35 | データ範囲の重なり → archive-fatal | Core | RawZipBuilder(F11) | 可 | |
-| 36 | LH 位置異常・Zip64 矛盾・DD 境界不定 → archive-fatal | Core | RawZipBuilder(F9、F10、F12、F13) | 可 | |
-| 37 | 受理範囲外 → unsupported | Core+Win(CLI) | RawZipBuilder(U1〜U4。SFX は先頭に無害なバイト列を付けた模擬) | 可 | |
-| 38 | 独立性を確認できない異常 → archive-fatal | Core | 境界ケース fixture(F14、F15、F18) | 可 | |
-| 39 | 名前付きストリーム付きファイル → SKIPPED | Core+Win | FsFixture.WriteAlternateStream | 可(CI ランナーのボリュームが NTFS であることが前提。[未確認]) | Fake: 判定 / Win: API の実挙動 |
-| 40 | 名前付きストリーム付きディレクトリ → 削除しない | Core+Win | 同上 | 同上 | |
-| 41 | 大小区別ディレクトリの `Foo`/`foo` | Win(+手動 M-09) | FsFixture.SetCaseSensitive | [未確認](CI で `setCaseSensitiveInfo` が使えるか) | 実 Win のみ |
-| 42 | 親ディレクトリの差し替え → 別個体を開かない | Core+Win(+手動 M-11) | フック(rename、junction 化) | 可(junction 化は管理者不要の見込み) | Fake: 再解決しない構造 / Win: H-1 の実挙動 |
-| 43 | 削除予定ディレクトリの判定、候補以外を列挙しない | Core+Win | FakeFS(列挙ログ) | 可 | Fake: 列挙範囲 / Win: 判定結果 |
-| 44 | 削除開始後の未検出異常 → 内部安全性エラー、3 | Core | フック注入 | 可 | Fake のみ(実在の欠陥を前提とするため) |
-| 45 | 空成分・`.` 成分 → UNSAFE_PATH、末尾区切り1個は受理 | Core | RawZipBuilder | 可 | |
-| 46 | unsupported と archive-fatal の理由の区別 | Core+Win(CLI) | RawZipBuilder | 可 | 表示のスナップショット |
-| 47 | target の最終成分が junction → 3 | Win | FsFixture.CreateJunction | 可 | |
-| 48 | 祖先に junction、最終成分は通常 → 個体保持で処理。固定できなければ 3 | Win+Core | FsFixture、Fake(固定失敗の注入) | 可 | 「固定できない」経路は実 Win での再現手段が不明のため Fake で確認([未確認]) |
-| 49 | 内容一致かつ読み取り専用 → ERROR(両モード) | Core+Win | FsFixture.SetReadOnly | 可 | Win: 実属性の取得 |
-| 50 | 削除候補ディレクトリの同名別個体への差し替え → 削除しない | Core+Win(+手動 M-11) | フック | 可 | Fake: 判定 / Win: ハンドル保持の効果 |
-| 51 | クラウド識別の初期化失敗 → 3 | Core(+手動 M-08) | ICloudStateProvider 注入 | 可(Core) | 実際の初期化失敗は CI で再現困難(再現手段が不明) |
-| 52 | 1対象のクラウド状態取得失敗 → 当該 ERROR、他は処理 | Core | 注入 | 可 | Fake のみ |
-| 53 | 完全削除と同一性不一致を別 reason、どちらも中止・3 | Core | ScriptedDeleter | 可 | Fake のみ。実 Win での完全削除の発生は M-01〜M-06、M-16 で観察。結果不明の `UnknownShellOutcome` は追加テスト X-20 |
-| 54 | 不正 UTF-8 名 → UNSAFE_PATH | Core | RawZipBuilder | 可 | |
-
-### 11.2 追加テスト(PLAN が導入した安全性の主張に対するもの。SPEC の番号外)
-
-| ID | 主張 | 種別 | 内容 |
+| ID | 入力・操作 | 期待結果 | 種別 |
 |---|---|---|---|
-| X-01 | 抽象は複数成分のパスを受け取らない | Core(アーキテクチャテスト) | 公開 API に `string` パスを受ける解決メソッド・削除メソッドがないこと(例外は利用者入力の入口 `IFileSystemProbe.InitializeTarget` のみ)。`IFileDeleter`・`IDirectoryRemover` がノードと `PathComponent` だけを受け取ること |
-| X-02 | 識別前に内容を読まない | Core | Fake で、クラウド・ストリーム・reparse の確認より前に `OpenContent` が呼ばれないこと |
-| X-03 | 構造検証が全件完了してから削除フェーズへ遷移 | Core | 状態機械のテスト。後方エントリの LH 異常で削除が一度も呼ばれないこと |
-| X-04 | Local Header・DD の全件検証 | Core | MISSING/MODIFIED のエントリの LH 異常でも archive-fatal |
-| X-05 | メタデータ総量・名前長・深さの上限 | Core | 注入した小さい上限で archive-fatal |
-| X-06 | 終端確認の偽陽性方向 | Core | 入力 EOF 到達時は終端未確認として ERROR(§4.1.1-2) |
-| X-07 | Shell 結果の状態機械 | Core | ScriptedSink で Post 欠落、重複、Pre 中止、`GetAnyOperationsAborted`=True、結果取得失敗の各組み合わせ |
-| X-08 | 「削除済み」は積極的確認時のみ | Core | Recycled 判定に保持ハンドル照合を要すること |
-| X-09 | 関連項目の追加の中止 | Core+手動 M-12 | 依頼外の項目の Pre で E_ABORT、内部安全性エラー |
-| X-10 | 読み取り専用の Shell 直前の再確認 | Core | Pre 時点の属性付与で中止 |
-| X-11 | ディレクトリ削除は同一ハンドルで行い、子から親 | Core+Win | 子が削除保留のまま残る場合に親を削除しない |
-| X-12 | 拒否リストは junction 経由の別名でも効く | Win | target を拒否対象を指す junction の配下として指定(システムディレクトリは読み取りのみ) |
-| X-13 | 分類 ID と削除時 ID の不一致は ERROR | Core | |
-| X-14 | dry-run で属性も不変 | Win | Snapshot に属性を追加 |
-| X-15 | ZIP 側の特殊種別(S-10: 安全原則は確定) | Core | 根拠を確認した属性(O-14)を持つエントリが削除候補にならないこと。根拠を確認していない属性を推測で特殊種別として扱わないこと(認識集合の拡張に合わせて期待値を追加) |
-| X-16 | CP437 の全 256 値の往復と、UTF-8 フラグ優先 | Core | |
-| X-17 | 読み取り専用 + 内容不一致 → `MODIFIED`(`ERROR` にすり替えない)。読み取り専用 + 内容一致 → `ERROR`(両モード。#49 の補完) | Core+Win | 比較を省略しないこと。サイズ不一致の読み取り専用も `MODIFIED` |
-| X-18 | §5.1.1 の判別規則: 切断 EOCD と末尾余剰の区別(F3/U3)、一定ずれの先頭余剰(U2)と未説明の隙間(F15)、fatal と unsupported の併発 | Core | RawZipBuilder。表示 reason が規則どおりに異なること(#46 の補完。S-15 確定)。表示に「規格違反」の文言を含まないこと |
-| X-19 | Stored・非暗号化で、解釈に使う宣言圧縮サイズ ≠ 宣言展開サイズ → archive-fatal(F19、S-16 確定) | Core | MISSING/MODIFIED のエントリでも検出されること。bit 3 で LH のサイズ・CRC が 0 のものは F19 にしないこと(DD/CD の値で判定)。暗号化された Stored は F19 にしないこと |
-| X-20 | Shell の結果が説明のつかない状態(Post 欠落・重複、結果取得失敗、説明のつかない `GetAnyOperationsAborted`)→ 元の位置にあるかを問わず `UnknownShellOutcome`、`PermanentDeletionOccurred` と区別、以降を中止し終了コード 3。説明のつく失敗(Post の失敗 hr、こちらの `E_ABORT`)で対象が元の位置にあれば当該 `ERROR` で継続 | Core | ScriptedSink、ScriptedDeleter。#53 の補完。S-05 決定済み。4 reason すべてが区別して表示・記録されること |
-| X-21 | 同一個体への別名(S-18): 8.3 短縮名の別名、大文字小文字の別名などで、複数のエントリが同じ個体へ解決された場合、その個体を削除候補にしない。ID が異なることを別個体の証明として扱わない | Core+Win(+手動 M-17) | Fake: 同じ `NodeIdentity` を返す2エントリ、解決後の実名が要求名と異なるエントリ / Win: 8.3 名が生成されるボリュームでの実解決。CI の可否は [未確認](8.3 名生成の設定に依存)。分類名の期待値は S-18 の決定後に確定 |
-| X-22 | ZIP 自身が target 内にあり、エントリが ZIP 自身へ解決される場合、ZIP を削除候補にしない(identity ベース) | Core+Win | P1-8(Fake)・P2-5(dry-run): 同一 object への解決を除外し、ZIP 自身を削除候補にしない。P3-4・P3-5(実削除統合): ZIP を target 内に置いた fixture で Recycle と `--delete-permanently` の各経路を通し、処理後も ZIP が存在し、ハッシュ・更新日時が不変(#23 の補完)。ID 不一致を別 object の証明にしない(S-18)。分類名の期待値は S-18 の決定後 |
-| X-23 | ファイル/ディレクトリの構造衝突: 明示的な `a` と `a/` → `AMBIGUOUS`(SPEC §8)。`a` と `a/b`(暗黙のディレクトリ)→ S-23 の決定に従う | Core | RawZipBuilder。#21 の補完。暗黙の場合の期待値は S-23 の決定後に確定 |
-| X-24 | `--target` が UNC ルート(`\\server\share`)→ 拒否、終了コード 3 | Core(+手動 M-05) | 拒否判定に UNC ルートの実パスを注入。実共有での確認は M-05(CI では共有を用意できない) |
-| X-25 | 確認プロンプト `[y/N]` の既定は中止: 空入力、EOF、`n`、その他の文字 → 何も削除せず終了コード 2。`y`/`Y` のみ続行 | Win(CLI) | プロセス起動(TTY を模擬した入力)。TTY の模擬が CI で困難な場合は、入力判定部の Core テストで補う |
-| X-26 | 状態機械の追加遷移: `ReportedFailed`(または Pre で中止)のあと対象が元の位置にない → `UnknownShellOutcome`。`ReportedRecycled` で Post の dwFlags に 0x80 がない → `UnknownShellOutcome` | Core | ScriptedSink。§4.7.3 |
+| P01 | 先頭に MATCHED が複数、後方の内容比較候補に CRC 不一致エントリ | 全体 FATAL、`--yes` 付きでも削除0件。先頭の MATCHED は判定済みとして表示、原因エントリを表示、未判定は件数のみ | Core+Win |
+| P02 | 先頭に MATCHED、後方に ZIP 名不正・resource limits 超過・target 安全判定 API 失敗・比較対象の共有違反 (それぞれ別 fixture) | いずれも全体 FATAL、削除0件 | Core+Win |
+| P03 | ZIP が無効 (EOCD なし)、ZIP/target の読取権限なし | 入力エラーまたは全体 FATAL、削除0件 | Core+Win |
+| P04 | 実行中に別プロセスが ZIP を書き込み用に開く・改名する | ZIP ハンドル保持により失敗し、ZIP は変わらない。既に書き込み用に開かれている ZIP は unextract 側のオープンが失敗して入力エラー | Win |
+| P05 | 空 ZIP、空 target、削除候補0件 | 正常終了、削除0件、確認プロンプトなし | Core+Win |
+| P06 | target が存在しない、ファイルである、非 NTFS、危険なルート/システム領域、最終成分が reparse | 入力エラー、作成・削除0件 | Core+Win |
+| P07 | target の最終成分が junction (確認用ハンドルの `FileAttributeTagInfo` で判定)。確認用ハンドルでの確認の後、保持用ハンドルで開くまでに target が差し替えられ、File ID が変わる | どちらも入力エラー、作成・削除0件 (SPEC §3 の手順1) | Core+Win |
+| P08 | target の最終パスが `\\?\UNC\` で始まる。`\\?\C:\` 形式の target の最終パスから組み立てた期待パスと、比較用ハンドルの最終パスの序数比較 (一致 / 大小文字だけ違う) | UNC は入力エラー。期待パスは `\\?\` 接頭辞を含むまま比較され、一致なら次の判定へ、大小文字だけの違いでも FATAL (SPEC §6.1 の手順4、§8.1) | Core |
 
-#### 11.2.1 追加テストの割当
+## 2. ZIP 内容の検証と CRC (target 状態との組み合わせ)
 
-| X | タスク(完了条件) | Phase |
-|---|---|---|
-| X-01 | P1-7 | 1 |
-| X-02、X-15、X-17 | P1-8 | 1 |
-| X-03、X-04、X-05、X-18、X-19 | P1-3(G1 の証拠を含む) | 1 |
-| X-06 | P1-4(G1 の証拠) | 1 |
-| X-16 | P1-5 | 1 |
-| X-23 | P1-6 | 1 |
-| X-21、X-22 | P1-8(Fake)、P2-3(X-21 の実 FS)、P2-5(X-22 の dry-run)、P3-4・P3-5(X-22 の実削除統合) | 1、2、3 |
-| X-12、X-24 | P2-2 | 2 |
-| X-14 | P2-5 | 2 |
-| X-13 | P3-1 | 3 |
-| X-11 | P3-2 | 3 |
-| X-20 | P3-3 | 3 |
-| X-07、X-08、X-09、X-10、X-26 | P3-4(G3 成立時のみ) | 3 |
-| X-25 | P4-1 | 4 |
+同じ壊れたエントリ `x.bin` (宣言 `Length` = N) を含む ZIP を、target 側の状態だけを変えて実行する。各行を `--dry-run` と通常実行の両方で行い、初回分類と FATAL 判定が一致することを確認する。
 
-### 11.3 正常 ZIP の `ZipArchive` 差分テスト(必須)
+| ID | `x.bin` の異常 | target: 不存在 | target: サイズ ≠ N | target: サイズ = N | 種別 |
+|---|---|---|---|---|---|
+| C01 | Central Directory の CRC-32 だけを書き換え (データは正常、target と全バイト一致) | MISSING、FATAL なし | MODIFIED、FATAL なし | **FATAL** (ランタイムは例外を出さず、unextract の CRC 照合で検出) | Core+Win |
+| C02 | Deflate データの途中を破損 | MISSING | MODIFIED | FATAL (`InvalidDataException`) | Core+Win |
+| C03 | 圧縮サイズを半分にして Deflate を途中で切る | MISSING | MODIFIED | FATAL (ランタイムは例外なく短く終わる。バイト数不足で検出) | Core+Win |
+| C04 | 宣言 `Length` を実データより小さくする (Deflate) | MISSING | MODIFIED | FATAL (出力は `Length` で切られる。CRC 不一致で検出) | Core+Win |
+| C05 | 宣言 `Length` を実データより大きくする (Deflate、Stored) | MISSING | MODIFIED | FATAL (バイト数不足) | Core+Win |
+| C06 | Stored で宣言 `Length` が圧縮サイズより小さい | MISSING | MODIFIED | FATAL (`Length` 超過の時点で中断し、それ以上読まない) | Core+Win |
+| C07 | 暗号化フラグ付き (データは平文の Deflate のまま) | MISSING | MODIFIED | FATAL (ランタイムは読めてしまう。`IsEncrypted` で `Open()` 前に検出) | Core+Win |
+| C08 | 未対応圧縮方式 (LZMA=14、BZip2=12、AES=99) | MISSING | MODIFIED | FATAL (`Open()` が `InvalidDataException`) | Core+Win |
 
-- **目的**: 自前の構造リーダーが、正常な ZIP に対して標準実装と同じ解釈をすること(互換性と構造解析の誤りの検出)
-- **比較項目**: エントリ数と順序、名前(UTF-8 フラグ付きはそのまま、フラグなしは `ZipArchive` に CP437 を明示して比較)、宣言サイズ、圧縮サイズ、CRC、圧縮方式、暗号化フラグ、展開後の内容(SHA-256)、展開バイト数
-- **入力の範囲**:
-  - `ZipArchive`(作成モード)で生成した ZIP(Stored / Deflate、0 バイト、空アーカイブ、多数エントリ、深い階層)
-  - `RawZipBuilder` の正常系(Zip64、Data Descriptor 付き、extra field 付き)
-  - 外部ツールで作成した正常 ZIP(Windows の圧縮フォルダー、7-Zip、Info-ZIP 等)を、ライセンス上問題のない自作内容で fixture として固定(作成ツールと版を記録)
-  - 生成器によるランダムな正常 ZIP(内容・名前・サイズを乱数で生成、シード固定)
-- **独立性の限界**:
-  - 展開に同じ `DeflateStream`(同じ基盤の inflate 実装)を使う部分は、`ZipArchive` と比べても**独立した基準にならない**。この比較は、境界・オフセット・メタデータの解釈の一致だけを示す
-  - 展開内容の独立した基準は、ZIP を作るときに使った**元のデータ**(既知の平文)とのバイト比較、および CRC の独立計算とする
-  - Z-B(自前 Inflate)を採用した場合は、`DeflateStream` が展開内容についての独立した基準になる
-- 異常系は差分テストの対象外(`ZipArchive` は §6.2 を満たさないため、比較の基準にできない)
+MISSING とサイズ不一致の列では、テスト用フックで `ZipArchiveEntry.Open()` が呼ばれないこと、CRC を計算しないことも確認する。
 
-### 11.4 G3 不成立時に影響を受ける SPEC テスト(#1〜#54 からの再抽出)
+| ID | 入力・操作 | 期待結果 | 種別 |
+|---|---|---|---|
+| C09 | 内容比較候補で先頭付近のバイトが target と異なり、かつ後方で C02 の破損 | MODIFIED ではなく FATAL (読み切りを省略しない)。不一致位置を変えても結果が同じ | Core+Win |
+| C10 | 内容比較候補で内容が1バイト異なり、ZIP は健全 | MODIFIED。FATAL にならない | Core+Win |
+| C11 | 0バイトエントリ: CRC=0 と target 0バイト / CRC を 0 以外に書き換え | MATCHED / FATAL | Core+Win |
+| C12 | Data Descriptor 付きエントリ (非シーク出力で作成) が target と一致 | MATCHED (期待 CRC は Central Directory の値) | Core+Win |
+| C13 | ランタイム回帰検知: C01・C03・C07 の fixture を `ZipArchive` 単体で読み、例外の有無を記録 | 例外の有無が `PLAN_VALIDATION.md` V2 と異なったら記録を更新する。どちらでも unextract の結果は FATAL のまま | Core |
+| C14 | `ZipArchiveEntry.Crc32` を reflection なしで直接参照するコードが、`global.json` で固定した SDK でコンパイルできる | ビルドが通る (導入版の確認を継続する) | Core |
 
-前提: G3 不成立の場合、Recycle を MVP から除外し、既定モードでは削除しない(全 `MATCHED` を `ERROR`)。`--delete-permanently` は SPEC どおり残す(PLAN 側で外さない)。#1〜#54 の全件を、既定モードの実削除に依存するかで分類した。
+CRC 不一致の検出は C01・C04・C11 で直接テストし、DD 付きエントリの期待 CRC は C12、削除フェーズの再比較での CRC 不一致は D13 でテストする。CRC が削除の根拠ではないこと (CRC が合っていても全バイト不一致なら MODIFIED) は C10 で確認する。
 
-| 区分 | テスト | 影響 |
-|---|---|---|
-| (A) 既定モードでの実削除を期待しており、記載どおりには成立しない | #7(他の `MATCHED` は削除される)、#11(空になったディレクトリを削除)、#33(先頭のみ削除、終了コード 1) | `--delete-permanently` でのみ成立する。テストの読み替えは SPEC の解釈に当たるため、V-04 として人間が決める |
-| (B) 「削除しない」ことを確認するテストで、既定モードでは削除経路がないため自明に成立し、検証力を失う | #5、#12、#13、#14、#23、#24、#25、#26、#40、#50 | #23 は、dry-run で ZIP 自身を候補にしない検査は残るが、元 ZIP が実削除後も不変という確認には実削除経路が必要。検証力を保つには `--delete-permanently` の経路で実行する必要がある。その扱いを V-04 で人間が決める |
-| (C) 削除開始後の挙動を確認するテストで、既定モードでは削除が始まらない | #44(削除開始後の未検出異常) | `--delete-permanently` の経路、または Fake でのみ確認できる |
-| (D) Recycle 固有の事象を前提とするテスト | #53(完全削除の発生を内部安全性エラーとする) | 「完全削除の発生」は Recycle モードの保証の破綻であり、Recycle を除外すると実環境では発生しない。Fake での確認のみ残る |
-| (E) モードごとの期待値を含むテスト | #27(既定は `ERROR`、`--delete-permanently` のみ削除)、#49(両モードで `ERROR`) | 既定モードの期待値は成立する。`--delete-permanently` 側は P3-5 で確認 |
-| (F) 影響なし | #1〜#4、#6、#8〜#10、#15〜#22、#28〜#32、#34〜#39、#41〜#43、#45〜#48、#51、#52、#54 | 分類、構造検証、パス検証、target 初期化、dry-run、CLI の確認であり、既定モードの実削除に依存しない |
+## 3. ZIP 名・構造・種類
 
-追加テストのうち X-07〜X-10、X-26 は Recycle の実装を前提とし、G3 不成立時は実施しない。X-20 は Fake での状態機械の確認として残す。§19(MVP 完成条件「ごみ箱へ送られる」)も影響を受ける(V-04)。
+| ID | 入力・操作 | 期待結果 | 種別 |
+|---|---|---|---|
+| Z01 | `../`、中間 `..`、絶対/ドライブ/UNC/デバイスパス、ADS コロン | 全体 FATAL、target 外へアクセスしない | Core |
+| Z02 | `.`、空成分、NUL・制御文字、予約名 (拡張子付きを含む)、末尾ドット/空白、`<>"\|?*` | 全体 FATAL、名前は安全な表記で表示 | Core |
+| Z03 | 同一名、大小文字だけ違う名、file/dir 同名、ZIP 内で file を親とする子 (`a` と `a/b.txt`) | 全体 FATAL、削除0件。target に `a/` がない場合の T02 (MISSING) と区別 | Core |
+| Z04 | 外部属性の種別が symlink (`0xA000`)・FIFO・デバイス (ファイル名・ディレクトリ名の両方)、DOS 属性 reparse、区切りなしで DOS ディレクトリ属性、`Length` > 0 のディレクトリエントリ | 全体 FATAL | Core |
+| Z04a | ファイルエントリ (`a.txt`) で上位16ビットの種別が `0x4000` (ディレクトリ) | 全体 FATAL | Core |
+| Z04b | ディレクトリエントリ (`d/`) で上位16ビットの種別が `0x8000` (通常ファイル) | 全体 FATAL | Core |
+| Z05 | ファイルエントリで種別が 0 (種別なし) または `0x8000`、ディレクトリエントリで種別が 0 または `0x4000`、DOS 属性 read-only/hidden/system/archive のみ | 受理し、それぞれ通常ファイル・ディレクトリとして分類 | Core |
+| Z06 | UTF-8 フラグ付きの正しい UTF-8、フラグなしの CP437 (`é` `░` を含む)、フラグなしの UTF-8 バイト列 | それぞれ UTF-8、CP437 として復号した名前で照合。フラグなし UTF-8 は CP437 として読んだ別名になり、文字化け名での誤対応をしない | Core+Win |
+| Z07 | UTF-8 フラグ付きで不正な UTF-8 | 全体 FATAL (復号名の U+FFFD を検出) | Core |
+| Z08 | 正常な Stored/Deflate、ZIP64 (強制 ZIP64 エントリ、65,536 件超の ZIP64 EOCD)、DD、オフセット調整済み SFX、末尾ごみ付き | 読めて同じ分類になる。形式だけでは拒否しない | Core+Win |
+| Z09 | 先頭にデータを付けただけでオフセットを調整していない ZIP | ZipArchive が開けず入力エラー、削除0件 | Core |
+
+## 4. resource limits
+
+| ID | 入力・操作 | 期待結果 | 種別 |
+|---|---|---|---|
+| R01 | エントリ数 100,000 / 100,001 | 許可 / 全体 FATAL | Core |
+| R02 | 名前 1,024 / 1,025 UTF-16 コード単位、深さ 128 / 129 成分 | 許可 / 全体 FATAL | Core |
+| R03 | 既定値: メタデータ総量がちょうど 134,217,728 バイト / +2 バイトになる入力 (名前長と件数で調整)。既定値では各項 (名前の UTF-16 バイト数、1エントリ当たり 128) が偶数で総量が必ず偶数になり、+1 バイトの入力は作れない。+1 は上限を奇数にした注入 (上限 = 総量 − 1) で確認する | 許可 / 全体 FATAL。計算式 (名前 UTF-16 バイト数 + 128 × 件数) を検証 | Core |
+| R04 | 長い名前で 100,000 件より前に 128 MiB を超える ZIP | 全体 FATAL (件数上限とは独立に発動) | Core |
+| R05 | 1エントリの宣言 `Length` が 16 GiB / 16 GiB + 1 (ヘッダー値の書き換えで作成。実データは小さい) | 許可 / 全体 FATAL | Core |
+| R06 | 宣言 `Length` 合計がちょうど 64 GiB / 64 GiB + 1、**全エントリが target に存在しない (MISSING)** | 許可 / 全体 FATAL。target に触れる前に判定され、target の状態や dry-run の有無で結果が変わらない | Core+Win |
+| R07 | 内容比較候補で実データが宣言 `Length` を超える (C06) | `Length` を超えた時点で読み取りを中断し FATAL。それ以上バッファを確保しない | Core |
+| R08 | 実測合計上限: 実測カウンタを小さな値に差し替えるテスト用フックで、累計が上限ちょうど / +1 | 許可 / 全体 FATAL | Core |
+
+## 5. target 分類と byte 比較
+
+| ID | 入力・操作 | 期待結果 | 種別 |
+|---|---|---|---|
+| T01 | 同一内容、1 byte 変更、サイズ違い、0 byte | 順に MATCHED、MODIFIED、MODIFIED (ZIP 内容を読まない)、MATCHED。mtime の違いは内容一致を覆さない | Core+Win |
+| T02 | 親成分の分類表 (SPEC §6.1) のうち MISSING の行: ZIP の `a/b/c.txt` に対し、target の `a` または `a/b` が (1) 存在しない、(2) 大小文字だけ違うディレクトリ、(3) 通常ファイル | いずれも `c.txt` は MISSING。ZIP 内容は開かない | Core+Win |
+| T03 | 親成分の分類表の reparse の行: `a/b` が (1) ディレクトリ junction、(2) ディレクトリ symlink、(3) ファイル symlink | いずれも SKIPPED_SPECIAL_FILE。リンク先を読まず変更しない | Core+Win |
+| T04 | 親成分の分類表の判定不能の行: 親成分の属性取得 API の失敗、想定外の種類を偽ファイルシステムで注入 | 全体 FATAL、削除0件 | Core |
+| T05 | ZIP にない target ファイルが、ZIP エントリと同じディレクトリに多数ある | 実名確認の列挙で走査はされるが、表示・集計・分類・削除されず、照合結果にも保持されない (テスト用フックで保持される名前を確認) | Core+Win |
+| T06 | 実名確認 (SPEC §6.2) の規則: target 側の大小文字違い (ファイル名、途中のディレクトリ名)、8.3 名でだけ一致 (ファイル名、途中のディレクトリ名)、ディレクトリ単位で大文字小文字を区別する NTFS ディレクトリ内の大小文字違い | いずれも MISSING、削除しない | Win |
+| T07 | ADS (`Zone.Identifier` を含む)、hardlink (リンク数2)、ファイル symlink、read-only、system、temporary、offline、その他許可集合外の属性 | `SKIPPED_SPECIAL_FILE`、内容を読まない | Core+Win |
+| T08 | archive、hidden、not-content-indexed、NTFS 圧縮、sparse、EFS 暗号化の各属性だけを持つ同一内容ファイル | MATCHED (これらだけを理由にスキップしない) | Core+Win |
+| T09 | ZIP に file があり target は directory、ZIP 自身に対応する対象 | `SKIPPED_SPECIAL_FILE`。ZIP 自身を変更しない | Core+Win |
+| T10 | ADS 列挙・属性・リンク数・File ID・親 File ID・最終パスの取得失敗、存在確認後のオープン失敗、比較中の読取失敗 | SKIP ではなく全体 FATAL、削除0件 | Core+Win |
+| T13 | 実名確認の失敗: 列挙用ハンドルのオープン失敗、列挙の途中のエラー (`ERROR_NO_MORE_FILES` 以外)、列挙用ハンドルの File ID・最終パスが列挙で見つけた項目と不一致、比較用ハンドルの File ID が列挙で見つけた項目と不一致 (解析中の差し替え) | 全体 FATAL、削除0件 | Core |
+| T14 | 実名確認の列挙で、(1) 同じ名前の項目が2回返る (File ID が異なる2件、偽ファイルシステムで注入)、(2) 照合する名前が返らない (列挙中の改名による見落としを注入) | (1) 最初の1件だけを採用する。比較用オープンの File ID が採用した項目と異なれば全体 FATAL。(2) その名前は `MISSING`、ZIP 内容を開かず削除しない | Core |
+| T15 | ディレクトリ単位で大文字小文字を区別する NTFS ディレクトリに `Foo` と `foo` (内容が異なる) が共存し、ZIP が `Foo` / `foo` / `FOO` を指す | `Foo` と `foo` はそれぞれ正しい個体 (列挙の File ID = 比較用オープンの File ID) に対応して比較される。`FOO` は `MISSING` | Win |
+| T16 | ZIP のファイルエントリに対し target がディレクトリで、そのディレクトリの `FileStreamInfo` が `ERROR_HANDLE_EOF` で失敗する (T09 の補強) | FATAL にならず `SKIPPED_SPECIAL_FILE`。`Directory` を最初に判定し、ストリーム一覧などを取得しない (SPEC §7 の判定順序) | Core+Win |
+| T11 | 比較対象を別プロセスが書き込みで開いたままにする (エディタで編集中を模擬) | 比較用ハンドルのオープンが共有違反になり全体 FATAL、削除0件。原因のパスを表示 | Win |
+| T12 | 比較用ハンドルの扱い | 各エントリの判定終了時に閉じられ、結果表示・確認待ち中に target ファイルのハンドルが開いていない (テスト用フックで開いているハンドル数を確認) | Core+Win |
+
+## 6. 削除・削除直前再検証・CLI
+
+| ID | 入力・操作 | 期待結果 | 種別 |
+|---|---|---|---|
+| D01 | dry-run、通常実行の `n`/空入力/EOF、非対話で `--yes` なし | 削除0件。全件解析結果は表示 | Core+Win |
+| D02 | `y`/`Y`、`--yes` | 検証済み MATCHED だけを個別削除。ディレクトリ、ZIP、ZIP にない target ファイルは残る | Core+Win |
+| D03 | 削除処理の呼び出し順 | 各対象について「期待パスでの削除用オープン1回 → 同じハンドルでの同一性再検証 → 同じハンドルからの読み取りと ZIP エントリの再展開による全バイト比較 → 同じハンドルでの最終確認 → 同じハンドルへの削除指示 → 同じハンドルでの成立確認 → クローズ」の順。オープン後にパスを使う呼び出し (パス指定の削除・属性取得・オープン) がないことを偽ファイルシステムの呼び出し記録で確認 | Core |
+| D04 | 確認待ち中に別プロセスが対象を変更する: 内容とサイズの変更 / 内容のみ変更 (mtime 自動更新) / 削除して同名で作り直す (File ID 変化) / 別ファイルで置換 (`MoveFileEx` で上書き) | 再検証で検出し、その対象を削除せず以後の削除を停止。停止理由を表示 | Win |
+| D05 | 確認待ち中に ADS を追加 / hardlink を追加 / read-only・system 属性を付与 / ファイルを symlink に置換 / 途中のディレクトリを junction または同名の別ディレクトリに置換 | 同上 (停止) | Win |
+| D06 | 再検証の情報取得 API が失敗するよう偽ファイルシステムで注入 | 削除せず停止 | Core |
+| D07 | 確認待ち中に、対象以外の変更だけを行う (ZIP にない target ファイルの追加・変更、他の MATCHED の読み取り、target 内の別ディレクトリの作成) | 対象の再検証・再比較は一致し、停止せず削除される (誤って停止しない) | Win |
+| D08 | 削除指示の失敗、成立確認の失敗 (偽ファイルシステムで注入) | 安全性破綻として停止。成立確認の失敗では「削除された可能性あり」と報告し、削除済み件数を正確に表示 | Core |
+| D09 | 再検証直後フックで、別プロセスが対象を書き込み用・改名用に開こうとする | 共有違反で失敗し、対象は unextract が検証した個体のまま削除される | Win |
+| D10 | 確認待ち中に、File ID・サイズ・`LastWriteTime`・`ChangeTime`・属性を保ったまま内容だけを書き換える (書き込み後にタイムスタンプを書き戻す) | 同一性の再検証は通るが、2回目の全バイト比較で検出され、削除されず以後が停止する | Win |
+| D11 | 確認待ち中に別プロセスが対象を書き込みで開いたままにする / `FILE_SHARE_DELETE` なしで読み取り中にする / ACL で対象の READ_DATA を拒否する / ACL で対象の DELETE と親の DELETE_CHILD を拒否する | 削除用オープンが共有違反 (32)・アクセス拒否 (5) になり (SPEC §13 の PoC 7 #1・#2・#3・#5)、識別確認の時点でスナップショットと一致する通常ファイルに見えるため `DELETE_FAILED` (削除しない)。後続の安全な MATCHED は削除される | Core+Win |
+| D13 | 2回目の比較中に ZIP 側の異常を注入する: CRC 不一致、`Length` 超過、終端欠落 (バイト数不足)、読み取り例外 | 削除せず以後を停止する。`DELETE_FAILED` で続行しない | Core |
+| D14 | 削除用オープンの段階で同一性に疑義が出る: 対象消失 (2)、親の消失・ファイル化 (3)、対象の reparse 化、親ディレクトリの差し替え、オープンは成功したが File ID 不一致、アクセス拒否 (5) だが識別確認で別の個体・ディレクトリ・ディレクトリ junction と判明、削除保留中 (削除用オープンも識別確認のオープンも 5) | いずれも停止。`DELETE_FAILED` で続行しない | Core+Win |
+| D15 | 削除用オープンで対応表に無いエラーコード、識別確認自体の失敗を注入 | 停止 | Core |
+| D16 | 最終確認直前フックで ADS を追加 / hardlink を追加 / read-only を付与 | 最終確認で検出して停止 (最終確認より後の追加は SPEC §12 の限界であり、検出を保証するテストにしない) | Win |
+| D17 | 削除指示の呼び出し内容 | `SetFileInformationByHandle(FileDispositionInfoEx)` が削除用ハンドルに対して1回だけ呼ばれ、flags がちょうど `DELETE \| POSIX_SEMANTICS` (0x3) で、`IGNORE_READONLY_ATTRIBUTE` (0x10) を含まない (偽ファイルシステムの呼び出し記録) | Core |
+| D18 | 削除指示の API が成功を返すが、同じハンドルの `DeletePending` が false のまま (偽ファイルシステムで注入。実機で `DELETE` ビットを含まない flags が成功を返すことに相当) | `DELETED` にせず停止し、「削除された可能性あり」と報告する。API の成功だけで成立としない | Core |
+| D19 | 確認待ち中に、親ディレクトリ `B` を同名の別ディレクトリに差し替え、**同じファイルを移して入れる** (File ID と最終パスは不変) | 親 File ID の不一致で検出し、削除せず停止 | Win |
+| D20 | 確認待ち中に、途中のディレクトリを元のディレクトリを指す junction に差し替える / 途中のディレクトリを大文字小文字だけ改名する (親 File ID は不変) | 最終パスの不一致で検出し、削除せず停止 | Win |
+| D21 | 最終確認の直後・削除指示の直前のフックで、別プロセスが対象に read-only を付与する。対象の前に削除済みの MATCHED と、後に未処理の MATCHED がある | 削除指示が失敗 (5) し、その対象は残り、以後の削除が停止する。それまでに削除したファイルは戻らない。未処理の件数を表示 | Win |
+| D22 | ACL で対象の DELETE だけを拒否する (親の DELETE_CHILD は許可のまま)。拒否する時点を (a) 初回分類の前、(b) 確認待ち中、の2通りで行う | 削除用オープンは成功する (SPEC §13 の PoC 7 #4)。E-2 の実測 (`PLAN_VALIDATION.md` の「E-2 実測」): (a) 段階1・2・5がすべて成功し (`DeletePending == true`)、対象は削除される。Windows の通常の ACL の挙動として受け入れる (`PLAN_DECISIONS.md` DEC-12)。(b) ACL の変更で `ChangeTime` が変わるため段階2の再検証で停止し、対象は残り、以後は未処理になる。どちらの場合も ZIP 自身と無関係のファイルは残る。テストは段階5の結果 (削除・停止の別、`DeletePending`、終了状態) をテスト出力に出す。段階5が失敗した場合 (実測では起きていない) は、そのファイルを残して以後の削除を停止することを期待する (SPEC §8.4)。判定は誤削除がないこと (対象以外が残り、停止なら対象も残ること) | Win |
+| D23 | 削除用ハンドルを開いている間 (再比較中フック) に、別プロセスが対象を書き込みで開こうとする (旧テスト番号 D12。DEC-12 との重複を避けて改番) | 共有違反で開けない | Win |
+
+競合の再現には、解析完了直後・確認待ち・再オープン直前・再検証直後・再比較中・最終確認直前・削除指示直前に注入できるテスト用フックを使う。他プロセスの模擬は別プロセスのヘルパーで行う。
+
+実削除を伴う Win テストは、テストが自分で作った一意な fixture ディレクトリ (テストの出力先の `fixtures/<一意名>/`) の中のファイルだけを削除する。削除指示の直前のフックで、テスト側のガードが削除用ハンドルの最終パスが fixture の内側であること (`\` 境界付きの比較) と、fixture から対象の親までの各ディレクトリが reparse point でないことを確かめ、違反なら例外で中止する。このガードはテストの安全装置であり、製品の安全装置の代わりにしない。ACL を変えるテストは `finally` で元に戻す。fixture のディレクトリ自体はテストから削除しない。
+
+## 7. dry-run と通常実行
+
+| ID | 入力・操作 | 期待結果 | 種別 |
+|---|---|---|---|
+| Y01 | C01〜C08 の各 target 状態、R06、T02〜T04、T07〜T11 の fixture で、`--dry-run` と通常実行 (`n` で中止) | 確認・削除フェーズに入る前までの初回分類、FATAL 判定、表示が一致する | Core+Win |
+| Y02 | 初回分類の後、確認待ち中に target の MATCHED ファイルの内容を変更する。同じ操作を `--dry-run` の結果表示後にも行う | 通常実行は削除直前再検証で停止する。dry-run は削除用ハンドルの再オープン・再検証・2回目の比較・削除を行わず (呼び出し記録で確認)、表示済みの MATCHED のまま正常終了する。この差は仕様どおり | Core+Win |
+
+## 8. 表示
+
+| ID | 入力・操作 | 期待結果 | 種別 |
+|---|---|---|---|
+| O01 | 全カテゴリー (MATCHED、MODIFIED、MISSING、SKIPPED_SPECIAL_FILE、DIRECTORY) を含む正常完走 | 各カテゴリーの全パスと件数を表示。進捗は `Checking n / total` | Core+Win |
+| O02 | 解析途中の FATAL (100 件中 40 件目) | 判定済みの 39 件のパス、原因エントリと原因、未判定 60 件は件数のみ、削除0件を明示 | Core+Win |
+| O03 | 削除途中の停止と `DELETE_FAILED` | `DELETE_FAILED` のパスと理由、停止原因のパスと理由、削除済み・DELETE_FAILED・未処理の件数 | Core+Win |
+| O04 | 表示できない名前 (制御文字など、FATAL の原因として) | エスケープ表記またはエントリ番号で表示 | Core |
+
+## 9. 実機確認と終了条件
+
+- SPEC §13 の PoC 1〜8 は実施済みで、結果は [`PLAN_VALIDATION.md`](PLAN_VALIDATION.md) にある。§13 の未確認の事項 (ファイル symlink への差し替え、クラウド placeholder) は、実装テストまたは実機確認で扱いを決めるまで成立と見なさない (SPEC §14)。D22 は扱いが確定済み (`PLAN_DECISIONS.md` DEC-12) で、段階5の結果は E-2 の実機テストで実測し `PLAN_VALIDATION.md` の「E-2 実測」に記録した。
+- 実削除テストは作業専用の一時ディレクトリと自作 fixture だけで行い、ZIP 自身、無関係のファイル、ディレクトリが残ることを確認する。
+- Core の結果だけで Windows API の同一個体保証を主張しない。実 Win で再現不能なケースは未確認として残す。
+- 全必須項目が通り、削除開始前の FATAL で削除0件、`DELETE_FAILED` で継続、削除直前再検証の不一致・未知のエラーで停止、dry-run と通常実行の初回分類の一致が確認できた時点を MVP のテスト完了とする。
+
+## 10. E2E (X 系)
+
+`tests/Unextract.E2E.Tests` は、`unextract.exe` を `Process.Start` で別プロセスとして起動し、終了コード・stdout・stderr・ファイルシステムの結果を検証する。同一プロセス内で CLI を呼ぶ `Unextract.Cli.Tests` では確かめられない、プロセス境界の挙動 (標準入力のリダイレクトによる非対話の判定、stdout と stderr の分離、出力のエンコーディング、終了コード、単一ファイル exe での動作) を担う。
+
+- 起動する exe: 環境変数 `UNEXTRACT_E2E_EXE` があればそれ (publish 済みの単一ファイル exe。CI の E2E ステップ)。なければテストアセンブリの位置から相対で `src/Unextract.Cli/bin/<構成>/<TFM>/unextract.exe` (ビルド順は `ProjectReference` の `ReferenceOutputAssembly=false` で保証する)。どちらでも見つからなければ失敗にする (成功・前提不成立にしない)。
+- stdin・stdout・stderr は常にリダイレクトし、stdout・stderr は UTF-8 で読む。60 秒で終わらなければプロセスツリーを kill して失敗にする。
+- 作業ディレクトリはテストの出力先の `fixtures/<テスト名>-<GUID>/` (テストからは削除しない)。junction・ACL・symlink は使わない。ZIP は段階 B の生成器 (`ZipFixture`、`ZipPatcher`) をリンクで共有して作る。
+- 実削除を伴う実行 (`--yes`、および誤って削除フェーズに入った場合に備えて X03 と X12 の中止の実行) の前に、領域外ガード (`Unextract.Windows.Tests` の `DeletionGuard` をリンクで共有) で、target と target 内の全ディレクトリの最終パス (確認用ハンドルから取得) が fixture の内側であり、fixture からその項目までの各成分が reparse point でないことを確かめる。違反なら例外で中止し、exe を起動しない。
+
+| ID | 入力・操作 | 期待結果 | 種別 |
+|---|---|---|---|
+| X01 | 全カテゴリー (MATCHED、MODIFIED (内容違い・サイズ違い)、MISSING、SKIPPED_SPECIAL_FILE (ZIP ではファイル、target ではディレクトリ)、DIRECTORY) と ZIP にない target ファイルを含む fixture で `--dry-run` | 終了コード 0。target 全体 (パス・サイズ・SHA-256・更新日時) と ZIP の SHA-256・更新日時が実行前後で不変。stdout に各カテゴリーの全パスと件数、合計行。ZIP にないファイルは出力されない。stderr は空 | E2E |
+| X02 | X01 と同じ fixture で `--yes` | 終了コード 0。MATCHED だけが削除され、MODIFIED・SKIPPED・ZIP にないファイル・ディレクトリ・ZIP (SHA-256 不変) は残る。stdout の最後が「削除済み 2、DELETE_FAILED 0、未処理 0」 | E2E |
+| X03 | X01 と同じ fixture で `--yes` なし。stdin は (1) 何も書かずに閉じる、(2) `n\n`、(3) `y\n` | いずれも非対話として中止。終了コード 2、削除0件。stdout に「標準入力が対話的でなく --yes も無いため、確認できません。」と「中止しました。削除0件。」、`[y/N]` は表示されない (E-2 の実測と同じ) | E2E |
+| X04 | 先頭に MATCHED 2件、3番目に Central Directory の CRC-32 だけを書き換えたエントリ (target にサイズ一致のファイルあり)、後方に2件。`--yes` | 終了コード 1、削除0件。stderr に FATAL と原因エントリ (`#3 "bad.txt"`)、削除0件の明示。stdout に判定済みの件数とパス、未判定の件数 (SPEC §10 により判定済み・未判定の件数は stdout)。未判定のパスは出力されない | E2E |
+| X05 | 引数の不正: `--target=dir`、ZIP なし、不明なオプション、オプションの重複、ZIP が2つ、`--target` の値が空 | 終了コード 1。stderr に入力エラーと使い方。stdout は空。fixture 全体が不変 | E2E |
+| X06 | target が存在しない、target がファイル、ZIP が存在しない (拒否対象ではない通常の入力の誤り)。`--yes` 付き | 終了コード 1。stderr に入力エラー (ZIP が開けない場合は FATAL) と削除0件の明示。stdout は空。存在しない target は作成されない | E2E |
+| X07 | 削除候補0件 (全て MODIFIED・MISSING)、空 ZIP。`--yes` なし、stdin は空 | プロンプトなしで終了コード 0 (「削除候補はありません。」)。target は不変 | E2E |
+| X08 | UTF-8 フラグ付きの日本語名の ZIP で `--dry-run`、続けて `--yes` | stdout (UTF-8 で読む) に日本語名がそのまま出る (U+FFFD なし)。終了コード 0。`--dry-run` と `--yes` の解析結果の一覧が一致し、`--yes` で MATCHED の日本語名ファイルだけが削除される | E2E |
+| X09 | UTF-8 フラグなしで CP437 の名前バイト (`café░.txt`) を持つ ZIP で `--dry-run`、続けて `-y` | CP437 として照合されて MATCHED。終了コード 0。削除される。`UNEXTRACT_E2E_EXE` の単一ファイル exe でも同じ | E2E |
+| X10 | `--dry-run`、`--yes`、FATAL、入力エラーの各実行 | 解析結果の一覧と削除の結果は stdout、FATAL・入力エラーは stderr。stderr がリダイレクトされているため進捗 (`Checking`、`Deleting`、改行を伴わない CR) は出ない | E2E |
+| X11 | 同じ fixture で `--dry-run`、続けて `--yes` | stdout の解析部分 (先頭から合計行まで) が一致する (SPEC §2)。その後は `--dry-run` が「--dry-run のため削除しません。」、`--yes` が削除の結果 | E2E |
+| X12 | 同じ fixture で `--dry-run` / 不明なオプション / `--yes` なし (非対話) | 終了コード 0 / 1 / 2。target は不変。各コードは X01〜X11 でも確認している (0: X01・X02・X07〜X09・X11、1: X04〜X06、2: X03) | E2E |
+
+**自動化しない項目** (手動手順書 [`MANUAL_TESTS.md`](MANUAL_TESTS.md) の M 系で扱う): E2E は stdin・stdout・stderr をリダイレクトして起動するため、exe からは常に非対話に見え、進捗も表示されない。そのため、対話的なコンソールでの `[y/N]` の入力 (`n`・空 Enter・`y`。M01〜M03)、確認待ちでの Ctrl+C (M04)、標準エラー出力が端末のときの進捗の1行上書き (M05)、コンソールのコードページ (932 / 65001) とフォントによる表示 (M06)、実際の確認待ち中に別のウィンドウから行う変更による停止 (M07。検出ロジックは D04 で自動化済み) は自動化しない。疑似コンソール (ConPTY) を使えば一部は自動化できるが、テスト側に端末エミュレーションを持ち込むことになり、検証対象 (実際の端末での見え方) とも一致しないため MVP では採らない。
