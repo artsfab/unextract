@@ -1,4 +1,5 @@
 using Microsoft.Win32.SafeHandles;
+using Unextract.Core.Analysis;
 using Unextract.Core.Deletion;
 using Unextract.Core.Results;
 using Unextract.Windows.Tests.Helper;
@@ -82,9 +83,12 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
         Assert.Contains("停止: b.txt: ", r.Error, StringComparison.Ordinal);
     }
 
-    // D02: 検証済みの MATCHED だけを個別に削除。ZIP、ZIP にない target のファイル、MODIFIED・特殊なファイル、ディレクトリは残る
-    [Fact]
-    public void D02_DeletesOnlyVerifiedMatched()
+    // D02: 検証済みの MATCHED だけを個別に削除。ZIP、ZIP にない target のファイル、MODIFIED・特殊なファイル、ディレクトリは残る。
+    // Fast では削除候補が SAME_SIZE になり、同じサイズで内容違いの changed.txt も削除される (SPEC §15.3、§15.5)。
+    [Theory]
+    [InlineData(RunMode.Strict)]
+    [InlineData(RunMode.Fast)]
+    public void D02_DeletesOnlyVerifiedMatched(RunMode mode)
     {
         var f = Create(
             nameof(D02_DeletesOnlyVerifiedMatched),
@@ -96,15 +100,22 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
         var zipHash = Hash(f.Zip);
         var before = Snapshot(f.Target);
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard);
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode);
 
         Log(r);
+        var fast = mode == RunMode.Fast;
+        string[] deleted = fast ? ["same.txt", "changed.txt", "d/deep.txt"] : ["same.txt", "d/deep.txt"];
         Assert.Equal(ExitStatus.Success, r.Outcome.Status);
-        Assert.Equal(["same.txt", "d/deep.txt"], r.DeletedNames);
-        Assert.Equal(2, f.Guard.CheckCount);
+        Assert.Equal(deleted, r.DeletedNames);
+        Assert.Equal(deleted.Length, f.Guard.CheckCount);
         var after = Snapshot(f.Target);
         before.Remove("same.txt");
         before.Remove(@"d\deep.txt");
+        if (fast)
+        {
+            before.Remove("changed.txt");
+        }
+
         before.Remove("d");
         after.Remove("d");
         Assert.Equal(before, after);
@@ -117,17 +128,23 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
     // 内容のみの変更では、NTFS の日時は粗いシステム時刻で記録されるため、初回比較と同じ刻みのうちに書き換わると
     // LastWriteTime・ChangeTime が変わらないことがある (実行環境の速度による)。その場合は同一性の再検証を通り、
     // 2回目の全バイト比較で検出される (SPEC §3 の 6、§12。D10 と同じ経路)。どちらになるかは変更の前後に観測した値で決める。
+    // Fast では2回目の全バイト比較が無いため、D04 の変更は同一性の再検証 (手順2) で検出される (PLAN_TESTS のモード違いの再利用の原則)。
+    // 内容のみの変更で日時・属性が変わらなかった場合は Fast の検出対象外 (D25 の範囲) なので、前提不成立として報告する。
     [Theory]
-    [InlineData("content-and-size", "同一性の再検証で不一致: EndOfFile")]
-    [InlineData("content-only", null)]
-    [InlineData("recreate", "同一性の再検証で不一致: File ID")]
-    [InlineData("replace", "同一性の再検証で不一致: File ID")]
-    public void D04_ChangeWhileAwaitingConfirmation_Stops(string change, string? expectedReason)
+    [InlineData("content-and-size", "同一性の再検証で不一致: EndOfFile", RunMode.Strict)]
+    [InlineData("content-only", null, RunMode.Strict)]
+    [InlineData("recreate", "同一性の再検証で不一致: File ID", RunMode.Strict)]
+    [InlineData("replace", "同一性の再検証で不一致: File ID", RunMode.Strict)]
+    [InlineData("content-and-size", "同一性の再検証で不一致: EndOfFile", RunMode.Fast)]
+    [InlineData("content-only", null, RunMode.Fast)]
+    [InlineData("recreate", "同一性の再検証で不一致: File ID", RunMode.Fast)]
+    [InlineData("replace", "同一性の再検証で不一致: File ID", RunMode.Fast)]
+    public void D04_ChangeWhileAwaitingConfirmation_Stops(string change, string? expectedReason, RunMode mode)
     {
         var f = CreateAbc($"{nameof(D04_ChangeWhileAwaitingConfirmation_Stops)}-{change}");
         var b = f.Path("b.txt");
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: () =>
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () =>
         {
             switch (change)
             {
@@ -154,9 +171,18 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
 
         output.WriteLine($"期待する停止理由: {expectedReason}");
         Assert.NotNull(expectedReason);
+        if (mode == RunMode.Fast && expectedReason == RecompareMismatch)
+        {
+            Log(r);
+            output.WriteLine("前提不成立: D04 content-only (Fast): 日時・属性が変わらなかったため、Fast の検出対象外 (D25 の範囲)");
+            return;
+        }
+
         AssertStoppedAtB(f, r, expectedReason);
         Assert.True(f.Exists("b.txt"));
     }
+
+    private const string RecompareMismatch = "2回目の全バイト比較で内容が一致しません";
 
     // 内容のみの変更 (サイズ・File ID は同じ) で、同一性の再検証が最初に検出する項目 (DeletionPhase の確認順)。
     // 日時・属性がどれも変わっていなければ、同一性の再検証は通り、2回目の全バイト比較で検出される。
@@ -177,26 +203,33 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
             return "同一性の再検証で不一致: 属性";
         }
 
-        return "2回目の全バイト比較で内容が一致しません";
+        return RecompareMismatch;
     }
 
     // D05: 確認待ち中に ADS 追加 / hardlink 追加 / read-only・system 付与 / 対象を junction に置換 /
     // 途中のディレクトリを junction または同名の別ディレクトリに置換 → 停止
     [Theory]
-    [InlineData("ads", "同一性の再検証で不一致")]
-    [InlineData("hardlink", "同一性の再検証で不一致")]
-    [InlineData("readonly", "同一性の再検証で不一致")]
-    [InlineData("system", "同一性の再検証で不一致")]
-    [InlineData("target-junction", "削除用に開けません")]
-    [InlineData("parent-junction", "同一性の再検証で不一致: 最終パス")]
-    [InlineData("parent-replaced", "同一性の再検証で不一致: File ID")]
-    public void D05_SpecialChangeWhileAwaitingConfirmation_Stops(string change, string reasonStart)
+    [InlineData("ads", "同一性の再検証で不一致", RunMode.Strict)]
+    [InlineData("hardlink", "同一性の再検証で不一致", RunMode.Strict)]
+    [InlineData("readonly", "同一性の再検証で不一致", RunMode.Strict)]
+    [InlineData("system", "同一性の再検証で不一致", RunMode.Strict)]
+    [InlineData("target-junction", "削除用に開けません", RunMode.Strict)]
+    [InlineData("parent-junction", "同一性の再検証で不一致: 最終パス", RunMode.Strict)]
+    [InlineData("parent-replaced", "同一性の再検証で不一致: File ID", RunMode.Strict)]
+    [InlineData("ads", "同一性の再検証で不一致", RunMode.Fast)]
+    [InlineData("hardlink", "同一性の再検証で不一致", RunMode.Fast)]
+    [InlineData("readonly", "同一性の再検証で不一致", RunMode.Fast)]
+    [InlineData("system", "同一性の再検証で不一致", RunMode.Fast)]
+    [InlineData("target-junction", "削除用に開けません", RunMode.Fast)]
+    [InlineData("parent-junction", "同一性の再検証で不一致: 最終パス", RunMode.Fast)]
+    [InlineData("parent-replaced", "同一性の再検証で不一致: File ID", RunMode.Fast)]
+    public void D05_SpecialChangeWhileAwaitingConfirmation_Stops(string change, string reasonStart, RunMode mode)
     {
         var f = Create($"{nameof(D05_SpecialChangeWhileAwaitingConfirmation_Stops)}-{change}", ("a.txt", A), ("p/", null), ("p/b.txt", B), ("c.txt", C));
         var p = f.Path("p");
         var b = f.Path(@"p\b.txt");
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: () =>
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () =>
         {
             switch (change)
             {
@@ -257,13 +290,15 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
     }
 
     // D07: 確認待ち中に対象以外だけを変える (ZIP にないファイルの追加・変更、他の MATCHED の読み取り、別ディレクトリの作成) → 停止せず削除
-    [Fact]
-    public void D07_UnrelatedChanges_DoNotStop()
+    [Theory]
+    [InlineData(RunMode.Strict)]
+    [InlineData(RunMode.Fast)]
+    public void D07_UnrelatedChanges_DoNotStop(RunMode mode)
     {
         var f = CreateAbc(nameof(D07_UnrelatedChanges_DoNotStop));
         File.WriteAllBytes(f.Path("unrelated.txt"), Bytes("u"));
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: () =>
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () =>
         {
             File.WriteAllBytes(f.Path("new.txt"), Bytes("n"));
             File.AppendAllText(f.Path("unrelated.txt"), "more");
@@ -281,8 +316,11 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
 
     // D09: 再検証直後に別プロセスが対象を書き込み用・改名用に開こうとする → 共有違反 (32)。対象は検証した個体のまま削除される
     // D23: 再比較中に別プロセスが対象を書き込みで開こうとする → 共有違反 (32)
-    [Fact]
-    public void D09_D23_OtherProcessCannotWriteOrRenameWhileDeletionHandleIsOpen()
+    // Fast では再比較を行わないため再比較中のフックは呼ばれず、D09 だけを確かめる (D23 は Strict だけ。PLAN_TESTS §6)。
+    [Theory]
+    [InlineData(RunMode.Strict)]
+    [InlineData(RunMode.Fast)]
+    public void D09_D23_OtherProcessCannotWriteOrRenameWhileDeletionHandleIsOpen(RunMode mode)
     {
         var f = CreateAbc(nameof(D09_D23_OtherProcessCannotWriteOrRenameWhileDeletionHandleIsOpen));
         var b = f.Path("b.txt");
@@ -306,7 +344,7 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
             },
         };
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard, hooks: hooks);
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, hooks: hooks, mode: mode);
 
         Log(r);
         foreach (var (what, code) in codes)
@@ -314,7 +352,10 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
             output.WriteLine($"{what}: {code}");
         }
 
-        Assert.Equal([("D09 write", 32), ("D09 rename", 32), ("D23 write", 32)], codes);
+        (string, int)[] expected = mode == RunMode.Fast
+            ? [("D09 write", 32), ("D09 rename", 32)]
+            : [("D09 write", 32), ("D09 rename", 32), ("D23 write", 32)];
+        Assert.Equal(expected, codes);
         Assert.Equal(ExitStatus.Success, r.Outcome.Status);
         Assert.Equal(["a.txt", "b.txt", "c.txt"], r.DeletedNames);
         Assert.False(File.Exists(b + ".renamed"));
@@ -334,16 +375,62 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
         Assert.Equal(Bytes("BRAVO CONTENT"), File.ReadAllBytes(b));
     }
 
+    // D25: --fast で、(a) 初回分類の前から内容が ZIP と異なる同サイズのファイル、(b) 確認待ち中に D10 と同じ操作 (File ID・サイズ・
+    // LastWriteTime・ChangeTime・属性を保ったまま内容だけを書き換える) をしたファイル → (a) SAME_SIZE と表示され削除される、
+    // (b) 同一性の再検証と最終確認を通り削除される。どちらも SPEC §15.5 の保証しない事項どおり (SPEC §14)。
+    // 同じ操作の Strict は (a) MODIFIED で削除しない (T01)、(b) D10 のとおり停止する (対照として同じ fixture で確かめる)。
+    [Theory]
+    [InlineData(RunMode.Fast)]
+    [InlineData(RunMode.Strict)]
+    public void D25_ContentOnlyDifferences(RunMode mode)
+    {
+        var f = Create($"{nameof(D25_ContentOnlyDifferences)}-{mode}", ("a.txt", A), ("b.txt", B), ("c.txt", C));
+        File.WriteAllBytes(f.Path("a.txt"), Bytes("ALPHA CONTENT"));
+        File.WriteAllBytes(f.Path("unrelated.txt"), Bytes("u"));
+        var b = f.Path("b.txt");
+
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () => RewriteKeepingMetadata(b, Bytes("BRAVO CONTENT")));
+
+        Log(r);
+        Assert.True(f.Exists("unrelated.txt"));
+        Assert.True(File.Exists(f.Zip));
+        if (mode == RunMode.Fast)
+        {
+            Assert.Equal(Classification.SameSize, r.Of("a.txt"));
+            Assert.Contains("SAME_SIZE (3):", r.Output, StringComparison.Ordinal);
+            Assert.Equal(ExitStatus.Success, r.Outcome.Status);
+            Assert.Null(r.Deletion.Stop);
+            Assert.Equal(["a.txt", "b.txt", "c.txt"], r.DeletedNames);
+            Assert.False(f.Exists("a.txt"));
+            Assert.False(f.Exists("b.txt"));
+            Assert.Equal(3, f.Guard.CheckCount);
+        }
+        else
+        {
+            Assert.Equal(Classification.Modified, r.Of("a.txt"));
+            Assert.True(f.Exists("a.txt"));
+            Assert.Equal("b.txt", r.Deletion.Stop!.Entry.Name);
+            Assert.Equal(RecompareMismatch, r.Deletion.Stop.Reason);
+            Assert.Empty(r.DeletedNames);
+            Assert.True(f.Exists("b.txt"));
+            Assert.True(f.Exists("c.txt"));
+        }
+    }
+
     // D11: 確認待ち中に、別プロセスが書き込みで開いたまま / FILE_SHARE_DELETE なしで読み取り中 / ACL で READ_DATA 拒否 /
     // ACL で対象の DELETE と親の DELETE_CHILD を拒否 → 削除用オープンが 32・5、識別確認の時点で一致に見えるため DELETE_FAILED。
     // 後続の安全な MATCHED は削除される。停止はないが DELETE_FAILED があるためエラー (1)。
     // 識別確認は拒否の理由も、拒否されたオープンと同じ個体であることも保証しない (SPEC §8.4 の限界)。一致しても削除しないことを確かめる。
     [Theory]
-    [InlineData("hold-write", 32)]
-    [InlineData("hold-read-share-read", 32)]
-    [InlineData("acl-read-data", 5)]
-    [InlineData("acl-delete-and-delete-child", 5)]
-    public void D11_OpenDeniedButLooksSame_IsDeleteFailedWithoutGuaranteeingSameObject(string situation, int expectedError)
+    [InlineData("hold-write", 32, RunMode.Strict)]
+    [InlineData("hold-read-share-read", 32, RunMode.Strict)]
+    [InlineData("acl-read-data", 5, RunMode.Strict)]
+    [InlineData("acl-delete-and-delete-child", 5, RunMode.Strict)]
+    [InlineData("hold-write", 32, RunMode.Fast)]
+    [InlineData("hold-read-share-read", 32, RunMode.Fast)]
+    [InlineData("acl-read-data", 5, RunMode.Fast)]
+    [InlineData("acl-delete-and-delete-child", 5, RunMode.Fast)]
+    public void D11_OpenDeniedButLooksSame_IsDeleteFailedWithoutGuaranteeingSameObject(string situation, int expectedError, RunMode mode)
     {
         var f = CreateAbc($"{nameof(D11_OpenDeniedButLooksSame_IsDeleteFailedWithoutGuaranteeingSameObject)}-{situation}");
         var b = f.Path("b.txt");
@@ -360,7 +447,7 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
 
             try
             {
-                r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: () =>
+                r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () =>
                 {
                     switch (situation)
                     {
@@ -398,11 +485,15 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
 
     // D14: 削除用オープンの段階で同一性に疑義 (対象消失 2、親の消失 3、ディレクトリ化 5 + 識別確認の不一致、削除保留中 5 + 識別確認の失敗) → 停止
     [Theory]
-    [InlineData("vanished", "Win32 エラー 2")]
-    [InlineData("parent-vanished", "Win32 エラー 3")]
-    [InlineData("directory", "識別確認でスナップショットと不一致")]
-    [InlineData("delete-pending", "識別確認も失敗")]
-    public void D14_IdentityInDoubtAtOpen_Stops(string situation, string reasonPart)
+    [InlineData("vanished", "Win32 エラー 2", RunMode.Strict)]
+    [InlineData("parent-vanished", "Win32 エラー 3", RunMode.Strict)]
+    [InlineData("directory", "識別確認でスナップショットと不一致", RunMode.Strict)]
+    [InlineData("delete-pending", "識別確認も失敗", RunMode.Strict)]
+    [InlineData("vanished", "Win32 エラー 2", RunMode.Fast)]
+    [InlineData("parent-vanished", "Win32 エラー 3", RunMode.Fast)]
+    [InlineData("directory", "識別確認でスナップショットと不一致", RunMode.Fast)]
+    [InlineData("delete-pending", "識別確認も失敗", RunMode.Fast)]
+    public void D14_IdentityInDoubtAtOpen_Stops(string situation, string reasonPart, RunMode mode)
     {
         var f = Create($"{nameof(D14_IdentityInDoubtAtOpen_Stops)}-{situation}", ("a.txt", A), ("p/", null), ("p/b.txt", B), ("c.txt", C));
         var p = f.Path("p");
@@ -411,7 +502,7 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
         Result r;
         try
         {
-            r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: () =>
+            r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () =>
             {
                 switch (situation)
                 {
@@ -450,10 +541,13 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
 
     // D16: 最終確認の直前に ADS 追加 / hardlink 追加 / read-only 付与 → 最終確認で検出して停止
     [Theory]
-    [InlineData("ads")]
-    [InlineData("hardlink")]
-    [InlineData("readonly")]
-    public void D16_ChangeBeforeFinalCheck_Stops(string change)
+    [InlineData("ads", RunMode.Strict)]
+    [InlineData("hardlink", RunMode.Strict)]
+    [InlineData("readonly", RunMode.Strict)]
+    [InlineData("ads", RunMode.Fast)]
+    [InlineData("hardlink", RunMode.Fast)]
+    [InlineData("readonly", RunMode.Fast)]
+    public void D16_ChangeBeforeFinalCheck_Stops(string change, RunMode mode)
     {
         var f = CreateAbc($"{nameof(D16_ChangeBeforeFinalCheck_Stops)}-{change}");
         var b = f.Path("b.txt");
@@ -483,7 +577,7 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
             },
         };
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard, hooks: hooks);
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, hooks: hooks, mode: mode);
 
         AssertStoppedAtB(f, r, "最終確認で不一致");
         Assert.True(File.Exists(b));
@@ -491,14 +585,16 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
 
     // D19: 確認待ち中に、親ディレクトリ p を同名の別ディレクトリに差し替え、同じファイルを移して入れる (File ID と最終パスは不変)
     // → 親 File ID の不一致で停止
-    [Fact]
-    public void D19_ParentReplacedWithSameFileMovedIn_StopsOnParentFileId()
+    [Theory]
+    [InlineData(RunMode.Strict)]
+    [InlineData(RunMode.Fast)]
+    public void D19_ParentReplacedWithSameFileMovedIn_StopsOnParentFileId(RunMode mode)
     {
         var f = Create(nameof(D19_ParentReplacedWithSameFileMovedIn_StopsOnParentFileId), ("a.txt", A), ("p/", null), ("p/b.txt", B), ("c.txt", C));
         var p = f.Path("p");
         var b = f.Path(@"p\b.txt");
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: () =>
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () =>
         {
             Directory.Move(p, p + "-old");
             Directory.CreateDirectory(p);
@@ -516,14 +612,16 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
     // D20: 確認待ち中に、途中のディレクトリを元のディレクトリを指す junction に差し替える / 大文字小文字だけ改名する
     // (親 File ID は不変) → 最終パスの不一致で停止
     [Theory]
-    [InlineData("junction")]
-    [InlineData("case")]
-    public void D20_OnlyFinalPathDiffers_StopsOnFinalPath(string change)
+    [InlineData("junction", RunMode.Strict)]
+    [InlineData("case", RunMode.Strict)]
+    [InlineData("junction", RunMode.Fast)]
+    [InlineData("case", RunMode.Fast)]
+    public void D20_OnlyFinalPathDiffers_StopsOnFinalPath(string change, RunMode mode)
     {
         var f = Create($"{nameof(D20_OnlyFinalPathDiffers_StopsOnFinalPath)}-{change}", ("a.txt", A), ("p/", null), ("p/b.txt", B), ("c.txt", C));
         var p = f.Path("p");
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: () =>
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () =>
         {
             if (change == "junction")
             {
@@ -545,8 +643,10 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
     }
 
     // D21: 最終確認の直後・削除指示の直前に対象へ read-only を付与 → 指示が 5 で失敗し、対象は残り、以後を停止。前は削除済み、後は未処理
-    [Fact]
-    public void D21_ReadOnlyBeforeDisposition_StopsAndKeepsFile()
+    [Theory]
+    [InlineData(RunMode.Strict)]
+    [InlineData(RunMode.Fast)]
+    public void D21_ReadOnlyBeforeDisposition_StopsAndKeepsFile(RunMode mode)
     {
         var f = CreateAbc(nameof(D21_ReadOnlyBeforeDisposition_StopsAndKeepsFile));
         var b = f.Path("b.txt");
@@ -561,7 +661,7 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
             },
         };
 
-        var r = RunDeleting(f.Zip, f.Target, f.Guard, hooks: hooks);
+        var r = RunDeleting(f.Zip, f.Target, f.Guard, hooks: hooks, mode: mode);
 
         AssertStoppedAtB(f, r, "削除の指示が失敗");
         Assert.Contains("Win32 エラー 5", r.Deletion.Stop!.Reason, StringComparison.Ordinal);
@@ -575,9 +675,11 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
     // awaiting: 確認待ち中に拒否する (PLAN_TESTS.md の記述どおり)。ACL の変更で対象の ChangeTime が変わるため、段階2で停止し段階5に届かない。
     // before-analysis: 初回分類の前に拒否する (スナップショットが変更後の ChangeTime を持つ)。段階5の成否はこちらで測る。
     [Theory]
-    [InlineData("awaiting")]
-    [InlineData("before-analysis")]
-    public void D22_DeleteDeniedOnTargetOnly_RecordsStage5Result(string when)
+    [InlineData("awaiting", RunMode.Strict)]
+    [InlineData("before-analysis", RunMode.Strict)]
+    [InlineData("awaiting", RunMode.Fast)]
+    [InlineData("before-analysis", RunMode.Fast)]
+    public void D22_DeleteDeniedOnTargetOnly_RecordsStage5Result(string when, RunMode mode)
     {
         var f = CreateAbc($"{nameof(D22_DeleteDeniedOnTargetOnly_RecordsStage5Result)}-{when}");
         var b = f.Path("b.txt");
@@ -590,7 +692,7 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
                 acl.Deny(b, "DE");
             }
 
-            r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: when == "awaiting" ? () => acl.Deny(b, "DE") : null);
+            r = RunDeleting(f.Zip, f.Target, f.Guard, awaiting: when == "awaiting" ? () => acl.Deny(b, "DE") : null, mode: mode);
 
             // 結果の記録 (PLAN_VALIDATION.md に転記する)。
             output.WriteLine($"D22 icacls (実行後): {(File.Exists(b) ? Cmd($"icacls \"{b}\"").Output.Trim() : "(対象なし)")}");
@@ -600,7 +702,7 @@ public class DeletionIntegrationTests(ITestOutputHelper output)
         var deletedB = r.DeletedNames.Contains("b.txt");
         var stop = r.Outcome.Deletion?.Stop;
         output.WriteLine(
-            $"D22 ({when}) 結果: 段階5 = {(deletedB ? "成功 (DeletePending = true、削除された)" : $"停止 ({stop?.Reason})")}、"
+            $"D22 ({when}, {mode}) 結果: 段階5 ={(deletedB ? "成功 (DeletePending = true、削除された)" : $"停止 ({stop?.Reason})")}、"
             + $"b.txt の存在 = {File.Exists(b)}、削除済み = [{string.Join(", ", r.DeletedNames)}]、"
             + $"DELETE_FAILED = {r.Deletion.Failed.Count}、未処理 = {r.Deletion.NotProcessedCount}、終了状態 = {r.Outcome.Status}");
 

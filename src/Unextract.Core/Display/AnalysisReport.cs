@@ -8,9 +8,23 @@ namespace Unextract.Core.Display;
 // 標準エラー出力 (FATAL・停止の原因とエラーで終わる理由) の行を返す。
 public static class AnalysisReport
 {
+    // Fast の警告 (SPEC §10、§15.6、PLAN.md §4 の「Fast モード」、DEC-20)。結果ヘッダーと [y/N] の直前で同じ文言を使う。
+    public const string FastWarning =
+        "警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、ZIP から正常に展開できることは確認していません。";
+
     private static readonly Classification[] Categories =
     [
         Classification.Matched,
+        Classification.Modified,
+        Classification.Missing,
+        Classification.SkippedSpecialFile,
+        Classification.Directory,
+    ];
+
+    // Fast は削除候補のカテゴリーだけを入れ替える (MATCHED の位置に SAME_SIZE。SPEC §10、DEC-21)。
+    private static readonly Classification[] FastCategories =
+    [
+        Classification.SameSize,
         Classification.Modified,
         Classification.Missing,
         Classification.SkippedSpecialFile,
@@ -22,17 +36,24 @@ public static class AnalysisReport
     public static string DeletingProgress(int current, int total) => $"Deleting {current} / {total}";
 
     // 正常完走: 各カテゴリーの全パスと件数。FATAL: 判定済みのパスと件数、未判定の件数 (パスは列挙しない)。
-    public static IReadOnlyList<string> Format(AnalysisResult result)
+    // カテゴリーはそのモードで意味のあるものだけ (SPEC §10)。Fast では先頭行に警告を出す。
+    public static IReadOnlyList<string> Format(AnalysisResult result, RunMode mode = RunMode.Strict)
     {
         ArgumentNullException.ThrowIfNull(result);
 
+        var categories = mode == RunMode.Fast ? FastCategories : Categories;
         var lines = new List<string>();
+        if (mode == RunMode.Fast)
+        {
+            lines.Add(FastWarning);
+        }
+
         if (result.Fatal is not null)
         {
             lines.Add($"判定済み: {result.Results.Count} エントリ");
         }
 
-        foreach (var category in Categories)
+        foreach (var category in categories)
         {
             var entries = result.Results.Where(r => r.Classification == category).ToList();
             lines.Add($"{category.ToDisplayString()} ({entries.Count}):");
@@ -47,7 +68,7 @@ public static class AnalysisReport
 
         lines.Add(
             $"合計: {result.TotalEntries} エントリ ("
-            + string.Join("、", Categories.Select(c => $"{c.ToDisplayString()} {result.Count(c)}"))
+            + string.Join("、", categories.Select(c => $"{c.ToDisplayString()} {result.Count(c)}"))
             + ")");
         return lines;
     }

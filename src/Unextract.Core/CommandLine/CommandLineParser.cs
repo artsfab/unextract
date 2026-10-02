@@ -1,6 +1,8 @@
+using Unextract.Core.Analysis;
+
 namespace Unextract.Core.CommandLine;
 
-public sealed record CommandLineOptions(string ArchivePath, string TargetPath, bool DryRun, bool AssumeYes);
+public sealed record CommandLineOptions(string ArchivePath, string TargetPath, bool DryRun, bool AssumeYes, RunMode Mode);
 
 public sealed record CommandLineParseResult(CommandLineOptions? Options, string? Error)
 {
@@ -9,11 +11,11 @@ public sealed record CommandLineParseResult(CommandLineOptions? Options, string?
     public static CommandLineParseResult Fail(string error) => new(null, error);
 }
 
-// unextract <archive.zip> --target <dir> [--dry-run] [--yes|-y] (SPEC §2)。
+// unextract <archive.zip> --target <dir> [--dry-run] [--fast] [--yes|-y] (SPEC §2)。--fast がなければ Strict (SPEC §15.1)。
 // 副作用のない純粋関数。パスの存在や種類は検査しない。
 public static class CommandLineParser
 {
-    public const string Usage = "使い方: unextract <archive.zip> --target <dir> [--dry-run] [--yes|-y]";
+    public const string Usage = "使い方: unextract <archive.zip> --target <dir> [--dry-run] [--fast] [--yes|-y]";
 
     public static CommandLineParseResult Parse(IReadOnlyList<string> args)
     {
@@ -22,6 +24,7 @@ public static class CommandLineParser
         string? archive = null;
         string? target = null;
         var dryRun = false;
+        var fast = false;
         var yes = false;
 
         for (var i = 0; i < args.Count; i++)
@@ -50,6 +53,15 @@ public static class CommandLineParser
                     }
 
                     dryRun = true;
+                    break;
+
+                case "--fast":
+                    if (fast)
+                    {
+                        return CommandLineParseResult.Fail("--fast が複数回指定されています");
+                    }
+
+                    fast = true;
                     break;
 
                 case "--yes":
@@ -93,6 +105,6 @@ public static class CommandLineParser
             return CommandLineParseResult.Fail("--target は必須です");
         }
 
-        return CommandLineParseResult.Ok(new CommandLineOptions(archive, target, dryRun, yes));
+        return CommandLineParseResult.Ok(new CommandLineOptions(archive, target, dryRun, yes, fast ? RunMode.Fast : RunMode.Strict));
     }
 }

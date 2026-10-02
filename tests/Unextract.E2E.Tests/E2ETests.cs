@@ -206,7 +206,7 @@ public class E2ETests
         Assert.True(result.ExitCode == Error, result.ToString());
         Assert.Equal(string.Empty, result.StandardOutput);
         Assert.StartsWith("入力エラー: ", result.ErrorLines[0], StringComparison.Ordinal);
-        Assert.Contains("使い方: unextract <archive.zip> --target <dir> [--dry-run] [--yes|-y]", result.ErrorLines);
+        Assert.Contains("使い方: unextract <archive.zip> --target <dir> [--dry-run] [--fast] [--yes|-y]", result.ErrorLines);
         Assert.Equal(all, E2EFixture.Snapshot(fixture.Directory));
     }
 
@@ -398,6 +398,165 @@ public class E2ETests
         Assert.Equal(analysis, Report.AnalysisPart(deleting));
         Assert.Equal(["--dry-run のため削除しません。"], dryRun.OutputLines[analysis.Count..]);
         Assert.Equal(["DELETE_FAILED (0):", "削除済み 2、DELETE_FAILED 0、未処理 0"], deleting.OutputLines[analysis.Count..]);
+    }
+
+    // Fast の警告 (PLAN.md §4 の「Fast モード」)。
+    private const string FastWarning =
+        "警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、ZIP から正常に展開できることは確認していません。";
+
+    // X01 の fixture の --fast での一覧: SAME_SIZE に X01 の MATCHED と内容違い (同サイズ) の MODIFIED、MODIFIED にサイズ違いだけ。
+    private static void AssertAllCategoriesFastReport(ProcessResult result)
+    {
+        Assert.Equal(FastWarning, result.OutputLines[0]);
+        var report = Report.Parse(result);
+        report.AssertCategory("SAME_SIZE", "same1.txt", "docs/deep.txt", "changed.txt");
+        report.AssertCategory("MODIFIED", "longer.txt");
+        report.AssertCategory("MISSING", "missing.txt");
+        report.AssertCategory("SKIPPED_SPECIAL_FILE", "folder.txt");
+        report.AssertCategory("DIRECTORY", "docs/");
+        Assert.False(report.Has("MATCHED"));
+        Assert.DoesNotContain("MATCHED", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(
+            "合計: 7 エントリ (SAME_SIZE 3、MODIFIED 1、MISSING 1、SKIPPED_SPECIAL_FILE 1、DIRECTORY 1)",
+            result.OutputLines);
+        Assert.DoesNotContain("unrelated", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    // X13: X01 と同じ fixture で --fast --dry-run、続けて --fast --yes。target・ZIP は dry-run の前後で不変。stdout の先頭行が警告、
+    // SAME_SIZE に X01 の MATCHED と内容違い (同サイズ) の MODIFIED、MODIFIED にサイズ違いだけ。MATCHED は出ない。stderr は空。
+    // stdout の解析部分 (先頭の警告から合計行まで) が --fast --yes と一致する。X01 (Strict) の stdout には警告と SAME_SIZE が無い。
+    [Fact]
+    public void X13_FastDryRunShowsSameSizeAndWarning()
+    {
+        var fixture = AllCategories();
+        var target = E2EFixture.Snapshot(fixture.Target);
+        var zip = E2EFixture.Describe(fixture.ArchivePath);
+
+        var strict = fixture.Run(stdin: null, "--dry-run");
+        var dryRun = fixture.Run(stdin: null, "--fast", "--dry-run");
+
+        Assert.True(dryRun.ExitCode == Success, dryRun.ToString());
+        AssertAllCategoriesFastReport(dryRun);
+        Assert.Equal("--dry-run のため削除しません。", dryRun.OutputLines[^1]);
+        Assert.Equal(string.Empty, dryRun.StandardError);
+        Assert.Equal(target, E2EFixture.Snapshot(fixture.Target));
+        Assert.Equal(zip, E2EFixture.Describe(fixture.ArchivePath));
+
+        Assert.True(strict.ExitCode == Success, strict.ToString());
+        Assert.DoesNotContain(FastWarning, strict.StandardOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("SAME_SIZE", strict.StandardOutput, StringComparison.Ordinal);
+
+        var deleting = fixture.RunDeleting(stdin: null, "--fast", "--yes");
+
+        Assert.True(deleting.ExitCode == Success, deleting.ToString());
+        Assert.Equal(Report.AnalysisPart(dryRun), Report.AnalysisPart(deleting));
+        Assert.Equal(FastWarning, Report.AnalysisPart(dryRun)[0]);
+    }
+
+    // X14: X01 と同じ fixture で --fast --yes → SAME_SIZE のファイル (X01 の MATCHED と内容違いの MODIFIED) だけが削除され、サイズ違いの
+    // MODIFIED・SKIPPED・ZIP にないファイル・ディレクトリ・ZIP (SHA-256 不変) は残る。[y/N] は出ない。
+    // X04 と同じ fixture で --fast --yes → FATAL にならず、CRC を書き換えたエントリの target も SAME_SIZE として削除され、終了コード 0。
+    [Fact]
+    public void X14_FastYesDeletesSameSize()
+    {
+        var fixture = AllCategories();
+        var before = E2EFixture.Snapshot(fixture.Target);
+        var zip = E2EFixture.Describe(fixture.ArchivePath);
+
+        var result = fixture.RunDeleting(stdin: null, "--fast", "--yes");
+
+        Assert.True(result.ExitCode == Success, result.ToString());
+        AssertAllCategoriesFastReport(result);
+        Assert.DoesNotContain("[y/N]", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Single(result.OutputLines, l => l == FastWarning);
+        Assert.Equal("削除済み 3、DELETE_FAILED 0、未処理 0", result.OutputLines[^1]);
+        Assert.Equal(string.Empty, result.StandardError);
+
+        var expected = new SortedDictionary<string, string>(before, StringComparer.Ordinal);
+        expected.Remove("same1.txt");
+        expected.Remove(@"docs\deep.txt");
+        expected.Remove("changed.txt");
+        var after = E2EFixture.Snapshot(fixture.Target);
+        Assert.Equal(expected.Keys, after.Keys);
+        foreach (var (path, description) in expected.Where(e => !e.Value.StartsWith("dir ", StringComparison.Ordinal)))
+        {
+            Assert.Equal(description, after[path]);
+        }
+
+        Assert.True(Directory.Exists(Path.Combine(fixture.Target, "docs")));
+        Assert.True(Directory.Exists(Path.Combine(fixture.Target, "folder.txt")));
+        Assert.Equal(zip, E2EFixture.Describe(fixture.ArchivePath));
+
+        var crc = CrcMismatch(nameof(X14_FastYesDeletesSameSize) + "-crc");
+        var crcZip = E2EFixture.Describe(crc.ArchivePath);
+
+        var crcResult = crc.RunDeleting(stdin: null, "--fast", "--yes");
+
+        Assert.True(crcResult.ExitCode == Success, crcResult.ToString());
+        Assert.Equal(FastWarning, crcResult.OutputLines[0]);
+        Report.Parse(crcResult).AssertCategory("SAME_SIZE", "a.txt", "b.txt", "bad.txt", "c.txt", "d.txt");
+        Assert.Equal("削除済み 5、DELETE_FAILED 0、未処理 0", crcResult.OutputLines[^1]);
+        Assert.Equal(string.Empty, crcResult.StandardError);
+        Assert.False(File.Exists(Path.Combine(crc.Target, "bad.txt")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(crc.Target));
+        Assert.Equal(crcZip, E2EFixture.Describe(crc.ArchivePath));
+    }
+
+    // X15: --fast --fast → 入力エラー (stdout 空)。--fast --yes で ZIP 名不正 → 事前検証の FATAL (stdout の先頭行が警告で判定済み・未判定の件数、
+    // stderr に FATAL と削除0件)。--fast で削除候補0件 (サイズ違いの MODIFIED と MISSING だけ)、--yes なし、stdin 空 → 終了コード 0、
+    // stdout の先頭行が警告、「削除候補はありません。」、プロンプトなし。
+    [Fact]
+    public void X15_FastInputErrorFatalAndNoCandidates()
+    {
+        var duplicate = AllCategories(nameof(X15_FastInputErrorFatalAndNoCandidates) + "-duplicate");
+        var all = E2EFixture.Snapshot(duplicate.Directory);
+
+        var input = duplicate.Run(stdin: null, "--fast", "--fast");
+
+        Assert.True(input.ExitCode == Error, input.ToString());
+        Assert.Equal(string.Empty, input.StandardOutput);
+        Assert.StartsWith("入力エラー: ", input.ErrorLines[0], StringComparison.Ordinal);
+        Assert.Contains("使い方: unextract <archive.zip> --target <dir> [--dry-run] [--fast] [--yes|-y]", input.ErrorLines);
+        Assert.DoesNotContain(FastWarning, input.StandardError, StringComparison.Ordinal);
+        Assert.Equal(all, E2EFixture.Snapshot(duplicate.Directory));
+
+        var invalid = E2EFixture.Create(nameof(X15_FastInputErrorFatalAndNoCandidates) + "-fatal");
+        invalid.WriteZip(ZipFixture.Create(
+            new FixtureEntry("ok.txt", E2EFixture.Bytes("hello")),
+            new FixtureEntry("bad|name.txt", E2EFixture.Bytes("hello"))));
+        invalid.WriteTarget("ok.txt", "hello");
+        var invalidTarget = E2EFixture.Snapshot(invalid.Target);
+
+        var fatal = invalid.RunDeleting(stdin: null, "--fast", "--yes");
+
+        Assert.True(fatal.ExitCode == Error, fatal.ToString());
+        Assert.Equal(FastWarning, fatal.OutputLines[0]);
+        Assert.Equal("判定済み: 0 エントリ", fatal.OutputLines[1]);
+        Assert.Equal("未判定: 1 エントリ", fatal.OutputLines[^1]);
+        Assert.StartsWith("FATAL: エントリ #2 ", fatal.ErrorLines[0], StringComparison.Ordinal);
+        Assert.Equal(FatalNoDeletion, fatal.ErrorLines[^1]);
+        Assert.DoesNotContain(FastWarning, fatal.StandardError, StringComparison.Ordinal);
+        Assert.Equal(invalidTarget, E2EFixture.Snapshot(invalid.Target));
+
+        var none = E2EFixture.Create(nameof(X15_FastInputErrorFatalAndNoCandidates) + "-none");
+        none.WriteZip(ZipFixture.Create(
+            new FixtureEntry("longer.txt", E2EFixture.Bytes("abc")),
+            new FixtureEntry("missing.txt", E2EFixture.Bytes("x"))));
+        none.WriteTarget("longer.txt", "abcdef");
+        var noneTarget = E2EFixture.Snapshot(none.Target);
+
+        var noCandidates = none.Run(stdin: null, "--fast");
+
+        Assert.True(noCandidates.ExitCode == Success, noCandidates.ToString());
+        Assert.Equal(FastWarning, noCandidates.OutputLines[0]);
+        Assert.Equal(NoCandidates, noCandidates.OutputLines[^1]);
+        Assert.Contains(
+            "合計: 2 エントリ (SAME_SIZE 0、MODIFIED 1、MISSING 1、SKIPPED_SPECIAL_FILE 0、DIRECTORY 0)",
+            noCandidates.OutputLines);
+        Assert.DoesNotContain("[y/N]", noCandidates.StandardOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("標準入力が対話的でなく", noCandidates.StandardOutput, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, noCandidates.StandardError);
+        Assert.Equal(noneTarget, E2EFixture.Snapshot(none.Target));
     }
 
     // X12: 終了コードの網羅 (成功 0 / エラー 1 / 中止 2)。各コードは X01〜X11 でも確認しているが、ここで1回ずつまとめて確かめる。

@@ -1,4 +1,4 @@
-"""unextract 手動確認 (docs/MANUAL_TESTS.md の M01〜M07) 用 fixture 生成スクリプト。
+"""unextract 手動確認 (docs/MANUAL_TESTS.md の M01〜M08) 用 fixture 生成スクリプト。
 
 使い方 (リポジトリ直下で):
     py scripts/make_manual_fixtures.py "<unextract.exe のパス>"
@@ -7,6 +7,7 @@
 - 既存のファイルは削除も上書きもしない (毎回新しい日時フォルダを作る)。
 - 実在データは使わない。作るのは小さなテスト用ファイルだけ。exe は実行しない。
 - 最後に、各シナリオの項目 ID・期待と実行コマンド (PowerShell 用) を表示する。
+- M08 (--fast の [y/N] 直前の警告) は yn-n シナリオを使う。M08 は表示に出さないため、コマンドは手順書 (MANUAL_TESTS.md の M08) のものを使う。
 - 表示が文字化けする・UnicodeEncodeError になる場合は、PowerShell で $env:PYTHONIOENCODING = 'utf-8' を設定してから実行する。
 """
 import os

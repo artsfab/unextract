@@ -15,11 +15,13 @@ public interface IConfirmationPrompt
 
 // 削除フェーズの入力。Comparer は初回分類で使ったものと同じインスタンス (PLAN.md §1)。
 // Progress は (n, total) で各対象の処理の前に呼ばれる (Deleting n / total)。
+// Mode は初回分類と同じ実行全体のモード。分岐は SPEC §8.3 の手順3 だけ (SPEC §15.4)。
 public sealed record DeletionRequest(
     IReadOnlyList<MatchedFile> Candidates,
     IZipContentProvider Contents,
     ContentComparer Comparer,
-    Action<int, int>? Progress = null);
+    Action<int, int>? Progress = null,
+    RunMode Mode = RunMode.Strict);
 
 // 削除フェーズ (SPEC §3 の 6、§8.3、§8.4)。実装は Unextract.Core.Deletion.DeletionPhase。
 public interface IDeletionPhase
@@ -39,6 +41,7 @@ public sealed class RunHooks
 
 // Output は解析結果の一覧と削除フェーズの結果、ErrorOutput は入力エラー・FATAL の原因・停止の原因とエラーで終わる理由 (SPEC §10)。
 // Contents は ZIP の内容の取得元 (null なら Archive)。テストで呼び出しを記録するために差し替える。
+// Mode は実行全体のモード (SPEC §15.1)。初回分類と削除フェーズに同じ値を渡す。
 public sealed record RunRequest(
     ZipArchiveSource Archive,
     string ArchivePath,
@@ -55,7 +58,8 @@ public sealed record RunRequest(
     Action<int, int>? Progress = null,
     Action<int, int>? DeletionProgress = null,
     IZipContentProvider? Contents = null,
-    RunHooks? Hooks = null);
+    RunHooks? Hooks = null,
+    RunMode Mode = RunMode.Strict);
 
 // InputError は target の入力エラー (§2)。Analysis は ZIP 事前検証以降の結果。ReportLines は初回分類の表示 (標準出力の分)。
 public sealed record RunOutcome(
@@ -90,7 +94,7 @@ public static class UnextractRunner
             var contents = request.Contents ?? request.Archive;
             var comparer = new ContentComparer(request.Limits);
             var analysis = Analyze(request, root, contents, comparer);
-            var report = AnalysisReport.Format(analysis);
+            var report = AnalysisReport.Format(analysis, request.Mode);
             foreach (var line in report)
             {
                 output.WriteLine(line);
@@ -128,7 +132,7 @@ public static class UnextractRunner
                 return new RunOutcome(ExitStatus.UserCancelled, null, analysis, report, null);
             }
 
-            var deleted = request.DeletionPhase.Delete(new DeletionRequest(candidates, contents, comparer, request.DeletionProgress));
+            var deleted = request.DeletionPhase.Delete(new DeletionRequest(candidates, contents, comparer, request.DeletionProgress, request.Mode));
             foreach (var line in AnalysisReport.FormatDeletion(deleted))
             {
                 output.WriteLine(line);
@@ -173,7 +177,8 @@ public static class UnextractRunner
             identity.Value,
             request.Limits,
             request.Progress,
-            comparer));
+            comparer,
+            request.Mode));
     }
 
     private static bool Confirm(RunRequest request, int count)
@@ -185,6 +190,9 @@ public static class UnextractRunner
         }
 
         request.Hooks?.AwaitingConfirmation?.Invoke();
-        return IsConfirmation(request.Prompt.Ask($"{count} 件のファイルを削除します。よろしいですか? [y/N] "));
+
+        // Fast では [y/N] の直前の行に警告を出す (SPEC §10、PLAN.md §4 の「Fast モード」)。確認プロンプトと同じ経路で渡す。
+        var warning = request.Mode == RunMode.Fast ? AnalysisReport.FastWarning + Environment.NewLine : string.Empty;
+        return IsConfirmation(request.Prompt.Ask($"{warning}{count} 件のファイルを削除します。よろしいですか? [y/N] "));
     }
 }

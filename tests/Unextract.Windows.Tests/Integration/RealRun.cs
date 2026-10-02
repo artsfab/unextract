@@ -48,7 +48,9 @@ internal static class RealRun
         public SkipReason? SkipOf(string name) => Analysis.Results.Single(r => r.Entry.Name == name).SkipReason;
     }
 
-    public static Result Run(string zipPath, string target, bool dryRun = true, Limits? limits = null)
+    // mode は実行全体のモード (SPEC §15)。共通の安全性テストを Fast でも実行するために切り替える。
+    // hooks は runner のテスト用の差し込み口 (解析完了直後など。実行中の変更の注入に使う)。
+    public static Result Run(string zipPath, string target, bool dryRun = true, Limits? limits = null, RunMode mode = RunMode.Strict, RunHooks? hooks = null)
     {
         var opened = ZipArchiveSource.Open(zipPath);
         using var source = opened.Source ?? throw new InvalidOperationException(opened.Fatal!.Describe());
@@ -58,13 +60,14 @@ internal static class RealRun
         var error = new StringWriter();
         var outcome = UnextractRunner.Run(new RunRequest(
             source, zipPath, target, dryRun, AssumeYes: false, new WindowsFileSystemProbe(), policy.Policy,
-            limits ?? Limits.Default, new ScriptedPrompt("n"), new NoDeletion(), output, error));
+            limits ?? Limits.Default, new ScriptedPrompt("n"), new NoDeletion(), output, error, Hooks: hooks, Mode: mode));
         return new Result(outcome, output.ToString(), error.ToString());
     }
 
     // 実際に削除する実行。確認には y と答え、その直前に awaiting を呼ぶ (確認待ち中の変更)。
     // hooks.BeforeDisposition の後に guard.Check を必ず呼ぶ (違反なら例外 → 削除フェーズはその対象で停止し、削除しない)。
-    public static Result RunDeleting(string zipPath, string target, DeletionGuard guard, Action? awaiting = null, DeletionHooks? hooks = null)
+    public static Result RunDeleting(
+        string zipPath, string target, DeletionGuard guard, Action? awaiting = null, DeletionHooks? hooks = null, RunMode mode = RunMode.Strict)
     {
         var opened = ZipArchiveSource.Open(zipPath);
         using var source = opened.Source ?? throw new InvalidOperationException(opened.Fatal!.Describe());
@@ -90,7 +93,7 @@ internal static class RealRun
         var error = new StringWriter();
         var outcome = UnextractRunner.Run(new RunRequest(
             source, zipPath, target, DryRun: false, AssumeYes: false, probe, policy.Policy, Limits.Default, prompt,
-            new DeletionPhase(probe, guarded), output, error));
+            new DeletionPhase(probe, guarded), output, error, Mode: mode));
         Assert.Empty(guard.Violations);
         return new Result(outcome, output.ToString(), error.ToString());
     }
@@ -110,6 +113,9 @@ internal static class RealRun
         ZipFixture.Create(entries.Select(e => new FixtureEntry(e.Name, e.Content)));
 
     public static byte[] Bytes(string text) => System.Text.Encoding.UTF8.GetBytes(text);
+
+    // 削除候補の分類 (Strict は MATCHED、Fast は SAME_SIZE。PLAN_TESTS のモード違いの再利用の原則)。
+    public static Classification Candidate(RunMode mode) => mode == RunMode.Fast ? Classification.SameSize : Classification.Matched;
 
     // ディレクトリ配下の全項目の (相対パス → 種類・サイズ・SHA-256・更新日時)。
     public static SortedDictionary<string, string> Snapshot(string directory)

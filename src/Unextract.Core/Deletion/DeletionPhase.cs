@@ -34,7 +34,7 @@ internal static class DeletionOpenErrors
 }
 
 // 削除フェーズ (SPEC §3 の 6、§8.3、§8.4)。各 MATCHED について、期待パスで削除用ハンドルを1回だけ開き、
-// 同じハンドルで 2. 同一性の再検証 → 3. 2回目の全バイト比較 → 4. 最終確認 → 5. 削除の指示 → 6. 成立確認 を行う。
+// 同じハンドルで 2. 同一性の再検証 → 3. 2回目の全バイト比較 (Strict のみ) → 4. 最終確認 → 5. 削除の指示 → 6. 成立確認 を行う。
 // オープンの後はパスを使わない (識別確認は段階1が失敗したときだけで、削除はしない)。
 // 削除用ハンドルは各対象の処理の中で using によって閉じるため、停止・例外を含むどの経路でも、その対象の処理が終わった時点で閉じられている。
 // 停止した後の対象は処理しない。既に削除したファイルは戻さない。
@@ -111,16 +111,20 @@ public sealed class DeletionPhase : IDeletionPhase
             _hooks.AfterRevalidation?.Invoke(file, handle);
 
             // 3. 2回目の全バイト比較。初回と同じ比較器で、違反は種類を問わず停止 (SPEC §5.2、§8.4)。
-            var content = request.Contents.GetContent(file.Entry.Index);
-            IComparisonHandle reader = _hooks.DuringRecompare is { } during ? new FirstReadHook(handle, () => during(file, handle)) : handle;
-            var compared = request.Comparer.Compare(content, reader, ComparisonPass.Recheck);
-            switch (compared.Verdict)
+            // Fast はこの手順だけを行わない (SPEC §15.4)。1、2、4、5、6 は両モードで同じ。
+            if (request.Mode == RunMode.Strict)
             {
-                case ContentVerdict.Fatal:
-                    var detail = compared.Detail is null ? string.Empty : $" ({compared.Detail})";
-                    return Outcome.Stop($"2回目の全バイト比較で異常: {FatalKindText.Describe(compared.FatalKind!.Value)}{detail}");
-                case ContentVerdict.Mismatch:
-                    return Outcome.Stop("2回目の全バイト比較で内容が一致しません");
+                var content = request.Contents.GetContent(file.Entry.Index);
+                IComparisonHandle reader = _hooks.DuringRecompare is { } during ? new FirstReadHook(handle, () => during(file, handle)) : handle;
+                var compared = request.Comparer.Compare(content, reader, ComparisonPass.Recheck);
+                switch (compared.Verdict)
+                {
+                    case ContentVerdict.Fatal:
+                        var detail = compared.Detail is null ? string.Empty : $" ({compared.Detail})";
+                        return Outcome.Stop($"2回目の全バイト比較で異常: {FatalKindText.Describe(compared.FatalKind!.Value)}{detail}");
+                    case ContentVerdict.Mismatch:
+                        return Outcome.Stop("2回目の全バイト比較で内容が一致しません");
+                }
             }
 
             // 4. 最終確認。2回目の比較の間に起き得る属性変更・ADS 作成・hardlink 追加・削除保留を検出する。

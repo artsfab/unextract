@@ -14,6 +14,9 @@ public class ClassificationTests
     private static readonly byte[] Hello = Bytes("hello");
     private static readonly byte[] World = Bytes("world!");
 
+    // 共通の安全性テストを両モードで実行する (PLAN_TESTS のモード違いの再利用の原則)。削除候補の期待は Candidate(mode) で読み替える。
+    public static TheoryData<RunMode> BothModes => new() { RunMode.Strict, RunMode.Fast };
+
     private static Classification Single(AnalysisResult result)
     {
         Assert.Null(result.Fatal);
@@ -43,17 +46,53 @@ public class ClassificationTests
         Assert.Equal(@"\\?\C:\target\same.txt", result.DeletionCandidates[0].ExpectedPath);
     }
 
+    // T17: T01 と同じ4つを --fast で → SAME_SIZE、SAME_SIZE、MODIFIED (ZIP 内容を読まない)、SAME_SIZE。
+    // 同一内容と1 byte 変更を区別しない。0 byte に特例はない (SPEC §15.2)。
+    // ZIP エントリの GetContent・Open()・Crc32 は呼び出し記録に残らない。target の内容の読み取りは、読めば例外になるよう注入して確かめる。
+    [Fact]
+    public void T17_Fast_SizeOnlyWithoutReadingContent()
+    {
+        var zip = MakeZip(("same.txt", Hello), ("changed.txt", Hello), ("size.txt", Hello), ("zero.txt", []));
+        using var harness = new PipelineHarness(zip) { Mode = RunMode.Fast };
+        FakeNode[] nodes =
+        [
+            harness.Fs.AddFile(@"C:\target\same.txt", Bytes("hello")),
+            harness.Fs.AddFile(@"C:\target\changed.txt", Bytes("hellO")),
+            harness.Fs.AddFile(@"C:\target\size.txt", Bytes("hello, world")),
+            harness.Fs.AddFile(@"C:\target\zero.txt", []),
+        ];
+        foreach (var node in nodes)
+        {
+            node.ThrowOnRead = true;
+        }
+
+        var result = harness.Run();
+
+        Assert.Null(result.Fatal);
+        Assert.Equal(
+            [Classification.SameSize, Classification.SameSize, Classification.Modified, Classification.SameSize],
+            result.Results.Select(r => r.Classification));
+        Assert.Empty(harness.Contents.Calls);
+        Assert.Equal(["same.txt", "changed.txt", "zero.txt"], result.DeletionCandidates.Select(c => c.Entry.Name));
+    }
+
     // T02: 親成分の分類表の MISSING の行 (存在しない、大小文字だけ違うディレクトリ、通常ファイル)。ZIP 内容は開かない。
     [Theory]
-    [InlineData("none")]
-    [InlineData("a-only")]
-    [InlineData("case-a")]
-    [InlineData("case-b")]
-    [InlineData("file-a")]
-    [InlineData("file-b")]
-    public void T02_ParentMissingRows_AreMissing(string layout)
+    [InlineData("none", RunMode.Strict)]
+    [InlineData("a-only", RunMode.Strict)]
+    [InlineData("case-a", RunMode.Strict)]
+    [InlineData("case-b", RunMode.Strict)]
+    [InlineData("file-a", RunMode.Strict)]
+    [InlineData("file-b", RunMode.Strict)]
+    [InlineData("none", RunMode.Fast)]
+    [InlineData("a-only", RunMode.Fast)]
+    [InlineData("case-a", RunMode.Fast)]
+    [InlineData("case-b", RunMode.Fast)]
+    [InlineData("file-a", RunMode.Fast)]
+    [InlineData("file-b", RunMode.Fast)]
+    public void T02_ParentMissingRows_AreMissing(string layout, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("a/b/c.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("a/b/c.txt", Hello))) { Mode = mode };
         var fs = harness.Fs;
         switch (layout)
         {
@@ -89,12 +128,15 @@ public class ClassificationTests
     // T03: 親成分の分類表の reparse の行 (ディレクトリ junction、ディレクトリ symlink、ファイル symlink)。
     // reparse の判定は他の種類より優先し、リンク先を読まない。
     [Theory]
-    [InlineData("junction")]
-    [InlineData("dir-symlink")]
-    [InlineData("file-symlink")]
-    public void T03_ParentReparse_IsSkipped(string kind)
+    [InlineData("junction", RunMode.Strict)]
+    [InlineData("dir-symlink", RunMode.Strict)]
+    [InlineData("file-symlink", RunMode.Strict)]
+    [InlineData("junction", RunMode.Fast)]
+    [InlineData("dir-symlink", RunMode.Fast)]
+    [InlineData("file-symlink", RunMode.Fast)]
+    public void T03_ParentReparse_IsSkipped(string kind, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("a/b/c.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("a/b/c.txt", Hello))) { Mode = mode };
         var fs = harness.Fs;
         var elsewhere = fs.AddDirectory(@"C:\elsewhere");
         fs.AddFile(@"C:\elsewhere\c.txt", Bytes("hello"));
@@ -125,12 +167,15 @@ public class ClassificationTests
 
     // T04: 親成分の分類表の判定不能の行 (列挙 API の失敗、想定外の種類) → 全体 FATAL
     [Theory]
-    [InlineData("enumerate-root", FatalKind.EnumerationFailed)]
-    [InlineData("enumerate-a", FatalKind.EnumerationFailed)]
-    [InlineData("device", FatalKind.UnexpectedTargetType)]
-    public void T04_ParentUndeterminable_IsFatal(string injection, FatalKind expected)
+    [InlineData("enumerate-root", FatalKind.EnumerationFailed, RunMode.Strict)]
+    [InlineData("enumerate-a", FatalKind.EnumerationFailed, RunMode.Strict)]
+    [InlineData("device", FatalKind.UnexpectedTargetType, RunMode.Strict)]
+    [InlineData("enumerate-root", FatalKind.EnumerationFailed, RunMode.Fast)]
+    [InlineData("enumerate-a", FatalKind.EnumerationFailed, RunMode.Fast)]
+    [InlineData("device", FatalKind.UnexpectedTargetType, RunMode.Fast)]
+    public void T04_ParentUndeterminable_IsFatal(string injection, FatalKind expected, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("first.txt", Hello), ("a/b/c.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("first.txt", Hello), ("a/b/c.txt", Hello))) { Mode = mode };
         var fs = harness.Fs;
         fs.AddFile(@"C:\target\first.txt", Bytes("hello"));
         var a = fs.AddDirectory(@"C:\target\a");
@@ -157,10 +202,11 @@ public class ClassificationTests
     }
 
     // T05 (保持しない部分): ZIP にない target ファイルが同じディレクトリに多数あっても、照合結果に保持されない
-    [Fact]
-    public void T05_UnrelatedNames_AreNotRetained()
+    [Theory]
+    [MemberData(nameof(BothModes))]
+    public void T05_UnrelatedNames_AreNotRetained(RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("dir/keep.txt", Hello), ("dir/gone.txt", Hello), ("top.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("dir/keep.txt", Hello), ("dir/gone.txt", Hello), ("top.txt", Hello))) { Mode = mode };
         var fs = harness.Fs;
         fs.AddDirectory(@"C:\target\dir");
         fs.AddFile(@"C:\target\dir\keep.txt", Bytes("hello"));
@@ -173,10 +219,10 @@ public class ClassificationTests
         var result = harness.Run();
 
         Assert.Equal(
-            [Classification.Matched, Classification.Missing, Classification.Missing],
+            [Candidate(mode), Classification.Missing, Classification.Missing],
             result.Results.Select(r => r.Classification));
         Assert.Equal(["dir", "keep.txt"], harness.LastRun!.Resolver.RetainedNames.Order(StringComparer.Ordinal));
-        var report = string.Join('\n', AnalysisReport.Format(result));
+        var report = string.Join('\n', AnalysisReport.Format(result, mode));
         Assert.DoesNotContain("unrelated", report, StringComparison.Ordinal);
         Assert.DoesNotContain("other-", report, StringComparison.Ordinal);
     }
@@ -222,18 +268,27 @@ public class ClassificationTests
     // T07 (偽 FS 部分): ADS (Zone.Identifier)、hardlink、ファイル symlink、read-only、system、temporary、offline、許可集合外の属性
     // → SKIPPED_SPECIAL_FILE、内容を読まない
     [Theory]
-    [InlineData("ads", SkipReason.AlternateDataStream)]
-    [InlineData("hardlink", SkipReason.HardLink)]
-    [InlineData("symlink", SkipReason.ReparsePoint)]
-    [InlineData("readonly", SkipReason.Attributes)]
-    [InlineData("system", SkipReason.Attributes)]
-    [InlineData("temporary", SkipReason.Attributes)]
-    [InlineData("offline", SkipReason.Attributes)]
-    [InlineData("recall", SkipReason.Attributes)]
-    [InlineData("undefined", SkipReason.Attributes)]
-    public void T07_SpecialFile_IsSkipped(string kind, SkipReason reason)
+    [InlineData("ads", SkipReason.AlternateDataStream, RunMode.Strict)]
+    [InlineData("hardlink", SkipReason.HardLink, RunMode.Strict)]
+    [InlineData("symlink", SkipReason.ReparsePoint, RunMode.Strict)]
+    [InlineData("readonly", SkipReason.Attributes, RunMode.Strict)]
+    [InlineData("system", SkipReason.Attributes, RunMode.Strict)]
+    [InlineData("temporary", SkipReason.Attributes, RunMode.Strict)]
+    [InlineData("offline", SkipReason.Attributes, RunMode.Strict)]
+    [InlineData("recall", SkipReason.Attributes, RunMode.Strict)]
+    [InlineData("undefined", SkipReason.Attributes, RunMode.Strict)]
+    [InlineData("ads", SkipReason.AlternateDataStream, RunMode.Fast)]
+    [InlineData("hardlink", SkipReason.HardLink, RunMode.Fast)]
+    [InlineData("symlink", SkipReason.ReparsePoint, RunMode.Fast)]
+    [InlineData("readonly", SkipReason.Attributes, RunMode.Fast)]
+    [InlineData("system", SkipReason.Attributes, RunMode.Fast)]
+    [InlineData("temporary", SkipReason.Attributes, RunMode.Fast)]
+    [InlineData("offline", SkipReason.Attributes, RunMode.Fast)]
+    [InlineData("recall", SkipReason.Attributes, RunMode.Fast)]
+    [InlineData("undefined", SkipReason.Attributes, RunMode.Fast)]
+    public void T07_SpecialFile_IsSkipped(string kind, SkipReason reason, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello))) { Mode = mode };
         var fs = harness.Fs;
         if (kind == "symlink")
         {
@@ -278,31 +333,40 @@ public class ClassificationTests
         Assert.False(harness.Contents.Touched(0));
     }
 
-    // T08 (偽 FS 部分): archive、hidden、not-content-indexed、NTFS 圧縮、sparse、EFS 暗号化の各属性だけ → MATCHED
+    // T08 (偽 FS 部分): archive、hidden、not-content-indexed、NTFS 圧縮、sparse、EFS 暗号化の各属性だけ → MATCHED (Fast は SAME_SIZE)
     [Theory]
-    [InlineData(0x20u)]
-    [InlineData(0x80u)]
-    [InlineData(0x2u)]
-    [InlineData(0x2000u)]
-    [InlineData(0x800u)]
-    [InlineData(0x200u)]
-    [InlineData(0x4000u)]
-    [InlineData(0x6AA2u)]
-    public void T08_AllowedAttributes_AreMatched(uint attributes)
+    [InlineData(0x20u, RunMode.Strict)]
+    [InlineData(0x80u, RunMode.Strict)]
+    [InlineData(0x2u, RunMode.Strict)]
+    [InlineData(0x2000u, RunMode.Strict)]
+    [InlineData(0x800u, RunMode.Strict)]
+    [InlineData(0x200u, RunMode.Strict)]
+    [InlineData(0x4000u, RunMode.Strict)]
+    [InlineData(0x6AA2u, RunMode.Strict)]
+    [InlineData(0x20u, RunMode.Fast)]
+    [InlineData(0x80u, RunMode.Fast)]
+    [InlineData(0x2u, RunMode.Fast)]
+    [InlineData(0x2000u, RunMode.Fast)]
+    [InlineData(0x800u, RunMode.Fast)]
+    [InlineData(0x200u, RunMode.Fast)]
+    [InlineData(0x4000u, RunMode.Fast)]
+    [InlineData(0x6AA2u, RunMode.Fast)]
+    public void T08_AllowedAttributes_AreMatched(uint attributes, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello))) { Mode = mode };
         harness.Fs.AddFile(@"C:\target\x.txt", Bytes("hello"), attributes);
 
-        Assert.Equal(Classification.Matched, Single(harness.Run()));
+        Assert.Equal(Candidate(mode), Single(harness.Run()));
     }
 
     // T09: ZIP にファイルがあり target はディレクトリ → SKIPPED_SPECIAL_FILE。
     // T16 (T09 の補強): そのディレクトリの FileStreamInfo が ERROR_HANDLE_EOF で失敗しても FATAL にならない。
     // Directory を最初に判定し、ストリーム一覧などを取得しない (SPEC §7 の判定順序)。
-    [Fact]
-    public void T09_T16_TargetDirectory_IsSkippedWithoutStreamQuery()
+    [Theory]
+    [MemberData(nameof(BothModes))]
+    public void T09_T16_TargetDirectory_IsSkippedWithoutStreamQuery(RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello))) { Mode = mode };
         var dir = harness.Fs.AddDirectory(@"C:\target\x.txt");
         dir.Errors[FakeOp.Basic] = 5;
         dir.Errors[FakeOp.AttributeTag] = 5;
@@ -317,10 +381,11 @@ public class ClassificationTests
     }
 
     // T16 の対照: ディレクトリでない対象で FileStreamInfo が ERROR_HANDLE_EOF (38) で失敗したら FATAL
-    [Fact]
-    public void T16_NonDirectory_StreamInfoHandleEof_IsFatal()
+    [Theory]
+    [MemberData(nameof(BothModes))]
+    public void T16_NonDirectory_StreamInfoHandleEof_IsFatal(RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello))) { Mode = mode };
         harness.Fs.AddFile(@"C:\target\x.txt", Bytes("hello")).Errors[FakeOp.Streams] = 38;
 
         var result = harness.Run();
@@ -329,15 +394,16 @@ public class ClassificationTests
     }
 
     // T09: ZIP 自身に対応する対象 (ボリュームシリアルと File ID が一致) → SKIPPED_SPECIAL_FILE
-    [Fact]
-    public void T09_ArchiveItself_IsSkipped()
+    [Theory]
+    [MemberData(nameof(BothModes))]
+    public void T09_ArchiveItself_IsSkipped(RunMode mode)
     {
         var zip = MakeZip(("archive.zip", Hello));
         var fs = new FakeFileSystem();
         fs.AddDirectory(@"C:\target");
         fs.AddDirectory(@"C:\in");
         fs.AddFile(@"C:\target\archive.zip", zip);
-        using var harness = new PipelineHarness(zip, fs) { ArchiveLocation = @"C:\target\archive.zip" };
+        using var harness = new PipelineHarness(zip, fs) { ArchiveLocation = @"C:\target\archive.zip", Mode = mode };
 
         var result = harness.Run();
 
@@ -346,19 +412,28 @@ public class ClassificationTests
     }
 
     // T10: 情報の取得失敗、存在確認後のオープン失敗、比較中の読み取り失敗 → SKIP ではなく全体 FATAL
+    // Fast では「比較中の読取失敗」を除く (Fast は target の内容を読まない。PLAN_TESTS のモード違いの再利用の原則)。
     [Theory]
-    [InlineData(FakeOp.Streams, FatalKind.TargetInfoFailed)]
-    [InlineData(FakeOp.Basic, FatalKind.TargetInfoFailed)]
-    [InlineData(FakeOp.AttributeTag, FatalKind.TargetInfoFailed)]
-    [InlineData(FakeOp.Standard, FatalKind.TargetInfoFailed)]
-    [InlineData(FakeOp.VolumeFileId, FatalKind.TargetInfoFailed)]
-    [InlineData(FakeOp.ParentFileId, FatalKind.TargetInfoFailed)]
-    [InlineData(FakeOp.FinalPath, FatalKind.TargetInfoFailed)]
-    [InlineData(FakeOp.OpenComparison, FatalKind.ComparisonOpenFailed)]
-    [InlineData(FakeOp.Read, FatalKind.TargetReadFailed)]
-    public void T10_TargetApiFailure_IsFatal(FakeOp op, FatalKind expected)
+    [InlineData(FakeOp.Streams, FatalKind.TargetInfoFailed, RunMode.Strict)]
+    [InlineData(FakeOp.Basic, FatalKind.TargetInfoFailed, RunMode.Strict)]
+    [InlineData(FakeOp.AttributeTag, FatalKind.TargetInfoFailed, RunMode.Strict)]
+    [InlineData(FakeOp.Standard, FatalKind.TargetInfoFailed, RunMode.Strict)]
+    [InlineData(FakeOp.VolumeFileId, FatalKind.TargetInfoFailed, RunMode.Strict)]
+    [InlineData(FakeOp.ParentFileId, FatalKind.TargetInfoFailed, RunMode.Strict)]
+    [InlineData(FakeOp.FinalPath, FatalKind.TargetInfoFailed, RunMode.Strict)]
+    [InlineData(FakeOp.OpenComparison, FatalKind.ComparisonOpenFailed, RunMode.Strict)]
+    [InlineData(FakeOp.Read, FatalKind.TargetReadFailed, RunMode.Strict)]
+    [InlineData(FakeOp.Streams, FatalKind.TargetInfoFailed, RunMode.Fast)]
+    [InlineData(FakeOp.Basic, FatalKind.TargetInfoFailed, RunMode.Fast)]
+    [InlineData(FakeOp.AttributeTag, FatalKind.TargetInfoFailed, RunMode.Fast)]
+    [InlineData(FakeOp.Standard, FatalKind.TargetInfoFailed, RunMode.Fast)]
+    [InlineData(FakeOp.VolumeFileId, FatalKind.TargetInfoFailed, RunMode.Fast)]
+    [InlineData(FakeOp.ParentFileId, FatalKind.TargetInfoFailed, RunMode.Fast)]
+    [InlineData(FakeOp.FinalPath, FatalKind.TargetInfoFailed, RunMode.Fast)]
+    [InlineData(FakeOp.OpenComparison, FatalKind.ComparisonOpenFailed, RunMode.Fast)]
+    public void T10_TargetApiFailure_IsFatal(FakeOp op, FatalKind expected, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("ok.txt", Hello), ("x.txt", World)));
+        using var harness = new PipelineHarness(MakeZip(("ok.txt", Hello), ("x.txt", World))) { Mode = mode };
         harness.Fs.AddFile(@"C:\target\ok.txt", Bytes("hello"));
         var node = harness.Fs.AddFile(@"C:\target\x.txt", Bytes("world!"));
         node.Errors[op] = 5;
@@ -371,18 +446,21 @@ public class ClassificationTests
 
         Assert.Equal(expected, result.Fatal?.Kind);
         Assert.Equal("x.txt", result.Fatal!.Entry!.Name);
-        Assert.Equal(Classification.Matched, Assert.Single(result.Results).Classification);
+        Assert.Equal(Candidate(mode), Assert.Single(result.Results).Classification);
         Assert.Empty(result.DeletionCandidates);
     }
 
     // T10: 存在を確認した後に開けない (見つからない 2、アクセス拒否 5、共有違反 32) → FATAL
     [Theory]
-    [InlineData(2)]
-    [InlineData(5)]
-    [InlineData(32)]
-    public void T10_OpenFailureAfterEnumeration_IsFatal(int error)
+    [InlineData(2, RunMode.Strict)]
+    [InlineData(5, RunMode.Strict)]
+    [InlineData(32, RunMode.Strict)]
+    [InlineData(2, RunMode.Fast)]
+    [InlineData(5, RunMode.Fast)]
+    [InlineData(32, RunMode.Fast)]
+    public void T10_OpenFailureAfterEnumeration_IsFatal(int error, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello))) { Mode = mode };
         harness.Fs.AddFile(@"C:\target\x.txt", Bytes("hello")).Errors[FakeOp.OpenComparison] = error;
 
         var result = harness.Run();
@@ -392,11 +470,12 @@ public class ClassificationTests
     }
 
     // T12: 比較用ハンドルは各エントリの判定終了時に閉じられる。FATAL の経路を含む (PipelineHarness.Run が毎回確認する)。
-    [Fact]
-    public void T12_HandlesAreClosedAfterEachEntry()
+    [Theory]
+    [MemberData(nameof(BothModes))]
+    public void T12_HandlesAreClosedAfterEachEntry(RunMode mode)
     {
         var zip = MakeZip(("a.txt", Hello), ("b.txt", Hello), ("c.txt", Hello), ("d/e.txt", Hello), ("f.txt", Hello));
-        using var harness = new PipelineHarness(zip);
+        using var harness = new PipelineHarness(zip) { Mode = mode };
         var fs = harness.Fs;
         fs.AddFile(@"C:\target\a.txt", Bytes("hello"));
         fs.AddFile(@"C:\target\b.txt", Bytes("hellO"));
@@ -434,15 +513,21 @@ public class ClassificationTests
 
     // T13: 実名確認の失敗 → 全体 FATAL
     [Theory]
-    [InlineData("open-enumeration", FatalKind.EnumerationOpenFailed)]
-    [InlineData("enumeration-midway", FatalKind.EnumerationFailed)]
-    [InlineData("enumeration-handle-id", FatalKind.EnumerationHandleMismatch)]
-    [InlineData("enumeration-handle-path", FatalKind.EnumerationHandleMismatch)]
-    [InlineData("enumeration-handle-info", FatalKind.EnumerationHandleMismatch)]
-    [InlineData("comparison-id", FatalKind.ComparisonFileIdMismatch)]
-    public void T13_RealNameCheckFailure_IsFatal(string injection, FatalKind expected)
+    [InlineData("open-enumeration", FatalKind.EnumerationOpenFailed, RunMode.Strict)]
+    [InlineData("enumeration-midway", FatalKind.EnumerationFailed, RunMode.Strict)]
+    [InlineData("enumeration-handle-id", FatalKind.EnumerationHandleMismatch, RunMode.Strict)]
+    [InlineData("enumeration-handle-path", FatalKind.EnumerationHandleMismatch, RunMode.Strict)]
+    [InlineData("enumeration-handle-info", FatalKind.EnumerationHandleMismatch, RunMode.Strict)]
+    [InlineData("comparison-id", FatalKind.ComparisonFileIdMismatch, RunMode.Strict)]
+    [InlineData("open-enumeration", FatalKind.EnumerationOpenFailed, RunMode.Fast)]
+    [InlineData("enumeration-midway", FatalKind.EnumerationFailed, RunMode.Fast)]
+    [InlineData("enumeration-handle-id", FatalKind.EnumerationHandleMismatch, RunMode.Fast)]
+    [InlineData("enumeration-handle-path", FatalKind.EnumerationHandleMismatch, RunMode.Fast)]
+    [InlineData("enumeration-handle-info", FatalKind.EnumerationHandleMismatch, RunMode.Fast)]
+    [InlineData("comparison-id", FatalKind.ComparisonFileIdMismatch, RunMode.Fast)]
+    public void T13_RealNameCheckFailure_IsFatal(string injection, FatalKind expected, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("d/x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("d/x.txt", Hello))) { Mode = mode };
         var fs = harness.Fs;
         var dir = fs.AddDirectory(@"C:\target\d");
         var file = fs.AddFile(@"C:\target\d\x.txt", Bytes("hello"));
@@ -480,11 +565,13 @@ public class ClassificationTests
 
     // T14 (1): 1回の列挙で同じ名前が2回返る → 最初の1件だけを採用する
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void T14_DuplicateNameInEnumeration_FirstWins(bool firstIsReal)
+    [InlineData(true, RunMode.Strict)]
+    [InlineData(false, RunMode.Strict)]
+    [InlineData(true, RunMode.Fast)]
+    [InlineData(false, RunMode.Fast)]
+    public void T14_DuplicateNameInEnumeration_FirstWins(bool firstIsReal, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello))) { Mode = mode };
         var fs = harness.Fs;
         var file = fs.AddFile(@"C:\target\x.txt", Bytes("hello"));
         var real = new DirectoryItem("x.txt", 0x20, 0, file.Id);
@@ -495,7 +582,7 @@ public class ClassificationTests
 
         if (firstIsReal)
         {
-            Assert.Equal(Classification.Matched, Single(result));
+            Assert.Equal(Candidate(mode), Single(result));
         }
         else
         {
@@ -505,10 +592,11 @@ public class ClassificationTests
     }
 
     // T14 (2): 照合する名前が列挙で返らない (列挙中の改名による見落とし) → MISSING、ZIP 内容を開かない
-    [Fact]
-    public void T14_NameMissingFromEnumeration_IsMissing()
+    [Theory]
+    [MemberData(nameof(BothModes))]
+    public void T14_NameMissingFromEnumeration_IsMissing(RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("x.txt", Hello))) { Mode = mode };
         var fs = harness.Fs;
         fs.AddFile(@"C:\target\x.txt", Bytes("hello"));
         fs.Get(@"C:\target").EnumerationOverride = [];
@@ -523,13 +611,17 @@ public class ClassificationTests
     // P08 (Core): 期待パスは \\?\ 形式の target 最終パスから組み立て、比較用ハンドルの最終パスと序数比較する。
     // 大小文字だけの違いでも FATAL (途中のディレクトリの大小文字だけの改名など)。
     [Theory]
-    [InlineData(null, true)]
-    [InlineData(@"\\?\C:\target\D\x.txt", false)]
-    [InlineData(@"\\?\c:\target\d\x.txt", false)]
-    [InlineData(@"C:\target\d\x.txt", false)]
-    public void P08_FinalPathComparedOrdinallyWithDevicePrefix(string? finalPath, bool matches)
+    [InlineData(null, true, RunMode.Strict)]
+    [InlineData(@"\\?\C:\target\D\x.txt", false, RunMode.Strict)]
+    [InlineData(@"\\?\c:\target\d\x.txt", false, RunMode.Strict)]
+    [InlineData(@"C:\target\d\x.txt", false, RunMode.Strict)]
+    [InlineData(null, true, RunMode.Fast)]
+    [InlineData(@"\\?\C:\target\D\x.txt", false, RunMode.Fast)]
+    [InlineData(@"\\?\c:\target\d\x.txt", false, RunMode.Fast)]
+    [InlineData(@"C:\target\d\x.txt", false, RunMode.Fast)]
+    public void P08_FinalPathComparedOrdinallyWithDevicePrefix(string? finalPath, bool matches, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("d/x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("d/x.txt", Hello))) { Mode = mode };
         harness.Fs.AddDirectory(@"C:\target\d");
         var file = harness.Fs.AddFile(@"C:\target\d\x.txt", Bytes("hello"));
         string? opened = null;
@@ -544,7 +636,7 @@ public class ClassificationTests
         Assert.Equal(@"\\?\C:\target\d\x.txt", opened);
         if (matches)
         {
-            Assert.Equal(Classification.Matched, Single(result));
+            Assert.Equal(Candidate(mode), Single(result));
             Assert.Equal(@"\\?\C:\target\d\x.txt", result.DeletionCandidates[0].Snapshot.FinalPath);
         }
         else
@@ -553,11 +645,12 @@ public class ClassificationTests
         }
     }
 
-    // MATCHED のスナップショット (SPEC §8.2) は同じハンドルから記録する
-    [Fact]
-    public void Matched_RecordsSnapshot()
+    // MATCHED のスナップショット (SPEC §8.2) は同じハンドルから記録する。Fast の SAME_SIZE も同じに記録する (SPEC §15.4)
+    [Theory]
+    [MemberData(nameof(BothModes))]
+    public void Matched_RecordsSnapshot(RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("d/x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("d/x.txt", Hello))) { Mode = mode };
         var dir = harness.Fs.AddDirectory(@"C:\target\d");
         var file = harness.Fs.AddFile(@"C:\target\d\x.txt", Bytes("hello"), 0x20 | 0x2);
 
@@ -608,18 +701,20 @@ public class ClassificationTests
 
     // P02 (偽 FS): 先頭に MATCHED、後方に target 安全判定 API の失敗・比較対象の共有違反 → 全体 FATAL、削除候補なし
     [Theory]
-    [InlineData(FakeOp.Streams, 1117, FatalKind.TargetInfoFailed)]
-    [InlineData(FakeOp.OpenComparison, 32, FatalKind.ComparisonOpenFailed)]
-    public void P02_LaterTargetFailure_BlocksEarlierMatched(FakeOp op, int error, FatalKind expected)
+    [InlineData(FakeOp.Streams, 1117, FatalKind.TargetInfoFailed, RunMode.Strict)]
+    [InlineData(FakeOp.OpenComparison, 32, FatalKind.ComparisonOpenFailed, RunMode.Strict)]
+    [InlineData(FakeOp.Streams, 1117, FatalKind.TargetInfoFailed, RunMode.Fast)]
+    [InlineData(FakeOp.OpenComparison, 32, FatalKind.ComparisonOpenFailed, RunMode.Fast)]
+    public void P02_LaterTargetFailure_BlocksEarlierMatched(FakeOp op, int error, FatalKind expected, RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("m.txt", Hello), ("x.txt", Hello)));
+        using var harness = new PipelineHarness(MakeZip(("m.txt", Hello), ("x.txt", Hello))) { Mode = mode };
         harness.Fs.AddFile(@"C:\target\m.txt", Bytes("hello"));
         harness.Fs.AddFile(@"C:\target\x.txt", Bytes("hello")).Errors[op] = error;
 
         var result = harness.Run();
 
         Assert.Equal(expected, result.Fatal?.Kind);
-        Assert.Equal(Classification.Matched, Assert.Single(result.Results).Classification);
+        Assert.Equal(Candidate(mode), Assert.Single(result.Results).Classification);
         Assert.Empty(result.DeletionCandidates);
     }
 
@@ -664,6 +759,34 @@ public class ClassificationTests
         {
             Assert.Equal(FatalKind.TotalReadLengthTooLarge, result.Fatal?.Kind);
             Assert.Equal("b.txt", result.Fatal!.Entry!.Name);
+        }
+    }
+
+    // R09: R08 と同じ差し替えで実測合計の上限を 0 にし、サイズ一致の内容比較候補を含む ZIP を --fast で実行する
+    // → FATAL にならず SAME_SIZE。実測展開量を計上しない (SPEC §15.2)。対照として同じ入力の Strict は FATAL。
+    [Theory]
+    [InlineData(RunMode.Fast)]
+    [InlineData(RunMode.Strict)]
+    public void R09_Fast_DoesNotCountActualReadLength(RunMode mode)
+    {
+        using var harness = new PipelineHarness(MakeZip(("a.txt", Hello), ("b.txt", Hello))) { Mode = mode };
+        harness.Fs.AddFile(@"C:\target\a.txt", Bytes("hello"));
+        harness.Fs.AddFile(@"C:\target\b.txt", Bytes("hello"));
+        harness.Limits = Limits.Default with { MaxTotalReadLength = 0 };
+
+        var result = harness.Run();
+
+        if (mode == RunMode.Fast)
+        {
+            Assert.Null(result.Fatal);
+            Assert.Equal([Classification.SameSize, Classification.SameSize], result.Results.Select(r => r.Classification));
+            Assert.Equal(2, result.DeletionCandidates.Count);
+            Assert.Empty(harness.Contents.Calls);
+        }
+        else
+        {
+            Assert.Equal(FatalKind.TotalReadLengthTooLarge, result.Fatal?.Kind);
+            Assert.Equal("a.txt", result.Fatal!.Entry!.Name);
         }
     }
 

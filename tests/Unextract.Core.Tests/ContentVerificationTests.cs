@@ -1,8 +1,11 @@
 using System.IO.Compression;
 using Unextract.Core.Analysis;
+using Unextract.Core.Deletion;
 using Unextract.Core.Results;
+using Unextract.Core.Target;
 using Unextract.Core.Tests.Fakes;
 using Unextract.Core.Tests.Fixtures;
+using Unextract.Core.Zip;
 
 namespace Unextract.Core.Tests;
 
@@ -75,6 +78,94 @@ public class ContentVerificationTests
 
         // 不存在・サイズ不一致では ZIP の内容を開かず、CRC も参照しない。
         Assert.False(harness.Contents.Touched(0), string.Join(", ", harness.Contents.Calls));
+    }
+
+    public static TheoryData<string, TargetState> FastCases()
+    {
+        var data = Cases();
+        foreach (var state in Enum.GetValues<TargetState>())
+        {
+            data.Add("C11-crc", state);
+        }
+
+        return data;
+    }
+
+    // C15: C01〜C08 と、C11 の CRC を 0 以外に書き換えた0バイトエントリを --fast で、target の3状態で実行する。
+    // --dry-run と通常実行 (--yes) の両方を runner 経由で行い、初回分類と表示が一致することも確かめる。
+    // 不存在は MISSING、サイズ ≠ N は MODIFIED、サイズ = N は FATAL ではなく SAME_SIZE で、--yes では削除される (SPEC §15.3)。
+    // どの列でも ZIP の GetContent・Open()・Crc32 は呼ばれない (呼び出し記録。CRC は Open() した内容からしか計算しない)。
+    [Theory]
+    [MemberData(nameof(FastCases))]
+    public void C15_Fast_BrokenEntry_ByTargetState(string id, TargetState state)
+    {
+        var dryRun = RunFast(id, state, dryRun: true);
+        var yes = RunFast(id, state, dryRun: false);
+
+        foreach (var run in new[] { dryRun, yes })
+        {
+            var analysis = run.Outcome.Analysis!;
+            Assert.Null(analysis.Fatal);
+            var entry = Assert.Single(analysis.Results);
+            var expected = state switch
+            {
+                TargetState.Missing => Classification.Missing,
+                TargetState.SizeDiffers => Classification.Modified,
+                _ => Classification.SameSize,
+            };
+            Assert.Equal(expected, entry.Classification);
+            Assert.Empty(run.Contents.Calls);
+            Assert.Equal(ExitStatus.Success, run.Outcome.Status);
+        }
+
+        Assert.Equal(dryRun.Outcome.ReportLines, yes.Outcome.ReportLines);
+        Assert.Empty(dryRun.Fs.Deleted);
+        Assert.Equal(state == TargetState.SizeMatches ? 1 : 0, yes.Fs.Deleted.Count);
+        Assert.Equal(state == TargetState.SizeDiffers, yes.Fs.Find(yes.TargetFile) is not null);
+    }
+
+    private sealed record FastRun(RunOutcome Outcome, FakeFileSystem Fs, RecordingContentProvider Contents, string TargetFile);
+
+    private sealed class NoPrompt : IConfirmationPrompt
+    {
+        public bool IsInteractive => true;
+
+        public string? Ask(string prompt) => throw new InvalidOperationException("--yes では確認しない");
+    }
+
+    private static FastRun RunFast(string id, TargetState state, bool dryRun)
+    {
+        byte[] zip;
+        long declared;
+        byte[] sameSizeTarget;
+        var target = Target;
+        if (id == "C11-crc")
+        {
+            var empty = PipelineHarness.MakeZip(("empty.txt", []));
+            zip = new ZipPatcher(empty).SetCrc32(0, 0x12345678).ToArray();
+            (declared, sameSizeTarget, target) = (0, [], @"C:\target\empty.txt");
+        }
+        else
+        {
+            (zip, declared, sameSizeTarget, _) = Fixture(id);
+        }
+
+        using var harness = new PipelineHarness(zip);
+        switch (state)
+        {
+            case TargetState.SizeDiffers:
+                harness.Fs.AddFile(target, new byte[declared + 1]);
+                break;
+            case TargetState.SizeMatches:
+                harness.Fs.AddFile(target, sameSizeTarget);
+                break;
+        }
+
+        var outcome = UnextractRunner.Run(new RunRequest(
+            harness.Source, PipelineHarness.ArchivePath, PipelineHarness.TargetPath, dryRun, AssumeYes: !dryRun, harness.Fs,
+            TargetLocationPolicy.None, Limits.Default, new NoPrompt(), new DeletionPhase(harness.Fs),
+            TextWriter.Null, TextWriter.Null, Contents: harness.Contents, Mode: RunMode.Fast));
+        return new FastRun(outcome, harness.Fs, harness.Contents, target);
     }
 
     // C09: 先頭付近のバイトが target と異なり、後方で C02 の破損 → MODIFIED ではなく FATAL。不一致位置を変えても同じ。
