@@ -1,4 +1,5 @@
 using Unextract.Core.Analysis;
+using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Tests.Fixtures;
 using Unextract.Core.Zip;
@@ -78,6 +79,9 @@ internal sealed class PipelineHarness : IDisposable
 
     public string ArchiveLocation { get; set; } = ArchivePath;
 
+    // 初回分類のモード (SPEC §15)。共通の安全性テストを Fast でも実行するために切り替える。
+    public RunMode Mode { get; set; } = RunMode.Strict;
+
     public ZipArchiveSource Source => _source;
 
     // 実行に使った ClassificationRun (RealNameResolver の保持内容の確認用)。
@@ -96,7 +100,7 @@ internal sealed class PipelineHarness : IDisposable
         Assert.True(identity.Succeeded);
 
         var run = new ClassificationRun(new ClassificationRequest(
-            prevalidation.Entries, Contents, Fs, root, identity.Value, Limits, (c, t) => Progress.Add((c, t))));
+            prevalidation.Entries, Contents, Fs, root, identity.Value, Limits, (c, t) => Progress.Add((c, t)), Mode: Mode));
         LastRun = run;
         var result = run.Execute();
 
@@ -113,4 +117,7 @@ internal sealed class PipelineHarness : IDisposable
         ZipFixture.Create(entries.Select(e => new FixtureEntry(e.Name, e.Content)));
 
     public static byte[] Bytes(string text) => System.Text.Encoding.UTF8.GetBytes(text);
+
+    // 削除候補の分類 (PLAN_TESTS のモード違いの再利用の原則: MATCHED を SAME_SIZE に読み替える)。
+    public static Classification Candidate(RunMode mode) => mode == RunMode.Fast ? Classification.SameSize : Classification.Matched;
 }

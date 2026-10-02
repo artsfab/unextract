@@ -33,7 +33,7 @@ public sealed record TargetSnapshot(
     uint ReparseTag,
     string FinalPath);
 
-// 削除フェーズに渡す MATCHED。ExpectedPath は削除用ハンドルを開く期待パス (\\?\ 形式)。
+// 削除フェーズに渡す削除候補 (Strict は MATCHED、Fast は SAME_SIZE。名前は MATCHED のときのまま)。ExpectedPath は削除用ハンドルを開く期待パス (\\?\ 形式)。
 public sealed record MatchedFile(ZipEntryRef Entry, string ExpectedPath, TargetSnapshot Snapshot);
 
 // 初回分類の結果 (SPEC §3 の 3〜5、§10)。結果は ZIP 内の順序で決定的。

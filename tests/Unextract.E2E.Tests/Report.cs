@@ -5,6 +5,9 @@ public sealed class Report
 {
     public static readonly string[] Categories = ["MATCHED", "MODIFIED", "MISSING", "SKIPPED_SPECIAL_FILE", "DIRECTORY"];
 
+    // 読み取るカテゴリー。--fast では MATCHED の位置に SAME_SIZE が出る (SPEC §10)。
+    private static readonly string[] Recognized = [.. Categories, "SAME_SIZE"];
+
     private readonly Dictionary<string, (int Count, List<string> Paths)> _sections = [];
 
     private Report(string[] lines)
@@ -19,7 +22,7 @@ public sealed class Report
             }
 
             current = null;
-            foreach (var category in Categories)
+            foreach (var category in Recognized)
             {
                 var prefix = category + " (";
                 if (line.StartsWith(prefix, StringComparison.Ordinal) && line.EndsWith("):", StringComparison.Ordinal))
@@ -36,6 +39,9 @@ public sealed class Report
     public IReadOnlyList<string> Paths(string category) => _sections[category].Paths;
 
     public int Count(string category) => _sections[category].Count;
+
+    // そのカテゴリーの見出し行 (「名前 (件数):」) があるか。モードで意味のないカテゴリーは件数0としても出ない (SPEC §10)。
+    public bool Has(string category) => _sections.ContainsKey(category);
 
     // 解析結果の一覧の部分: 先頭から「合計:」または「未判定:」の行まで (それ以降は dry-run・確認・削除フェーズの行)。
     public static IReadOnlyList<string> AnalysisPart(ProcessResult result)

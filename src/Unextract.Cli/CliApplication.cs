@@ -24,7 +24,7 @@ internal sealed record CliEnvironment(
     }
 }
 
-// unextract <archive.zip> --target <dir> [--dry-run] [--yes|-y] (SPEC §2、§3)。
+// unextract <archive.zip> --target <dir> [--dry-run] [--fast] [--yes|-y] (SPEC §2、§3)。
 // 出力先 (SPEC §10): 解析結果の一覧と削除フェーズの結果は stdout、入力エラー・FATAL・停止の原因・内部エラーと進捗は stderr。
 internal static class CliApplication
 {
@@ -90,7 +90,8 @@ internal static class CliApplication
                 stdout,
                 stderr,
                 progress is null ? null : progress.Report,
-                deleting is null ? null : deleting.Report));
+                deleting is null ? null : deleting.Report,
+                Mode: options.Mode));
             return outcome.Status;
         }
     }

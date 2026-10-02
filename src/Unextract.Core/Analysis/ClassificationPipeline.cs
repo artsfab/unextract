@@ -7,6 +7,7 @@ namespace Unextract.Core.Analysis;
 // 初回分類の入力。Entries は ZIP 事前検証 (ZipPrevalidator) を通過した全エントリ (ZIP 内の順序)。
 // Progress は (n, total) で各エントリの判定の前に呼ばれる (Checking n / total)。
 // Comparer は削除フェーズの2回目の比較と共有する比較器 (PLAN.md §1)。null なら新しく作る (分類だけを行うテスト用)。
+// Mode は実行全体のモード (SPEC §15)。分岐は §6.1 の手順7 だけ。
 public sealed record ClassificationRequest(
     IReadOnlyList<ValidatedZipEntry> Entries,
     IZipContentProvider Contents,
@@ -15,7 +16,8 @@ public sealed record ClassificationRequest(
     VolumeFileId ArchiveIdentity,
     Limits Limits,
     Action<int, int>? Progress = null,
-    ContentComparer? Comparer = null);
+    ContentComparer? Comparer = null,
+    RunMode Mode = RunMode.Strict);
 
 // 初回分類 (SPEC §3 の 4、§6、§7)。--dry-run と通常実行は同じこの処理を通る (SPEC §2、PLAN.md §1)。
 public static class ClassificationPipeline
@@ -221,15 +223,22 @@ internal sealed class ClassificationRun
             return InfoFailed(parent.Describe());
         }
 
-        // 手順7: エントリ内容の検証基準による初回比較。
-        var content = _request.Contents.GetContent(entry.Entry.Index);
-        var compared = _comparer.Compare(content, handle);
-        switch (compared.Verdict)
+        // 手順7: Strict はエントリ内容の検証基準による初回比較。Fast は ZIP と target のどちらの内容も読まずに SAME_SIZE
+        // (SPEC §15.2)。Fast で §5.2 の FATAL・実測展開量の計上が起きないのは、この比較を呼ばないことの帰結。
+        var classification = Classification.SameSize;
+        if (_request.Mode == RunMode.Strict)
         {
-            case ContentVerdict.Fatal:
-                return FileOutcome.Fail(compared.FatalKind!.Value, compared.Detail);
-            case ContentVerdict.Mismatch:
-                return FileOutcome.Of(Classification.Modified);
+            var content = _request.Contents.GetContent(entry.Entry.Index);
+            var compared = _comparer.Compare(content, handle);
+            switch (compared.Verdict)
+            {
+                case ContentVerdict.Fatal:
+                    return FileOutcome.Fail(compared.FatalKind!.Value, compared.Detail);
+                case ContentVerdict.Mismatch:
+                    return FileOutcome.Of(Classification.Modified);
+            }
+
+            classification = Classification.Matched;
         }
 
         // 手順8: 閉じる前に、内容比較の前に取得した値で再検証用スナップショットを記録する。
@@ -245,7 +254,7 @@ internal sealed class ClassificationRun
             streams.Value,
             tag.Value.ReparseTag,
             finalPath.Value);
-        return FileOutcome.Matched(snapshot);
+        return FileOutcome.Candidate(classification, snapshot);
     }
 
     // SPEC §7 の特殊判定 (Directory は判定済み)。どれか1つでも該当すれば SKIPPED_SPECIAL_FILE。
@@ -310,8 +319,9 @@ internal sealed class ClassificationRun
         public static FileOutcome Of(Classification classification, SkipReason? reason = null) =>
             new(classification, reason, null, null, null);
 
-        public static FileOutcome Matched(TargetSnapshot snapshot) =>
-            new(Classification.Matched, null, snapshot, null, null);
+        // 削除候補 (Strict は MATCHED、Fast は SAME_SIZE)。
+        public static FileOutcome Candidate(Classification classification, TargetSnapshot snapshot) =>
+            new(classification, null, snapshot, null, null);
 
         public static FileOutcome Fail(FatalKind kind, string? detail = null) => new(default, null, null, kind, detail);
     }

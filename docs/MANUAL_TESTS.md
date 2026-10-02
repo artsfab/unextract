@@ -1,16 +1,16 @@
 # unextract 手動テスト手順書 (M 系)
 
-仕様の唯一の基準は [`SPEC.md`](SPEC.md)。本書は、自動テスト ([`PLAN_TESTS.md`](PLAN_TESTS.md)) では確認できない項目を、手順どおりに実施すれば誰でも同じ確認ができる形で定める。期待結果は SPEC とリポジトリ直下の `README.md` に書かれた事実だけを使う。SPEC・README に定めがなく実装の挙動にすぎない点は「観察」として分けて書き、合否の基準にしない。
+仕様の唯一の基準は [`SPEC.md`](SPEC.md)。本書は、自動テスト ([`PLAN_TESTS.md`](PLAN_TESTS.md)) では確認できない項目を、手順どおりに実施すれば誰でも同じ確認ができる形で定める。期待結果は原則として SPEC / PLAN_TESTS とリポジトリ直下の `README.md` に書かれた事実に従う。SPEC が具体的な文言や運用詳細を PLAN に委ねている項目については、確定済みの PLAN の記述に従う。SPEC・README に定めがなく実装の挙動にすぎない点は「観察」として分けて書き、合否の基準にしない。
 
 > **安全上の注意 (必ず読む)**
 >
 > - **target には、`scripts/make_manual_fixtures.py` が `%TEMP%\unextract-manual\` の下に作った fixture だけを使う。実在のデータ (自分の文書・ダウンロード・作業フォルダーなど) を target にしない。**
-> - **`y` の入力と `--yes` の実行は、fixture の `MATCHED` のファイルを実際に削除する。ごみ箱を使わない完全削除で、復旧できない。**
+> - **`y` の入力と `--yes` の実行は、fixture の削除候補 (`MATCHED`。`--fast` では `SAME_SIZE`) のファイルを実際に削除する。ごみ箱を使わない完全削除で、復旧できない。**
 > - **コマンドを実行する前に、`--target` の後のパスが `%TEMP%\unextract-manual\<日時>\<シナリオ名>\target` であることを目で確認する。**
 
 ## 1. 目的と実施タイミング
 
-- 目的: 対話的なコンソールが必要な挙動 (`[y/N]` の確認入力、Ctrl+C、進捗表示、コードページごとの名前の表示、確認待ち中の外部変更) を、実際の端末で確認する。
+- 目的: 対話的なコンソールが必要な挙動 (`[y/N]` の確認入力、Ctrl+C、進捗表示、コードページごとの名前の表示、確認待ち中の外部変更、`--fast` の `[y/N]` の直前の警告) を、実際の端末で確認する。
 - 実施タイミング: 最初のリリースの前に1回。その後は、確認プロンプト・進捗表示・出力のエンコーディングに関わるコード (`src/Unextract.Cli` の `Program.cs`、`CliApplication.cs` の `ConsolePrompt`・`ProgressLine` など) を変更したときに行う。毎回のコード変更やリリースごとには不要。
 
 ## 2. 前提
@@ -41,7 +41,7 @@ py scripts\make_manual_fixtures.py "$exe"
 
 | シナリオ | 使う項目 | 内容 |
 |---|---|---|
-| `yn-n`、`yn-enter`、`yn-y`、`yn-ctrlc` | M01、M02、M03、M04 | ZIP: `same1.txt`、`same2.txt`、`docs/`、`docs/deep.txt`、`changed.txt`、`missing.txt`。target: `same1.txt`・`same2.txt`・`docs\deep.txt` が一致、`changed.txt` が同じサイズで内容違い、ZIP にない `unrelated.txt` |
+| `yn-n`、`yn-enter`、`yn-y`、`yn-ctrlc` | M01、M02、M03、M04 (`yn-n` は M08 でも使う) | ZIP: `same1.txt`、`same2.txt`、`docs/`、`docs/deep.txt`、`changed.txt`、`missing.txt`。target: `same1.txt`・`same2.txt`・`docs\deep.txt` が一致、`changed.txt` が同じサイズで内容違い、ZIP にない `unrelated.txt` |
 | `progress` | M05 | 10 個のフォルダーに分けた 500 ファイル。全て一致 |
 | `ja` | M06 | UTF-8 フラグ付きの日本語名 (`資料/報告書.txt`、`資料/写真一覧.csv`、`ファイル名.txt`) と `café░.txt`。target には `資料\報告書.txt` と `café░.txt` だけがある |
 | `stop` | M07 | `f01.txt`〜`f10.txt`。全て一致 |
@@ -175,6 +175,30 @@ py scripts\make_manual_fixtures.py "$exe"
   - 停止の前に削除されたファイルは戻らない (SPEC §8.4)。実装は `MATCHED` を ZIP の順に処理するため、`f01.txt`〜`f09.txt` が削除済み、`f10.txt` だけが残る想定である (想定と違えば事実を記録する)。
   - 終了コード 1 (削除フェーズの停止はエラー。SPEC §2)。
 
+### M08: `--fast` の確認プロンプトの直前の警告
+
+- 目的: `--fast` の対話的な通常実行で、`[y/N]` の直前に Fast の警告が表示され、Strict では表示されないこと (SPEC §10、§15.6、`PLAN.md` §4 の「Fast モード」、`PLAN_TESTS.md` O07)。
+- 機能部分は E2E PTY (`PtyConfirmationTests.M08_O07_InteractiveWarningAndCancelWithN`) で自動確認済み。`yn-n` 相当の fixture を一時生成し、Fast / Strict の実際の `[y/N]` 表示後に `n` を送信、終了コード 2・target 非削除を確認する。Fast は PLAN 指定の警告がヘッダーと確認直前の計2回出て、最後の警告から確認文・`[y/N]` までに別出力が無いこと、Strict は警告が無いことを確認する。fixture は PTY / process tree の終了・Dispose 完了後に自動 cleanup する。実績は `PLAN_VALIDATION.md` の「Fast / PTY / publish E2E の最終確認」。
+- 以下の手動手順は実端末のフォント・折り返し・視認性の確認用として残す。機能確認の自動化とは分けて記録する。
+- シナリオ: `yn-n` (どちらの実行も `n` で中止し、削除しない)。M01 の後に続けて使う場合は、M01 で target が変わっていないことを確かめてから使う。スクリプトの表示 (項目 ID・期待・実行コマンド) には M08 は出ないため、コマンドは下の手順のものを使う。
+- 手順:
+  1. `$s = "$env:TEMP\unextract-manual\<日時>\yn-n"`
+  2. `Get-ChildItem -Recurse -File "$s\target" | ForEach-Object FullName`
+  3. `& $exe "$s\archive.zip" --target "$s\target" --fast`
+  4. `[y/N]` の確認が表示されたら、その直前の行を記録してから `n` を入力して Enter
+  5. `$LASTEXITCODE`
+  6. `& $exe "$s\archive.zip" --target "$s\target"` (Strict)
+  7. `[y/N]` の確認が表示されたら、その直前の行を記録してから `n` を入力して Enter
+  8. `$LASTEXITCODE`
+  9. `Get-ChildItem -Recurse -File "$s\target" | ForEach-Object FullName`
+- 期待結果:
+  - 手順 3: 解析結果の一覧の先頭行に Fast の警告 (`PLAN.md` §4 の「Fast モード」の文言) が表示される。一覧は `SAME_SIZE` 4 (`same1.txt`、`same2.txt`、`docs/deep.txt`、`changed.txt`)、`MISSING` 1、`DIRECTORY` 1 で、`MATCHED` は表示されない (`changed.txt` は同じサイズで内容違いのため、Fast では `SAME_SIZE`。SPEC §15.3)。
+  - 手順 4: `[y/N]` の確認の直前の行が、同じ Fast の警告の文言である。警告は確認プロンプトに続けて同じ画面に表示される。
+  - 手順 5・8: 中止し、削除0件。終了コード 2 (SPEC §2)。
+  - 手順 6・7: Fast の警告は、一覧の先頭にも `[y/N]` の直前にも表示されない。一覧は M01 と同じ (`MATCHED` 3、`MODIFIED` 1、`MISSING` 1、`DIRECTORY` 1。`SAME_SIZE` は表示されない)。
+  - 手順 9 の一覧が手順 2 と同じ。
+- 確認範囲の分担: 警告が確認プロンプトと同じ出力経路 (`IConfirmationPrompt.Ask` に渡す文字列) で出ていることは O07 の Core テスト、実際の表示順序と Strict の警告なしは O07 の PTY テストで確認する。PTY は stdout / stderr が同一端末に流れるため、ヘッダー警告の stdout 所属は O06 が担当する。`--fast --yes`、非対話 (`--yes` なし)、偽プロンプトの経路も既存 Core テストが担当する。手動では実端末上の警告と確認プロンプトの読みやすさ・折り返しを見る。
+
 ## 6. 結果の記録
 
 - 下の表に、項目ごとに1行記入する。複数回実施したときは行を追加する。
@@ -196,6 +220,7 @@ py scripts\make_manual_fixtures.py "$exe"
 | M06 (932、再実施) | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | MATCHED 2、MISSING 2。`資料/報告書.txt`、`café░.txt` を正常表示。 | 0 | 合 | fixture 修正後に再生成して実施。実行後のコードページ 932 を確認。 |
 | M06 (65001) | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | MATCHED 2、MISSING 2。`資料/報告書.txt`、`café░.txt` を正常表示。 | 0 | 合 | fixture 修正後に再生成して実施。実行後のコードページ 65001 を確認。 |
 | M07 | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | `f10.txt` の同一性再検証で不一致となり停止。削除済み9、DELETE_FAILED 0、未処理0。 | 1 | 合 | 確認待ち中に別 PowerShell から `f10.txt` を変更。`f01.txt`〜`f09.txt` は削除済みで、`f10.txt` のみ残存。削除済みファイルのロールバックなし。 |
+| M08 (実端末の視覚確認) | | | | | | | | 未実施 | 機能部分は Fast / Strict とも E2E PTY で自動確認済み。ここはフォント・折り返し・視認性だけを記録する。 |
 
 ## 7. 自動化済みの項目と、手動に残した理由
 
@@ -215,5 +240,7 @@ exe を別プロセスとして起動する E2E (`tests/Unextract.E2E.Tests`、[
 | `--dry-run` と `--yes` の解析結果の一致 | X11 |
 | 終了コード 0 / 1 / 2 | X12 |
 | 確認待ち中の外部変更による停止 (プロセス内のフックで注入) | `Unextract.Windows.Tests` の D04 など |
+| `--fast` の `--dry-run`・`--yes`・事前 FATAL・削除候補0件での分類と、解析結果の一覧の先頭の警告 | X13、X14、X15 |
+| 実際の `[y/N]` → `n` → 終了コード 2・非削除、Fast の警告2回と確認直前の順序、Strict の警告なし | M08 / O07 (E2E PTY) |
 
-手動に残した理由: E2E では stdin・stdout・stderr をリダイレクトして exe を起動するため、exe からは常に非対話に見え (確認プロンプトに到達しない)、進捗も表示されない。そのため、対話的なコンソールでの `[y/N]` の入力 (M01〜M03、M07)、コンソールへの Ctrl+C の送信 (M04)、標準エラー出力が端末のときの進捗表示 (M05)、コンソールのコードページとフォントによる表示 (M06) は自動化できない。M07 の検出ロジック自体は D04 で自動化しているが、実際の確認待ちの間に別のウィンドウから変更する流れは手動で確認する。
+手動に残した理由: X 系の E2E はリダイレクト実行で非対話だが、M08 / O07 の機能部分は Windows PTY で自動化済み。実端末での操作 (M01〜M03、M07)、Ctrl+C (M04)、進捗の見え方 (M05)、コードページとフォントによる表示 (M06)、M08 のフォント・折り返し・視認性は手動で確認する。PTY の `y` ケースは追加していない。M07 の検出ロジック自体は D04 で自動化しているが、実際の確認待ちの間に別のウィンドウから変更する流れは手動で確認する。

@@ -324,6 +324,103 @@ public class CliApplicationTests
         Assert.Contains("入力エラー: 拒否対象のフォルダー", stderr);
     }
 
+    // D26・O06 (CLI): --fast は解析結果のモードとして runner に渡り、初回分類と削除フェーズに同じモードが届く。
+    // --fast の --dry-run は stdout の先頭行が警告で、削除候補は SAME_SIZE (MATCHED は出ない)。--fast なしは Strict のまま。
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void FastOption_IsPassedToRunnerAndDeletionPhase(bool fast)
+    {
+        var dir = NewDirectory();
+        var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
+        var zip = WriteZip(dir, ("same.txt", "hello"), ("changed.txt", "hello"), ("size.txt", "hello"));
+        File.WriteAllText(Path.Combine(target, "same.txt"), "hello");
+        File.WriteAllText(Path.Combine(target, "changed.txt"), "hellO");
+        File.WriteAllText(Path.Combine(target, "size.txt"), "hello!");
+        var before = Snapshot(target);
+        string[] mode = fast ? ["--fast"] : [];
+
+        var (dryStatus, dryStdout, dryStderr) = Run([zip, "--target", target, "--dry-run", .. mode]);
+
+        Assert.Equal(ExitStatus.Success, dryStatus);
+        Assert.Empty(dryStderr);
+        var lines = dryStdout.Split(System.Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        if (fast)
+        {
+            Assert.Equal(AnalysisReport.FastWarning, lines[0]);
+            Assert.Equal(["SAME_SIZE (2):", "  same.txt", "  changed.txt", "MODIFIED (1):", "  size.txt"], lines[1..6]);
+            Assert.DoesNotContain(lines, l => l.Contains("MATCHED", StringComparison.Ordinal));
+        }
+        else
+        {
+            Assert.DoesNotContain(AnalysisReport.FastWarning, dryStdout, StringComparison.Ordinal);
+            Assert.Equal(["MATCHED (1):", "  same.txt", "MODIFIED (2):", "  changed.txt", "  size.txt"], lines[0..5]);
+            Assert.DoesNotContain(lines, l => l.Contains("SAME_SIZE", StringComparison.Ordinal));
+        }
+
+        RunMode? received = null;
+        var deletion = new RecordingDeletion(request =>
+        {
+            received = request.Mode;
+            return new DeletionReport(request.Candidates.Select(c => c.Entry).ToList(), [], null, 0);
+        });
+
+        var (status, stdout, _) = Run([zip, "--target", target, "--yes", .. mode], Environment(deletion: deletion));
+
+        Assert.Equal(ExitStatus.Success, status);
+        Assert.Equal(fast ? RunMode.Fast : RunMode.Strict, received);
+        Assert.Contains(fast ? "削除済み 2、DELETE_FAILED 0、未処理 0" : "削除済み 1、DELETE_FAILED 0、未処理 0", stdout);
+        Assert.Equal(before, Snapshot(target));
+    }
+
+    // O06 (CLI): 結果表示に至らない終了 (引数の入力エラー、target の入力エラー、ZIP を開けない) では、--fast でも警告を出さない
+    [Theory]
+    [InlineData("duplicate-fast")]
+    [InlineData("missing-target-value")]
+    [InlineData("missing-archive")]
+    [InlineData("invalid-archive")]
+    [InlineData("z09-prefix")]
+    [InlineData("missing-target")]
+    public void FastWarning_IsNotShownWithoutAnalysisResult(string kind)
+    {
+        var dir = NewDirectory();
+        var zip = WriteZip(dir, ("a.txt", "x"));
+        var invalid = Path.Combine(dir, "not-a-zip.zip");
+        File.WriteAllText(invalid, "not a zip");
+
+        // Z09: 先頭にデータを付けただけでオフセットを調整していない ZIP (ZipArchive が開けない)。
+        var prefixed = Path.Combine(dir, "prefixed.zip");
+        File.WriteAllBytes(prefixed, [.. new byte[4096], .. File.ReadAllBytes(zip)]);
+        string[] args = kind switch
+        {
+            "duplicate-fast" => [zip, "--target", dir, "--fast", "--fast"],
+            "missing-target-value" => [zip, "--fast", "--target"],
+            "missing-archive" => [Path.Combine(dir, "missing.zip"), "--target", dir, "--fast"],
+            "invalid-archive" => [invalid, "--target", dir, "--fast"],
+            "z09-prefix" => [prefixed, "--target", dir, "--fast"],
+            "missing-target" => [zip, "--target", Path.Combine(dir, "no-such-target"), "--fast"],
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+
+        var (status, stdout, stderr) = Run(args);
+
+        Assert.Equal(ExitStatus.Error, status);
+        Assert.Empty(stdout);
+        Assert.DoesNotContain(AnalysisReport.FastWarning, stderr, StringComparison.Ordinal);
+        if (kind is "duplicate-fast" or "missing-target-value")
+        {
+            Assert.Contains("入力エラー", stderr);
+            Assert.Contains(Unextract.Core.CommandLine.CommandLineParser.Usage, stderr);
+        }
+
+        if (kind is "invalid-archive" or "z09-prefix")
+        {
+            // P03・Z09 (--fast): ZIP として読み取れず、削除開始前に中止 (Strict は InvalidArchive_IsError と Core の Z09)。
+            Assert.Contains("FATAL: ZIP として読み取れません", stderr);
+            Assert.Contains("削除0件", stderr);
+        }
+    }
+
     private static IReadOnlyList<string> RunnerReport(string zipPath, string target)
     {
         var opened = ZipArchiveSource.Open(zipPath);

@@ -39,6 +39,96 @@ public class AnalysisReportTests
             lines);
     }
 
+    // O05: O01 と同じ全カテゴリーの fixture を Strict と --fast で。Strict は SAME_SIZE を件数0としても出さない。
+    // Fast は MATCHED の位置に SAME_SIZE を表示し、MATCHED を出さない。共通カテゴリーの表示は従来どおり (SPEC §10)。
+    [Theory]
+    [InlineData(RunMode.Strict)]
+    [InlineData(RunMode.Fast)]
+    public void O05_CategoriesByMode(RunMode mode)
+    {
+        var zip = MakeZip(("same.txt", Bytes("hello")), ("changed.txt", Bytes("hello")), ("size.txt", Bytes("hello")), ("missing.txt", Bytes("x")), ("d/", null), ("d/link", Bytes("x")));
+        using var harness = new PipelineHarness(zip) { Mode = mode };
+        harness.Fs.AddFile(@"C:\target\same.txt", Bytes("hello"));
+        harness.Fs.AddFile(@"C:\target\changed.txt", Bytes("hellO"));
+        harness.Fs.AddFile(@"C:\target\size.txt", Bytes("hello!"));
+        harness.Fs.AddDirectory(@"C:\target\d");
+        harness.Fs.AddFile(@"C:\target\d\link", Bytes("x")).Links = 2;
+
+        var lines = AnalysisReport.Format(harness.Run(), mode);
+
+        string[] expected = mode == RunMode.Strict
+            ?
+            [
+                "MATCHED (1):",
+                "  same.txt",
+                "MODIFIED (2):",
+                "  changed.txt",
+                "  size.txt",
+                "MISSING (1):",
+                "  missing.txt",
+                "SKIPPED_SPECIAL_FILE (1):",
+                "  d/link",
+                "DIRECTORY (1):",
+                "  d/",
+                "合計: 6 エントリ (MATCHED 1、MODIFIED 2、MISSING 1、SKIPPED_SPECIAL_FILE 1、DIRECTORY 1)",
+            ]
+            :
+            [
+                AnalysisReport.FastWarning,
+                "SAME_SIZE (2):",
+                "  same.txt",
+                "  changed.txt",
+                "MODIFIED (1):",
+                "  size.txt",
+                "MISSING (1):",
+                "  missing.txt",
+                "SKIPPED_SPECIAL_FILE (1):",
+                "  d/link",
+                "DIRECTORY (1):",
+                "  d/",
+                "合計: 6 エントリ (SAME_SIZE 2、MODIFIED 1、MISSING 1、SKIPPED_SPECIAL_FILE 1、DIRECTORY 1)",
+            ];
+        Assert.Equal(expected, lines);
+        Assert.DoesNotContain(lines, l => l.Contains(mode == RunMode.Strict ? "SAME_SIZE" : "MATCHED", StringComparison.Ordinal));
+    }
+
+    // O05 (FATAL): O02 と同じ FATAL を両モードで (FATAL の原因は内容に依存しない共有違反)。Fast は判定済みのカテゴリーが SAME_SIZE
+    [Theory]
+    [InlineData(RunMode.Strict)]
+    [InlineData(RunMode.Fast)]
+    public void O05_FatalAtEntry40Of100_ByMode(RunMode mode)
+    {
+        var entries = Enumerable.Range(1, 100).Select(i => ($"f{i:D3}.txt", (byte[]?)Bytes("hello"))).ToArray();
+        using var harness = new PipelineHarness(MakeZip(entries)) { Mode = mode };
+        for (var i = 1; i <= 100; i++)
+        {
+            var node = harness.Fs.AddFile($@"C:\target\f{i:D3}.txt", Bytes("hello"));
+            if (i == 40)
+            {
+                node.Errors[FakeOp.OpenComparison] = 32;
+            }
+        }
+
+        var result = harness.Run();
+        var lines = AnalysisReport.Format(result, mode);
+
+        var offset = mode == RunMode.Fast ? 1 : 0;
+        if (mode == RunMode.Fast)
+        {
+            Assert.Equal(AnalysisReport.FastWarning, lines[0]);
+        }
+
+        Assert.Equal("判定済み: 39 エントリ", lines[offset]);
+        Assert.Equal(mode == RunMode.Fast ? "SAME_SIZE (39):" : "MATCHED (39):", lines[offset + 1]);
+        Assert.Equal(Enumerable.Range(1, 39).Select(i => $"  f{i:D3}.txt"), lines.Skip(offset + 2).Take(39));
+        Assert.Equal(
+            ["MODIFIED (0):", "MISSING (0):", "SKIPPED_SPECIAL_FILE (0):", "DIRECTORY (0):", "未判定: 60 エントリ"],
+            lines.Skip(offset + 41));
+        Assert.Equal(
+            "FATAL: エントリ #40 \"f040.txt\": 存在を確認したファイルを開けません (他のプログラムが使用中の場合を含む) (OpenComparison が失敗 (Win32 エラー 32))",
+            AnalysisReport.FormatFatal(result)[0]);
+    }
+
     // O02: 100 件中 40 件目の FATAL → 判定済み 39 件のパス、原因エントリと原因、未判定 60 件は件数のみ、削除0件
     [Fact]
     public void O02_FatalAtEntry40Of100()

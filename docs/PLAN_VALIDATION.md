@@ -23,6 +23,8 @@
 | G3 | 通過 (未確認の事項を除く) | 非破壊の実測 (V4〜V7)、SPEC §13 の PoC 1〜8、実 NTFS の T 系・D 系テストの合格、「E-2 実測」(D22 を含む)。PoC 7 の結果は `PLAN.md` §4 の対応表に反映済み | 未確認: PoC 7 のファイル symlink への差し替え、クラウド placeholder、EFS で暗号化された対象の削除、USN 機能を持たないファイルシステム。SPEC §14 のとおり成立と見なさず、判定できなければ削除しない側に倒す。D22 は案 A で確定し実測済み (初回分類の前の拒否は削除、確認待ち中の拒否は段階2で停止。`PLAN_DECISIONS.md` DEC-12) |
 | G4 | 通過 | 値と適用範囲は SPEC §11 で確定。R 系テスト (R01〜R08) の合格 | なし (benchmark は不要) |
 
+Fast モード (SPEC §15) には新しいゲートを設けない (`PLAN.md` §2)。上の状態とテストの件数は、Fast を追加する前の (Strict だけの) 実装とテストによるものである。その後、Fast 本体とテスト、M08 / O07 の PTY 自動化、publish 版 E2E wrapper の実装・検証が完了した。最新実績は「Fast / PTY / publish E2E の最終確認」(2026-10-03 記録) に記す。
+
 ## V1. 名前の復号
 
 | fixture | `entryNameEncoding` 未指定 | CP437 を指定 |
@@ -585,9 +587,64 @@ FATAL: エントリ #3 "bad.txt": エントリの CRC-32 が一致しません
 - 注釈 (警告) が1件あった: 使用中の公式アクションが Node.js 20 を対象にしており、廃止予定であるという GitHub の通知。実行は成功しており、対応は見送る (アクションの新しいメジャーバージョンが出たときに更新する)。
 - 未確認: ランナーで管理者権限が実際にあったかどうか。
 
+## Fast / PTY / publish E2E の最終確認 (2026-10-03 記録)
+
+以下は今回提示された実装・検証済みの実績を、実ファイルのテスト名・スクリプト名・処理と照合して同期した記録。文書同期作業では build / test を再実行していない。以前の節の件数・実施日は当時の記録として残す。
+
+### Fast 本体とモード共通テスト
+
+- Fast 本体は実装済み。SPEC §6.1 手順7 は Strict では content verification / full-byte comparison、Fast では body を読まず同サイズなら `SAME_SIZE`。§8.3 手順3 は Strict では2回目の full-byte comparison、Fast ではこの手順だけを省略し、手順1・2・4・5・6 は両モード共通。Fast 専用レイヤー、サービス、Win32 API は追加していない。
+- 新規 ID: C15、R09、T17、D24、D25、D26、O05、O06、O07、X13、X14、X15 を検証済み。
+- Fast 再利用監査で P04〜P07 の必要箇所、Z01〜Z09、R01〜R06、O03、O04 などの不足を補完済み。既存のモード共通安全性テストも `PLAN_TESTS.md` の再利用原則に従って両モードで実行済み。T12 の通常のハンドル解放・resource safety は両モード、「比較中 target-read 例外」の経路は Strict 専用。
+- D04 の Fast content-only change は、今回の実 NTFS fixture では `File.WriteAllBytes` によって `LastWriteTime` が変わり、§8.3 手順2 の同一性再検証で停止した。仕様どおり。メタデータを保った content-only change は D25 (`DeletionIntegrationTests.D25_ContentOnlyDifferences`) が担当し、Strict は再比較で停止、Fast は検出せず削除した。D04 と D25 は異なる変更条件を検証しており、矛盾しない。
+- Fast 固有ではない既存 Win-layer test の欠け (P01、P02、P05、P07 の確認後差し替え、Z06、Z08、T01、T10、C04〜C06、C08〜C12、D01、Y02、O01〜O03 など) は今回追加していない。テスト計画上の `Core+Win` は実施予定の種別であり、Win の全ケースを実装・検証済みとする記録ではない。本書の既存記録にも、存在しない Win test を Win で確認済みとした箇所は見つかっていない。
+
+### body 非読取と CRC の確認方法
+
+- Core: C15 の `RecordingContentProvider`、T17 の呼び出し記録・`ThrowOnRead`、D24 の呼び出し順・比較器の記録など、既存のフック・記録で直接確認した。Fast は ZIP entry body の `GetContent` / `Open()` を呼ばず、target body を初回分類でも削除フェーズでも読まず、§8.3 手順3 の recompare を呼ばない。
+- CRC 計算そのものには専用観測フックを追加していない。comparer に到達しない、ZIP stream を `Open()` しない、CRC 期待値を参照しないことからの間接確認であり、CRC 計算そのものを直接観測したとはしない。C15 の期待値は維持した。
+- Win 実 NTFS: body 非読取の多くは D25 / C15 / T17 などの結果による間接確認。Core の観測を Win API 上の直接観測と同一視しない。新しい観測 API は追加していない。
+
+### M08 / O07 の Windows PTY 自動化と cleanup
+
+- `PtyConfirmationTests.M08_O07_InteractiveWarningAndCancelWithN` が `yn-n` 相当の fixture を一時生成して Fast / Strict を実行する。テスト専用依存 `Porta.Pty 2.2.2` は E2E test project のみにあり、製品コードには PTY 関連依存が無い。
+- Fast: 実際に `[y/N]` が出る、PLAN 指定と一致する警告がヘッダーと確認直前の計2回出る、最後の警告から確認文・`[y/N]` までに別出力が無いことを確認。`[y/N]` 表示後に `n` を送り、終了コード 2、target fixture 非削除を確認した。
+- Strict: 実際に `[y/N]` が出て、Fast warning が存在しない。`n` を送り、終了コード 2、target fixture 非削除を確認した。
+- PTY では stdout / stderr が同一端末に流れるため、ヘッダー警告の stdout 所属は O06 が担当する。`--yes`、非対話条件、偽プロンプトの経路は既存 Core テストが担当する。PTY の `y` ケースは追加していない。実端末のフォント・折り返し・視認性は自動化対象外で、M08 の手動記録欄に残す。
+- 正常終了、assertion / 起動失敗 / 例外時とも cleanup を行う。PTY / process tree の終了・Dispose 完了後に、テスト自身が作った GUID 付きディレクトリだけを削除する。cleanup failure は黙殺せず、元の失敗情報・terminal output を保持する。
+- PTY 単独を3回実行し、毎回 Fast / Strict の2件とも成功。各回の新規 fixture 残存は 0。意図的な exe 起動失敗でも fixture 残存 0。過去の旧 PTY fixture は手動で掃除済み。
+
+### publish 版 E2E wrapper と cleanup
+
+標準実行方法:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-e2e-tests.ps1
+```
+
+- `scripts/run-e2e-tests.ps1` は OS temp 直下の `unextract-e2e-publish-<GUID>` に既存 `win-x64` profile で Release publish し、exe 存在確認後に wrapper プロセス内で `UNEXTRACT_E2E_EXE` を設定して E2E project 全体 (PTY を含む) を実行する。`finally` で元の環境変数を復元し、自分が作った temp publish だけを削除する。
+- 外部 exe、既存 `bin/` / `obj/` は削除しない。削除対象を `UNEXTRACT_E2E_EXE` から逆算しない。`UnextractProcess.ResolveExe` は環境変数があればその exe、未設定なら通常 build 出力を使用する。E2E test 自身は publish しない。
+- 正常系3回: E2E / PTY 成功、終了コード 0。各回で今回の publish 残存 0、PTY fixture 残存 0、環境変数復元、外部 exe の hash 不変を確認した。
+- 失敗系: publish failure、test failure、publish 後 exe 不在、test failure + cleanup failure、test success + cleanup failure を確認済み。publish / test の元の失敗 code を保持し、cleanup failure が元の失敗を隠さないことを確認した。元の失敗が無く wrapper / cleanup だけが失敗した場合は終了コード 1。
+- `dotnet test unextract.sln` は通常 build を含む全体 test、wrapper は配布形態の publish 版 E2E / PTY 検証で、役割が異なる。その他の fixture は既存の手動 cleanup 方針を維持する。
+
+### 最終 build / test 実績
+
+| 対象 | passed | failed | skipped |
+|---|---|---|---|
+| Core | 732 | 0 | 0 |
+| Windows | 155 | 0 | 0 |
+| CLI | 30 | 0 | 0 |
+| E2E (PTY を含む) | 27 | 0 | 0 |
+| 合計 | **944** | **0** | **0** |
+
+`dotnet build unextract.sln`: warning 0 / error 0。PTY 単独は Fast / Strict 2件が3回連続全成功、各回 fixture 残存 0。publish wrapper は正常系3回成功、各回 publish 残存 0・PTY fixture 残存 0。
+
 ## 必須テスト対応表
 
-最初の依頼の必須12項目と、第2回の依頼で追加した項目それぞれに対応する [`PLAN_TESTS.md`](PLAN_TESTS.md) のテスト ID。
+最初の依頼の必須12項目と、第2回の依頼で追加した項目、Fast モード (SPEC §15) の追加で加えた項目それぞれに対応する [`PLAN_TESTS.md`](PLAN_TESTS.md) のテスト ID。
+
+「Fast」以外の行の期待結果は Strict のものである。そのうち Strict と共通の安全性を確かめるテストは、`PLAN_TESTS.md` 冒頭の「モード違いの再利用の原則」に従い、同じ fixture で `--fast` を付けても実行する (対象のテスト ID と期待結果の読み替えは同書が正)。SPEC §5.2 の内容検証、§8.3 の手順3、`MATCHED` の表示に依存するテスト (P01、C01〜C14、R07、R08、T01、D03、D10、D13、D23、O01、X01〜X12) は Strict だけで行い、Fast 側の観点は「Fast」の行のテストで確かめる。
 
 | # | 必須項目 | テスト ID |
 |---|---|---|
@@ -623,3 +680,15 @@ FATAL: エントリ #3 "bad.txt": エントリの CRC-32 が一致しません
 | PoC 反映 | 親 File ID だけが不一致の差し替え / 最終パスだけが不一致の差し替えで、それぞれ停止 | D19、D20 |
 | PoC 反映 | 段階5 (削除指示) の失敗 (read-only の付与) で、そのファイルを残し以後を停止 | D21、D08 |
 | PoC 反映 | 対象の DELETE だけを ACL で拒否した場合 (段階1は成功) の段階5の結果 (扱いは確定。E-2 で実測済み: 初回分類の前の拒否は削除、確認待ち中の拒否は段階2で停止。どちらも誤削除なし) | D22 |
+| Fast | Strict と共通の安全性 (入力エラー、内容検証に依存しない FATAL、`MISSING`、`SKIPPED_SPECIAL_FILE`、削除0件、削除フェーズの停止、`DELETE_FAILED`、識別確認) が `--fast` でも同じ | `PLAN_TESTS.md` の「モード違いの再利用の原則」の対象 (P02〜P08、Z01〜Z09、R01〜R06、T02〜T16 (T10 の比較中の読取失敗・T12 の比較中 target-read 例外を除く)、D01、D02、D04〜D09、D11、D14〜D22、Y01、Y02、O02〜O04) を `--fast` で |
+| Fast | 内容検証で失敗するエントリでも、サイズ一致なら FATAL にならず `SAME_SIZE`。どの target の状態でも ZIP エントリを開かず CRC を計算しない | C15 |
+| Fast | 実測展開量を計上せず、その上限で FATAL にならない | R09 |
+| Fast | 同一内容・1 byte 変更・0 byte は `SAME_SIZE`、サイズ違いは `MODIFIED`。ZIP エントリと target の内容を読まない | T17 |
+| Fast | 削除フェーズは SPEC §8.3 の手順3 (再比較) だけを行わず、同じハンドルで再検証・最終確認・削除・成立確認を行う。削除指示は Strict と同じ | D24 |
+| Fast | 同じサイズで内容の違うファイル (初回分類の前から異なる / 確認待ち中にメタデータを保ったまま書き換えた) が削除される (仕様どおりの挙動) | D25、T17、X14 |
+| Fast | `--fast` の解析 (重複は入力エラー、`--dry-run`・`--yes`・`-y` と併用可、なしは Strict、使い方に `[--fast]`) | D26 |
+| Fast | `--dry-run` と通常実行の初回分類の一致は同じモード同士 | Y01、Y02 (Fast 同士)、X13 |
+| Fast | 表示するカテゴリー (Strict は `SAME_SIZE` を、Fast は `MATCHED` を出さない) | O05、X13 |
+| Fast | 警告: 結果表示に至る Fast の実行では解析結果の一覧の先頭行 (標準出力) に出し、結果表示に至らない終了と Strict では出さない | O06、X13〜X15 |
+| Fast | 警告: Fast の確認プロンプトの直前の行に出し (確認プロンプトと同じ経路)、`--yes`・非対話と Strict では出さない | O07 (Core+E2E PTY。M08 の機能部分を自動確認済み。実端末の視覚確認は [`MANUAL_TESTS.md`](MANUAL_TESTS.md)) |
+| Fast | exe での Fast の実行 (`--dry-run`、`--yes`、Strict では FATAL になる CRC 不一致の fixture、`--fast` の重複、事前検証の FATAL、削除候補0件) | X13、X14、X15 |
