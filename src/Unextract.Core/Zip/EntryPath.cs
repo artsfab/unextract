@@ -7,7 +7,7 @@ internal readonly record struct ParsedEntryPath(bool IsDirectory, string[] Compo
     public static ParsedEntryPath Fail(FatalKind kind) => new(false, [], kind);
 }
 
-// エントリ名のパス検査 (SPEC §4.2)。/ と \ を区切りとし、正規化前の名前で判定する。
+// エントリ名のパス検査 (docs/spec/zip.md#paths)。/ と \ を区切りとし、正規化前の名前で判定する。
 internal static class EntryPath
 {
     private static readonly char[] Separators = ['/', '\\'];

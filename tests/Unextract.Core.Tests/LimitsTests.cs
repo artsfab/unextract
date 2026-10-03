@@ -5,7 +5,7 @@ using static Unextract.Core.Tests.TestHelpers;
 
 namespace Unextract.Core.Tests;
 
-// SPEC §11 (DEC-6)。境界は「上限以下を許可、超過を拒否」。既定値のままのテストと、小さい値を注入するテストの両方。
+// docs/spec/zip.md#limits (docs/RATIONALE.md#zip-limits)。境界は「上限以下を許可、超過を拒否」。既定値のままのテストと、小さい値を注入するテストの両方。
 // 実 ZIP での R03・R05・R06 は ZipArchiveSourceTests。
 public class LimitsTests
 {

@@ -2,7 +2,7 @@ using static Unextract.Windows.Tests.TestFixture;
 
 namespace Unextract.Windows.Tests;
 
-// SPEC §8.1 の用途別オープンの共有モードとエラーコードを実 NTFS で確認する。
+// docs/spec/filesystem.md#handles の用途別オープンの共有モードとエラーコードを実 NTFS で確認する。
 public class HandleOpenerTests
 {
     private const int ErrorFileNotFound = 2;
@@ -67,7 +67,7 @@ public class HandleOpenerTests
     }
 
     // 確認 7 の対照: FILE_READ_ATTRIBUTES だけのハンドルは共有モードの判定に参加せず、保持していても改名できてしまう
-    // (SPEC §8.1 で target ルートに FILE_LIST_DIRECTORY を付ける根拠)。
+    // (docs/spec/filesystem.md#handles で target ルートに FILE_LIST_DIRECTORY を付ける根拠)。
     [Fact]
     public void ReadAttributesOnlyHandle_DoesNotBlockRename()
     {
@@ -117,7 +117,7 @@ public class HandleOpenerTests
         Assert.Null(result.Value);
     }
 
-    // 定数が SPEC §8.1 の表の値と一致する
+    // 定数が docs/spec/filesystem.md#handles の表の値と一致する
     [Fact]
     public void HandleSpecs_MatchSpecTable()
     {

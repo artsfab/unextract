@@ -8,7 +8,7 @@ using static Unextract.Core.Tests.Fakes.PipelineHarness;
 
 namespace Unextract.Core.Tests;
 
-// delete の逐次処理 (SPEC §3.4、§7 の事前判定、§8.2〜§8.4、PLAN.md §4) を偽ファイルシステムで確認する (S 系の Core)。
+// delete の逐次処理 (docs/SPEC.md#execution、docs/spec/filesystem.md#special-files の事前判定、docs/spec/filesystem.md#baselines〜docs/spec/filesystem.md#failure-boundary、docs/spec/filesystem.md#open-errors) を偽ファイルシステムで確認する (S 系の Core)。
 // ZIP は実際の ZipArchive で読む。競合は DeleteHooks (H1〜H5) で注入する。DeleteHarness.Run が毎回、削除用ハンドルの解放、
 // 比較用ハンドルを開かないこと、パスを使う呼び出しが各エントリの OpenForDeletion 1回 (と失敗時の CheckIdentity 1回) だけであることを確かめる。
 public class SequentialDeleteTests
@@ -77,7 +77,7 @@ public class SequentialDeleteTests
     }
 
     // S01: 対象だけが削除され、MODIFIED・SKIPPED・ZIP にないファイル・ディレクトリ・ZIP は残る。結果は処理順に1件ずつ。
-    // Fast では同じサイズで内容違いの changed.txt も削除される (SPEC §15.3、§15.5)。
+    // Fast では同じサイズで内容違いの changed.txt も削除される (docs/SPEC.md#modes、docs/SPEC.md#modes)。
     [Theory]
     [MemberData(nameof(BothModes))]
     public void S01_DeletesOnlyVerifiedFiles(RunMode mode)
@@ -502,7 +502,7 @@ public class SequentialDeleteTests
             Assert.Empty(h.Fs.Deleted);
             Assert.DoesNotContain(h.Fs.Calls, c => c.StartsWith("Disposition", StringComparison.Ordinal));
 
-            // 2・3 と表に無いコードでは識別確認をしない。32・5 だけが識別確認に進む (PLAN.md §4)。
+            // 2・3 と表に無いコードでは識別確認をしない。32・5 だけが識別確認に進む (docs/spec/filesystem.md#open-errors)。
             Assert.Equal(identityChecked, h.Fs.Calls.Any(c => c.StartsWith("CheckIdentity", StringComparison.Ordinal)));
         }
     }
@@ -762,7 +762,7 @@ public class SequentialDeleteTests
     }
 
     // S27 (Core)・S25 (Core): H3 (比較中) と H4 (最終確認の直前) に M0 の各項目を1つずつ変える → 最終確認で STOP。そのファイルは残る。
-    // Fast は H3 が無い (内容を読まない) ため H4 だけ。M0 の全項目を照合し、旧方式の4項目だけの最終確認にしない (DEC-29)。
+    // Fast は H3 が無い (内容を読まない) ため H4 だけ。M0 の全項目を照合し、一部の項目だけの最終確認にしない (docs/RATIONALE.md#identity-path)。
     [Theory]
     [InlineData("FileId", "File ID")]
     [InlineData("VolumeSerial", "File ID")]
@@ -1152,7 +1152,7 @@ public class SequentialDeleteTests
         Assert.True(h.Exists("b.txt"));
     }
 
-    // 削除の指示の後の想定外の例外は STOP で「削除された可能性あり」(SPEC §8.4 の「任意」の行)。後続は処理しない。
+    // 削除の指示の後の想定外の例外は STOP で「削除された可能性あり」(docs/spec/filesystem.md#failure-boundary の「任意」の行)。後続は処理しない。
     [Fact]
     public void Exception_AfterDisposition_IsPossiblyDeleted()
     {
@@ -1171,7 +1171,7 @@ public class SequentialDeleteTests
     }
 
     // A08 (Core): analyze の後、delete の前に MATCHED のファイルの内容だけを書き換える (メタデータを保つ) → delete は analyze の結果を
-    // 使わず現在の内容で判定する。Strict は MODIFIED (削除しない)、Fast は DELETED (SPEC §15.5)。
+    // 使わず現在の内容で判定する。Strict は MODIFIED (削除しない)、Fast は DELETED (docs/SPEC.md#modes)。
     [Theory]
     [MemberData(nameof(BothModes))]
     public void A08_DeleteDoesNotTrustAnalyze(RunMode mode)

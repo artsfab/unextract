@@ -7,11 +7,11 @@ namespace Unextract.Core.Zip;
 
 public sealed record ZipOpenResult(ZipArchiveSource? Source, FatalError? Fatal);
 
-// ZipArchive のアダプタ。ZIP を FileShare.Read で開いて Dispose まで保持し (SPEC §3 の 1)、
-// エントリ名を CP437 指定で復号する (SPEC §4.1)。ZIP 構造の独自解析はしない。
+// ZipArchive のアダプタ。ZIP を FileShare.Read で開いて Dispose まで保持し (docs/SPEC.md#prepare のZIP保持)、
+// エントリ名を CP437 指定で復号する (docs/spec/zip.md#decoding)。ZIP 構造の独自解析はしない。
 public sealed class ZipArchiveSource : IZipContentProvider, IDisposable
 {
-    // フラグなしの名前を UTF-8 として扱わせないため、必ず CP437 を渡す (SPEC §4.1、DEC-7)。
+    // フラグなしの名前を UTF-8 として扱わせないため、必ず CP437 を渡す (docs/spec/zip.md#decoding、docs/RATIONALE.md#real-names)。
     private static readonly Encoding EntryNameEncoding =
         CodePagesEncodingProvider.Instance.GetEncoding(437)
         ?? throw new InvalidOperationException("code page 437 is not available");
@@ -47,7 +47,7 @@ public sealed class ZipArchiveSource : IZipContentProvider, IDisposable
         }
     }
 
-    // 内容比較候補の内容を読むときだけ使う (SPEC §5.1)。
+    // 内容比較候補の内容を読むときだけ使う (docs/spec/zip.md#read-scope)。
     public IZipEntryContent GetContent(int index) => new ZipArchiveEntryContent(_archive.Entries[index]);
 
     public static ZipOpenResult Open(string path)

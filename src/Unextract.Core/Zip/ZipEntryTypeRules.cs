@@ -2,7 +2,7 @@ using Unextract.Core.Results;
 
 namespace Unextract.Core.Zip;
 
-// ZIP の特殊エントリの判定 (SPEC §4.4、DEC-7)。
+// ZIP の特殊エントリの判定 (docs/spec/zip.md#types、docs/RATIONALE.md#real-names)。
 // ZipArchiveEntry は作成元 OS を公開しないため、ExternalAttributes だけで保守的に判定する。
 // 種別はエントリの種類 (名前が区切りで終わるか) と組み合わせて判定し、
 // ファイルエントリの 0x4000 とディレクトリエントリの 0x8000 は、どちらとして扱うか決められないため FATAL。

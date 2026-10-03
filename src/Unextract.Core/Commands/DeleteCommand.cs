@@ -6,7 +6,7 @@ using Unextract.Core.Target;
 
 namespace Unextract.Core.Commands;
 
-// AwaitingConfirmation と Hooks はテスト用の差し込み口 (PLAN.md §4: 確認プロンプトの直前、H1〜H5)。製品 CLI からは設定しない。
+// AwaitingConfirmation と Hooks はテスト用の差し込み口 (docs/TESTING.md#hooks: 確認プロンプトの直前、H1〜H5)。製品 CLI からは設定しない。
 // DeletionStarting は逐次処理開始の通知。CLI の最上位の例外処理で、開始前と開始後を区別するために使う。
 public sealed record DeleteCommandRequest(
     string ArchivePath,
@@ -25,7 +25,7 @@ public sealed record DeleteCommandRequest(
 // (entries の入力エラーでは null。原因は標準エラー出力に書く)。
 public sealed record DeleteCommandOutcome(ExitStatus Status, DeleteReport? Report, FatalError? PrepareError = null);
 
-// unextract delete (SPEC §2、§3、§8.3、§10.3)。Prepare の後に1回だけ確認し (案 A、DEC-31)、処理対象を ZIP の順に1件ずつ、
+// unextract delete (docs/spec/cli.md#arguments、docs/SPEC.md#execution、docs/spec/filesystem.md#delete-flow、docs/spec/cli.md#delete-output)。Prepare の後に1回だけ確認し (案 A、docs/RATIONALE.md#confirmation)、処理対象を ZIP の順に1件ずつ、
 // その時点の target の状態で検証してその場で削除する。analyze の結果は参照しない。全件の事前解析をしない。
 public static class DeleteCommand
 {
@@ -94,7 +94,7 @@ public static class DeleteCommand
                 AnalyzeCommand.WriteLines(output, DeleteOutput.Summary(report, prepared.Entries.Count - prepared.Targets.Count));
                 WriteRemainingErrors(report);
 
-                // STOP、または STOP がなくても DELETE_FAILED が1件以上あればエラー (SPEC §2、DEC-18)。
+                // STOP、または STOP がなくても DELETE_FAILED が1件以上あればエラー (docs/spec/cli.md#arguments、docs/RATIONALE.md#open-failures)。
                 var status = report.Stop is null && report.Count(DeleteStatus.DeleteFailed) == 0 ? ExitStatus.Success : ExitStatus.Error;
                 return new DeleteCommandOutcome(status, report);
             }
@@ -114,7 +114,7 @@ public static class DeleteCommand
         }
     }
 
-    // 確認入力は y / Y だけを開始とする。空入力、EOF、その他は中止。非対話で --yes がなければ中止 (SPEC §2)。
+    // 確認入力は y / Y だけを開始とする。空入力、EOF、その他は中止。非対話で --yes がなければ中止 (docs/spec/cli.md#arguments)。
     public static bool IsConfirmation(string? answer) => answer is "y" or "Y";
 
     private static bool Confirm(DeleteCommandRequest request, int fileEntries)

@@ -1,13 +1,13 @@
 namespace Unextract.Core.Results;
 
-// 削除開始前の全体 FATAL の原因の種別 (SPEC §9)。target の入力エラー (SPEC §2、§3 の手順1) を含む。
+// 削除開始前の全体 FATAL の原因の種別 (docs/SPEC.md#failure-stages)。target の入力エラー (docs/spec/cli.md#arguments、docs/spec/filesystem.md#target-root のtarget確認) を含む。
 public enum FatalKind
 {
-    // ZIP を開けない・ZipArchive が読めない (SPEC §5.4、§9)。入力エラーとして扱う。
+    // ZIP を開けない・ZipArchive が読めない (docs/spec/zip.md#runtime、docs/SPEC.md#failure-stages)。入力エラーとして扱う。
     ArchiveOpenFailed,
     ArchiveUnreadable,
 
-    // resource limits (SPEC §11)
+    // resource limits (docs/spec/zip.md#limits)
     TooManyEntries,
     NameTooLong,
     MetadataTooLarge,
@@ -16,7 +16,7 @@ public enum FatalKind
     TotalDeclaredLengthTooLarge,
     InvalidDeclaredLength,
 
-    // 名前の復号とパス (SPEC §4.1、§4.2)
+    // 名前の復号とパス (docs/spec/zip.md#decoding、docs/spec/zip.md#paths)
     NameContainsReplacementCharacter,
     RootedPath,
     DriveSpecifier,
@@ -29,13 +29,13 @@ public enum FatalKind
     TrailingDotOrSpace,
     ReservedName,
 
-    // ZIP 内部の構造 (SPEC §4.3)
+    // ZIP 内部の構造 (docs/spec/zip.md#structure)
     DuplicateEntry,
     CaseInsensitiveCollision,
     FileDirectoryConflict,
     FileUsedAsParent,
 
-    // ZIP の特殊エントリ (SPEC §4.4)
+    // ZIP の特殊エントリ (docs/spec/zip.md#types)
     FileEntryWithDirectoryType,
     DirectoryEntryWithFileType,
     UnsupportedEntryType,
@@ -43,7 +43,7 @@ public enum FatalKind
     DosReparsePointAttribute,
     DirectoryEntryWithData,
 
-    // target の入力エラー (SPEC §2、§3 の手順1)
+    // target の入力エラー (docs/spec/cli.md#arguments、docs/spec/filesystem.md#target-root のtarget確認)
     TargetNotFound,
     TargetCheckFailed,
     TargetIsReparsePoint,
@@ -56,7 +56,7 @@ public enum FatalKind
     TargetIsProtectedLocation,
     ProtectedLocationUnresolved,
 
-    // target 側の判定不能 (SPEC §6、§7、§9)
+    // target 側の判定不能 (docs/spec/filesystem.md#classification、docs/spec/filesystem.md#special-files、docs/SPEC.md#failure-stages)
     ArchiveIdentityFailed,
     EnumerationOpenFailed,
     EnumerationHandleMismatch,
@@ -70,7 +70,7 @@ public enum FatalKind
     TargetInfoFailed,
     TargetReadFailed,
 
-    // 内容比較候補のエントリ内容の検証基準 1〜5 の違反 (SPEC §5.2) と実測展開量の累計上限 (SPEC §11)
+    // 内容比較候補のエントリ内容の検証基準 1〜5 の違反 (docs/spec/zip.md#verification) と実測展開量の累計上限 (docs/spec/zip.md#limits)
     ContentEncrypted,
     ContentReadFailed,
     ContentTooLong,

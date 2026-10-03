@@ -1,6 +1,6 @@
 namespace Unextract.E2E.Tests;
 
-// stdout の結果行 (SPEC §10.1) を読む。各行は「状態名を 20 桁に左詰め」+ 空白2個 + Entry + " -> " + Target (+ 理由)。
+// stdout の結果行 (docs/spec/cli.md#result-lines) を読む。各行は「状態名を 20 桁に左詰め」+ 空白2個 + Entry + " -> " + Target (+ 理由)。
 // Entry は ZIP の FullName を変換せずに表示したもの (> はエントリ名に現れないため、最初の " -> " で区切れる)。
 public sealed class Report
 {

@@ -2,14 +2,14 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Unextract.Windows;
 
-// SPEC §8.1 の表の用途別オープン。アクセス・共有モード・フラグは表の行と完全に一致させ、HandleSpecs の1か所で定義する。
+// docs/spec/filesystem.md#handles の表の用途別オープン。アクセス・共有モード・フラグは表の行と完全に一致させ、HandleSpecs の1か所で定義する。
 // FILE_FLAG_BACKUP_SEMANTICS を使っても特権の有効化はしない。
 public static class HandleOpener
 {
-    // 表の「削除用」の行。1件の再検証・再比較・削除の間だけ開く。
+    // 表の「削除用」の行。1件の照合・検査・Strictの1回比較・最終確認・削除の間だけ開く。
     public static Win32Result<SafeFileHandle> OpenForDeletion(string path) => Open(path, HandleSpecs.Deletion);
 
-    // SPEC §8.4 の識別確認。削除用オープンが共有違反・アクセス拒否で失敗したときだけ開く。このハンドルでは削除しない。
+    // docs/spec/filesystem.md#failure-boundary の識別確認。削除用オープンが共有違反・アクセス拒否で失敗したときだけ開く。このハンドルでは削除しない。
     public static Win32Result<SafeFileHandle> OpenForIdentityCheck(string path) => Open(path, HandleSpecs.IdentityCheck);
 
     // 表の「target ルート」の行。実行終了まで保持する。
@@ -22,7 +22,7 @@ public static class HandleOpener
     // 表の「比較用」の行。
     public static Win32Result<SafeFileHandle> OpenForComparison(string path) => Open(path, HandleSpecs.Comparison);
 
-    // SPEC §3 の手順1の確認用ハンドル (最終成分の reparse をたどらない)。
+    // docs/spec/filesystem.md#target-root のtarget確認の確認用ハンドル (最終成分の reparse をたどらない)。
     public static Win32Result<SafeFileHandle> OpenForConfirmation(string path) => Open(path, HandleSpecs.Confirmation);
 
     // FILE_READ_ATTRIBUTES のみで開く (共有モードの判定に参加しない)。ZIP 自身の File ID と、拒否対象のフォルダーの最終パスに使う。
@@ -47,7 +47,7 @@ public static class HandleOpener
 
 internal readonly record struct HandleSpec(uint Access, uint Share, uint Flags);
 
-// アクセス・共有モード・フラグの定数 (SPEC §8.1 の表)。値は winnt.h / fileapi.h のもの。
+// アクセス・共有モード・フラグの定数 (docs/spec/filesystem.md#handles の表)。値は winnt.h / fileapi.h のもの。
 internal static class HandleSpecs
 {
     // アクセス
@@ -93,29 +93,29 @@ internal static class HandleSpecs
         FileFlagBackupSemantics | FileFlagOpenReparsePoint | FileFlagOpenNoRecall | FileFlagSequentialScan);
 
     // | 削除用 | GENERIC_READ | DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE | FILE_SHARE_READ
-    // | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL | 1件の再検証・再比較・削除の間だけ |
+    // | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL | 1件の照合・検査・Strictの1回比較・最終確認・削除の間だけ |
     // FILE_SHARE_WRITE と FILE_SHARE_DELETE を含めない。FILE_FLAG_BACKUP_SEMANTICS は付けない (ディレクトリは開けず 5 になる)。
     public static readonly HandleSpec Deletion = new(
         GenericRead | Delete | FileReadAttributes | Synchronize,
         FileShareRead,
         FileFlagOpenReparsePoint | FileFlagOpenNoRecall);
 
-    // SPEC §8.4 の識別確認: FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL。
+    // docs/spec/filesystem.md#failure-boundary の識別確認: FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL。
     // データアクセスを持たないため共有モードの判定に参加しない (共有モードの値は他者に影響しない)。
     public static readonly HandleSpec IdentityCheck = new(
         FileReadAttributes,
         FileShareRead | FileShareWrite,
         FileFlagBackupSemantics | FileFlagOpenReparsePoint | FileFlagOpenNoRecall);
 
-    // SPEC §3 の手順1の確認用: FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT。
+    // docs/spec/filesystem.md#target-root のtarget確認の確認用: FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT。
     // データアクセスを持たないため共有モードの判定に参加しない (共有モードの値は他者に影響しない)。
     public static readonly HandleSpec Confirmation = new(
         FileReadAttributes,
         FileShareRead | FileShareWrite,
         FileFlagBackupSemantics | FileFlagOpenReparsePoint);
 
-    // FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS (reparse はたどる)。ZIP 自身の File ID (SPEC §7) と、
-    // 拒否対象のフォルダーの最終パス (SPEC §3 の手順1) に使う。保持中の ZIP (FileShare.Read) とも共存する。
+    // FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS (reparse はたどる)。ZIP 自身の File ID (docs/spec/filesystem.md#special-files) と、
+    // 拒否対象のフォルダーの最終パス (docs/spec/filesystem.md#target-root のtarget確認) に使う。保持中の ZIP (FileShare.Read) とも共存する。
     public static readonly HandleSpec AttributesOnly = new(
         FileReadAttributes,
         FileShareRead | FileShareWrite,

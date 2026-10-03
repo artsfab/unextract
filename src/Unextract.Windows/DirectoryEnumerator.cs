@@ -22,8 +22,8 @@ public readonly record struct DirectoryEnumerationStep(DirectoryEnumerationStepK
     internal static DirectoryEnumerationStep Fail(int error) => new(DirectoryEnumerationStepKind.Failed, default, error);
 }
 
-// GetFileInformationByHandleEx(FileIdExtdDirectoryRestartInfo → FileIdExtdDirectoryInfo) による列挙 (SPEC §6.2 の 1・2・7)。
-// 項目を1件ずつ返すだけで、照合・保持の規則 (§6.2 の 3〜6) は持たない。"." と ".." は返さない。
+// GetFileInformationByHandleEx(FileIdExtdDirectoryRestartInfo → FileIdExtdDirectoryInfo) による列挙 (docs/spec/filesystem.md#real-names の 1・2・7)。
+// 項目を1件ずつ返すだけで、照合・保持の規則 (docs/spec/filesystem.md#real-names の 3〜6) は持たない。"." と ".." は返さない。
 // 終端は ERROR_NO_MORE_FILES (18) だけで、それ以外のエラーは Failed を返す。Failed または End の後は同じ結果を返し続ける。
 // ハンドルは呼び出し側が所有し、このクラスは閉じない。
 public sealed unsafe class DirectoryEnumerator

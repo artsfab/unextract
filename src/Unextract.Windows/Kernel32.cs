@@ -3,13 +3,13 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Unextract.Windows;
 
-// kernel32 の LibraryImport 宣言 (SPEC §8.1)。読み取り・情報取得・列挙と、ハンドルへの削除の指示に必要なものだけを置く。
+// kernel32 の LibraryImport 宣言 (docs/spec/filesystem.md#handles)。読み取り・情報取得・列挙と、ハンドルへの削除の指示に必要なものだけを置く。
 // パスベースの削除・改名の API (DeleteFileW、MoveFileExW など) は宣言しない。
 internal static unsafe partial class Kernel32
 {
     private const string Library = "kernel32.dll";
 
-    // 削除の指示 (SPEC §8.3 の 5) だけに使う。呼び出しは WindowsDeletionHandle.SetDispositionEx の1か所。
+    // 削除の指示 (docs/spec/filesystem.md#delete-flow の削除指示) だけに使う。呼び出しは WindowsDeletionHandle.SetDispositionEx の1か所。
     [LibraryImport(Library, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SetFileInformationByHandle(

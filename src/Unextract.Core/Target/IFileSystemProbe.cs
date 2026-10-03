@@ -9,10 +9,10 @@ public readonly record struct FileId(ulong Low, ulong High)
 // ボリュームシリアル番号と File ID の組 (FILE_ID_INFO)。個体の同一性の判定に使う。
 public readonly record struct VolumeFileId(ulong VolumeSerialNumber, FileId FileId);
 
-// §3 の手順1の確認用ハンドル (FILE_READ_ATTRIBUTES のみ、OPEN_REPARSE_POINT 付き) から得る情報。
+// docs/spec/filesystem.md#target-root のtarget確認の確認用ハンドル (FILE_READ_ATTRIBUTES のみ、OPEN_REPARSE_POINT 付き) から得る情報。
 public readonly record struct TargetConfirmation(uint Attributes, uint ReparseTag, VolumeFileId Id);
 
-// 列挙用・target ルート保持用ハンドルの検証に使う情報 (SPEC §6.2 の 1)。FinalPath は \\?\ 形式のまま。
+// 列挙用・target ルート保持用ハンドルの検証に使う情報 (docs/spec/filesystem.md#real-names の 1)。FinalPath は \\?\ 形式のまま。
 public readonly record struct DirectoryHandleInfo(VolumeFileId Id, bool IsDirectory, uint Attributes, uint ReparseTag, string FinalPath);
 
 // 列挙で返る1項目 (FileIdExtdDirectoryInfo)。名前はロング名。"." と ".." は返さない。
@@ -66,7 +66,7 @@ public interface IDirectoryHandle : IDisposable
     IDirectoryEnumeration Enumerate();
 }
 
-// 比較用ハンドル (SPEC §8.1) の不透明な表現。情報取得と、先頭からの逐次読み取りができる。
+// 比較用ハンドル (docs/spec/filesystem.md#handles) の不透明な表現。情報取得と、先頭からの逐次読み取りができる。
 public interface IComparisonHandle : IDisposable
 {
     ProbeResult<VolumeFileId> GetVolumeFileId();
@@ -89,24 +89,24 @@ public interface IComparisonHandle : IDisposable
     ProbeResult<int> Read(Span<byte> buffer);
 }
 
-// target に対する操作の抽象 (SPEC §3 の手順1、§6.2、§8.1)。Win32 の実装は Unextract.Windows が持つ (段階 C-3)。
+// target に対する操作の抽象 (docs/spec/filesystem.md#target-root のtarget確認、docs/spec/filesystem.md#real-names、docs/spec/filesystem.md#handles)。Win32 の実装は Unextract.Windows が持つ。
 // オープンの失敗は OS のエラーコードで返す。取得の失敗は部分的な値を返さない。
 public interface IFileSystemProbe
 {
-    // §3 の手順1の確認用ハンドル (FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT) で
+    // docs/spec/filesystem.md#target-root のtarget確認の確認用ハンドル (FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT) で
     // path を開き、FileAttributeTagInfo と FileIdInfo を取得して閉じる。
     ProbeResult<TargetConfirmation> ConfirmTargetFinalComponent(string path);
 
-    // §8.1 の target ルートの保持用ハンドル。呼び出し側が実行終了まで保持する。
+    // docs/spec/filesystem.md#handles の target ルートの保持用ハンドル。呼び出し側が実行終了まで保持する。
     ProbeResult<IDirectoryHandle> OpenTargetRoot(string path);
 
-    // §8.1 の列挙用ハンドル (target ルート以外のディレクトリ)。
+    // docs/spec/filesystem.md#handles の列挙用ハンドル (target ルート以外のディレクトリ)。
     ProbeResult<IDirectoryHandle> OpenDirectoryForEnumeration(string path);
 
-    // §8.1 の比較用ハンドル。
+    // docs/spec/filesystem.md#handles の比較用ハンドル。
     ProbeResult<IComparisonHandle> OpenForComparison(string path);
 
-    // ZIP 自身の個体判定 (SPEC §7) 用。FILE_READ_ATTRIBUTES のみで開いてボリュームシリアルと File ID を返す。
+    // ZIP 自身の個体判定 (docs/spec/filesystem.md#special-files) 用。FILE_READ_ATTRIBUTES のみで開いてボリュームシリアルと File ID を返す。
     // ZIP は FileShare.Read で保持されていて改名・削除されないため、パスで開き直しても同じ個体になる。
     ProbeResult<VolumeFileId> GetFileIdentity(string path);
 }

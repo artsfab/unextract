@@ -3,11 +3,11 @@ using static Unextract.Windows.Tests.TestFixture;
 
 namespace Unextract.Windows.Tests;
 
-// 削除用ハンドルと識別確認の Windows 層 (SPEC §8.1、§8.3、§8.4)。実際に削除するのは fixture 内のファイルだけで、
+// 削除用ハンドルと識別確認の Windows 層 (docs/spec/filesystem.md#handles、docs/spec/filesystem.md#delete-flow、docs/spec/filesystem.md#failure-boundary)。実際に削除するのは fixture 内のファイルだけで、
 // 削除の指示の前に必ず DeletionGuard で削除用ハンドルの最終パスと親を確かめる。
 public class DeletionHandleTests
 {
-    // SPEC §8.1 の表の「削除用」の行と完全一致: GENERIC_READ | DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE、FILE_SHARE_READ、
+    // docs/spec/filesystem.md#handles の表の「削除用」の行と完全一致: GENERIC_READ | DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE、FILE_SHARE_READ、
     // FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL (BACKUP_SEMANTICS なし)。識別確認は FILE_READ_ATTRIBUTES のみ。
     [Fact]
     public void HandleSpecs_MatchSpecTable()

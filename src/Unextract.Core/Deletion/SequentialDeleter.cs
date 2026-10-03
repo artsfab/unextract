@@ -5,7 +5,7 @@ using Unextract.Core.Zip;
 
 namespace Unextract.Core.Deletion;
 
-// delete の1エントリの結果 (SPEC §10.3)。
+// delete の1エントリの結果 (docs/spec/cli.md#delete-output)。
 public enum DeleteStatus
 {
     Deleted,
@@ -49,7 +49,7 @@ public sealed record DeleteReport(IReadOnlyList<DeleteEntryResult> Results, int 
     public int Count(DeleteStatus status) => Results.Count(r => r.Status == status);
 }
 
-// テスト用の差し込み口 (PLAN.md §4 の H1〜H5)。製品 CLI からは設定しない。handle は削除用ハンドルで、テストはこれを閉じない。
+// テスト用の差し込み口 (docs/TESTING.md#hooks の H1〜H5)。製品 CLI からは設定しない。handle は削除用ハンドルで、テストはこれを閉じない。
 public sealed class DeleteHooks
 {
     // H1: エントリの解決 (と事前判定) の後、削除用オープンの直前。引数は期待パス。
@@ -83,7 +83,7 @@ public sealed record DeleteRequest(
     Action<DeleteEntryResult>? OnResult = null,
     DeleteHooks? Hooks = null);
 
-// 削除用オープンの失敗の分類 (PLAN.md §4 の対応表)。表に無いコードは全て STOP とする。
+// 削除用オープンの失敗の分類 (docs/spec/filesystem.md#open-errors の対応表)。表に無いコードは全て STOP とする。
 internal static class DeletionOpenErrors
 {
     public const int AccessDenied = 5;
@@ -100,15 +100,15 @@ internal static class DeletionOpenErrors
     };
 }
 
-// delete のエントリ処理 (SPEC §3.4、§8.3、§8.4)。処理対象を ZIP の順に1件ずつ、その時点の target の状態で検証し、
+// delete のエントリ処理 (docs/SPEC.md#execution、docs/spec/filesystem.md#delete-flow、docs/spec/filesystem.md#failure-boundary)。処理対象を ZIP の順に1件ずつ、その時点の target の状態で検証し、
 // 条件を満たしたファイルをその場で削除する。各エントリで削除用ハンドルを1回だけ開き、同じハンドルで照合 → 検査と M0 →
 // (Strict) 1回の全バイト比較 → 最終確認 (M0 の全項目) → 削除の指示 → 成立確認 を行い、閉じてから次へ進む。
 // 比較用ハンドルは開かない。全件の削除候補とその状態を保持しない (列挙由来の基準と M0 はエントリの処理の間だけ持つ)。
-// STOP したら、その対象を削除せず、以後のエントリは処理しない。既に削除したファイルは戻さない (rollback しない)。
+// STOPしたら以後のエントリは処理しない。指示前は非削除、指示後は削除された可能性を保持する。既に削除したファイルは戻さない (rollback しない)。
 public static class SequentialDeleter
 {
     // FILE_DISPOSITION_FLAG_DELETE (0x1) | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS (0x2)。
-    // FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE (0x10) は含めない (DEC-10、read-only を最後の防壁として残す)。
+    // FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE (0x10) は含めない (docs/RATIONALE.md#disposition、read-only を最後の防壁として残す)。
     public const uint DispositionFlags = 0x3;
 
     public static DeleteReport Run(DeleteRequest request) => new DeleteRun(request).Execute();
@@ -128,7 +128,7 @@ internal sealed class DeleteRun
         _hooks = request.Hooks ?? new DeleteHooks();
         _comparer = new ContentComparer(request.Limits);
 
-        // 探す名前は処理対象のファイルエントリからだけ集める。指定外のエントリは解決も列挙もしない (SPEC §3.3)。
+        // 探す名前は処理対象のファイルエントリからだけ集める。指定外のエントリは解決も列挙もしない (docs/spec/cli.md#entries)。
         _target = new TargetResolver(request.Probe, request.Root, request.Entries);
     }
 
@@ -148,7 +148,7 @@ internal sealed class DeleteRun
             var entry = entries[i];
             if (entry.IsDirectory)
             {
-                // ディレクトリは削除しない (SPEC §1)。結果行を出さず、件数だけを要約に出す。
+                // ディレクトリは削除しない (docs/SPEC.md#scope)。結果行を出さず、件数だけを要約に出す。
                 directories++;
                 continue;
             }
@@ -179,7 +179,7 @@ internal sealed class DeleteRun
 
         try
         {
-            // 1. 解決: 親成分と最終成分の実名確認 (列挙結果は後続のエントリに再利用する。DEC-25)。
+            // 1. 解決: 親成分と最終成分の実名確認 (列挙結果は後続のエントリに再利用する。docs/RATIONALE.md#current-state)。
             var resolution = _target.Resolve(entry);
             switch (resolution.Kind)
             {
@@ -191,7 +191,7 @@ internal sealed class DeleteRun
                     return Result(DeleteStatus.SkippedSpecialFile, SkipReason.ParentReparsePoint);
             }
 
-            // 2. 事前判定 (D1、SPEC §7、DEC-28): 列挙項目の属性がディレクトリ・reparse・許可外なら、削除用ハンドルを開かない。
+            // 2. 事前判定 (D1、docs/spec/filesystem.md#special-files、docs/RATIONALE.md#special-precheck): 列挙項目の属性がディレクトリ・reparse・許可外なら、削除用ハンドルを開かない。
             // この判定は削除しない側にだけ働く。通過した対象もハンドル上で全ての判定を改めて行う。
             var item = resolution.Item;
             if (PreCheck(item) is { } preSkip)
@@ -199,7 +199,7 @@ internal sealed class DeleteRun
                 return Result(DeleteStatus.SkippedSpecialFile, preSkip);
             }
 
-            // 列挙由来の基準 (SPEC §8.2): 列挙項目の File ID、target ルートのボリュームシリアル、たどった親の File ID、期待パス。
+            // 列挙由来の基準 (docs/spec/filesystem.md#baselines): 列挙項目の File ID、target ルートのボリュームシリアル、たどった親の File ID、期待パス。
             var baseline = new IdentityBaseline(
                 new VolumeFileId(_request.Root.Id.VolumeSerialNumber, item.FileId), resolution.ParentFileId, expectedPath);
 
@@ -254,7 +254,7 @@ internal sealed class DeleteRun
                 return Stop(Describe(FatalKind.ParentFileIdMismatch, null));
             }
 
-            // 5. 検査と M0: §7 の特殊判定 (DeletePending を含む) とサイズ。M0 は内容比較の前に同じハンドルから取得する。
+            // 5. 検査と M0: docs/spec/filesystem.md#special-files の特殊判定 (DeletePending を含む) とサイズ。M0 は内容比較の前に同じハンドルから取得する。
             var inspection = HandleInspector.Inspect(handle, identity.Id, entry.Entry.Length, _request.ArchiveIdentity,
                 stopOnDeletePending: true, standardInformation: standard.Value);
             switch (inspection.Kind)
@@ -269,16 +269,16 @@ internal sealed class DeleteRun
 
             var m0 = HandleInspector.State(identity.Id, parent.Value, identity.FinalPath, inspection);
 
-            // 6. 全バイト比較 (Strict のみ): 同じハンドルから読み、このエントリについて1回だけ比較する。Fast は読まない (DEC-34)。
+            // 6. 全バイト比較 (Strict のみ): 同じハンドルから読み、このエントリについて1回だけ比較する。Fast は読まない (docs/RATIONALE.md#fast)。
             IComparisonHandle reader = _hooks.DuringCompare is { } during ? new FirstReadHook(handle, () => during(reference, handle)) : handle;
             var compared = _comparer.Verify(_request.Mode, _request.Contents, entry.Entry.Index, reader);
             switch (compared.Verdict)
             {
                 case ContentVerdict.Fatal:
-                    // §5.2 の 1〜5 の違反 (ZIP 側の異常)、target の読み取り失敗、実測展開量の合計の超過。
+                    // docs/spec/zip.md#verification の 1〜5 の違反 (ZIP 側の異常)、target の読み取り失敗、実測展開量の合計の超過。
                     return Stop($"全バイト比較で異常: {Describe(compared.FatalKind!.Value, compared.Detail)}");
                 case ContentVerdict.Mismatch:
-                    // §5.2 の 6 だけが不成立 (内容が異なる): 削除せず続行する。
+                    // docs/spec/zip.md#verification の 6 だけが不成立 (内容が異なる): 削除せず続行する。
                     return Result(DeleteStatus.Modified);
             }
 
@@ -289,7 +289,7 @@ internal sealed class DeleteRun
                 return Stop($"最終確認で不一致: {changed}");
             }
 
-            // 8. 削除: 同じハンドルへの削除の指示。失敗は種類を問わず STOP (DEC-12)。
+            // 8. 削除: 同じハンドルへの削除の指示。失敗は種類を問わず STOP (docs/RATIONALE.md#acl)。
             _hooks.BeforeDisposition?.Invoke(reference, handle);
             dispositionRequested = true;
             var disposition = handle.SetDispositionEx(SequentialDeleter.DispositionFlags);
@@ -301,7 +301,7 @@ internal sealed class DeleteRun
                 return Stop($"削除の指示が失敗: {disposition.Describe()}", possibly);
             }
 
-            // 9. 成立確認: 同じハンドルの DeletePending が true。API の成功だけでは成立としない (DEC-11)。
+            // 9. 成立確認: 同じハンドルの DeletePending が true。API の成功だけでは成立としない (docs/RATIONALE.md#disposition)。
             var confirmed = handle.GetStandardInformation();
             if (!confirmed.Succeeded)
             {
@@ -322,7 +322,7 @@ internal sealed class DeleteRun
         }
     }
 
-    // 削除用オープンの失敗 (SPEC §8.4、PLAN.md §4)。32・5 は識別確認で「列挙由来の基準と一致する通常ファイルに見える」ときだけ
+    // 削除用オープンの失敗 (docs/spec/filesystem.md#failure-boundary、docs/spec/filesystem.md#open-errors)。32・5 は識別確認で「列挙由来の基準と一致する通常ファイルに見える」ときだけ
     // DELETE_FAILED。識別確認は拒否された削除用オープンとは別のオープンであり、同じ個体を見たことも拒否の理由も保証しない。
     // 一致しても削除はせず、残して次へ進むだけなので、この限界は誤削除につながらない。不一致・失敗・判定不能は STOP。
     private DeleteEntryResult OpenFailed(ZipEntryRef entry, string expectedPath, IdentityBaseline baseline, int error)
@@ -352,7 +352,7 @@ internal sealed class DeleteRun
             $"削除用に開けません ({description})。識別確認の時点では同じファイルに見えるため、削除せずに残しました。内容は確認していません");
     }
 
-    // 識別確認の比較項目 (SPEC §8.4): File ID とボリュームシリアル、親 File ID、最終パスを列挙由来の基準と比較し、
+    // 識別確認の比較項目 (docs/spec/filesystem.md#failure-boundary): File ID とボリュームシリアル、親 File ID、最終パスを列挙由来の基準と比較し、
     // ディレクトリでない、reparse でない、DeletePending が false であることを確かめる。
     internal static string? IdentityMismatch(IdentityCheckInfo info, IdentityBaseline baseline)
     {

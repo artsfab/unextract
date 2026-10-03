@@ -83,7 +83,7 @@ internal sealed class FakeNode
     // 削除の指示を受けて、最後のハンドルが閉じるのを待っている状態 (FILE_STANDARD_INFO.DeletePending)。
     public bool DeletePending { get; set; }
 
-    // 削除の指示が成功を返すが何もしない (DELETE ビットを含まない flags 相当、テスト D18)。
+    // 削除の指示が成功を返すが何もしない (DELETE ビットを含まない flags 相当、テスト S33)。
     public bool DispositionHasNoEffect { get; set; }
 
     // 削除の指示を受け付けた後に例外を投げる (削除の指示の後の想定外の例外の経路)。
@@ -256,7 +256,7 @@ internal sealed class FakeFileSystem : IFileSystemProbe, IDeletionProbe
             : ProbeResult<VolumeFileId>.Ok(new VolumeFileId(node.VolumeSerial, node.Id));
     }
 
-    // 削除用オープン (SPEC §8.1)。実機と同じく、ディレクトリと削除保留中の対象は 5 (ERROR_ACCESS_DENIED)。
+    // 削除用オープン (docs/spec/filesystem.md#handles)。実機と同じく、ディレクトリと削除保留中の対象は 5 (ERROR_ACCESS_DENIED)。
     public ProbeResult<IDeletionHandle> OpenForDeletion(string path)
     {
         Calls.Add($"OpenDeletion {path}");
@@ -277,7 +277,7 @@ internal sealed class FakeFileSystem : IFileSystemProbe, IDeletionProbe
         return ProbeResult<IDeletionHandle>.Ok(handle);
     }
 
-    // 識別確認 (SPEC §8.4)。削除保留中は実機と同じく識別確認のオープンも 5。
+    // 識別確認 (docs/spec/filesystem.md#failure-boundary)。削除保留中は実機と同じく識別確認のオープンも 5。
     public ProbeResult<IdentityCheckInfo> CheckIdentity(string path)
     {
         Calls.Add($"CheckIdentity {path}");
@@ -477,7 +477,7 @@ internal sealed class FakeDirectoryHandle(FakeFileSystem fs, FakeNode node, stri
 
 internal sealed class FakeComparisonHandle(FakeFileSystem fs, FakeNode node) : FakeFileHandle(fs, node, "comparison");
 
-// 削除用ハンドル。読み取りと削除の指示も呼び出し記録に残す (テスト D03、D17)。
+// 削除用ハンドル。読み取りと削除の指示も呼び出し記録に残す (テスト S05、S32)。
 internal sealed class FakeDeletionHandle(FakeFileSystem fs, FakeNode node) : FakeFileHandle(fs, node, "deletion"), IDeletionHandle
 {
     public List<uint> DispositionFlags { get; } = [];

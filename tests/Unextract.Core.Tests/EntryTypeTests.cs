@@ -4,7 +4,7 @@ using static Unextract.Core.Tests.TestHelpers;
 
 namespace Unextract.Core.Tests;
 
-// SPEC §4.4 (DEC-7)。ExternalAttributes の上位16ビットの種別と下位の DOS 属性。
+// docs/spec/zip.md#types (docs/RATIONALE.md#real-names)。ExternalAttributes の上位16ビットの種別と下位の DOS 属性。
 public class EntryTypeTests
 {
     private static Unextract.Core.Zip.ZipPrevalidationResult ValidateOne(string name, int attributes, long length = 0) =>

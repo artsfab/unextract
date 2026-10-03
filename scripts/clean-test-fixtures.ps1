@@ -3,7 +3,7 @@
     Lists (default) or removes the test fixtures left under tests/*/bin/*/*/fixtures.
 
 .DESCRIPTION
-    The tests never delete their own fixtures (docs/PLAN_TESTS.md). This script is the manual
+    The tests never delete their own fixtures (docs/TESTING.md). This script is the manual
     cleanup for developers. Without -Execute it only lists what it would do and changes nothing.
 
     With -Execute it runs, in this order, and stops at the first failure:

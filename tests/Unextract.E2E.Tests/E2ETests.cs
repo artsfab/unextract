@@ -4,7 +4,7 @@ using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.E2E.Tests;
 
-// E2E (X 系、docs/PLAN_TESTS.md §11)。ビルド済みの unextract.exe (または UNEXTRACT_E2E_EXE の exe) を別プロセスとして起動し、
+// E2E (X 系、docs/TESTING.md#e2e)。ビルド済みの unextract.exe (または UNEXTRACT_E2E_EXE の exe) を別プロセスとして起動し、
 // 終了コード・stdout・stderr・ファイルシステムの結果を検証する。stdin・stderr は常にリダイレクトされるため、exe からは
 // 非対話で、進捗は表示されない。TTY が必要な項目 (対話の [y/N]) は PTY テスト (X28) と docs/MANUAL_TESTS.md の M 系で扱う。
 // delete の実行の前には必ず E2EFixture の領域外ガードを通す (誤って削除に入った場合に備えて、中止の実行でも通す)。
@@ -20,7 +20,7 @@ public class E2ETests
     private const string NotInteractive = "標準入力が対話的でなく --yes も無いため、確認できません。";
     private const string Heading = "Status                Entry -> Target";
 
-    // PLAN.md §5.2 の指定を独立した期待値として保持する (製品定数は参照しない)。
+    // docs/spec/cli.md#warning の指定を独立した期待値として保持する (製品定数は参照しない)。
     private const string Warning =
         "警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、ZIP から正常に展開できることは確認していません。";
 
@@ -519,7 +519,7 @@ public class E2ETests
         Assert.True(File.Exists(crc.ArchivePath));
     }
 
-    // X27: 終了コード 0 / 1 / 2 (SPEC §2)。各コードは X16〜X26 でも確認しているが、ここで1回ずつまとめて確かめる。
+    // X27: 終了コード 0 / 1 / 2 (docs/spec/cli.md#arguments)。各コードは X16〜X26 でも確認しているが、ここで1回ずつまとめて確かめる。
     [Fact]
     public void X27_ExitCodes()
     {

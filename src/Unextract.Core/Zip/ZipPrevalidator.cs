@@ -29,7 +29,7 @@ public sealed class ZipPrevalidationResult
     internal static ZipPrevalidationResult Fail(FatalError fatal) => new(fatal, [], 0);
 }
 
-// ZIP 事前検証 (SPEC §3 の 3)。全エントリの名前・種類・重複と衝突・resource limits を検査する。
+// ZIP 事前検証 (docs/spec/zip.md#names の事前検証)。全エントリの名前・種類・重複と衝突・resource limits を検査する。
 // target に触れず、入力はエントリの一覧だけなので target の状態に依存しない。
 // エントリを ZIP 内の順序で1件ずつ検査し、最初の FATAL で打ち切る。1エントリ内の検査順も固定のため、
 // どのエントリのどの原因で FATAL になるかは ZIP 内の順序で決定的に決まる。
@@ -89,7 +89,7 @@ public static class ZipPrevalidator
                 return Fail(FatalKind.MetadataTooLarge);
             }
 
-            // 不正な UTF-8 は例外にならず U+FFFD に置換されるため、復号後の名前で検出する (SPEC §4.1)。
+            // 不正な UTF-8 は例外にならず U+FFFD に置換されるため、復号後の名前で検出する (docs/spec/zip.md#decoding)。
             if (name.Contains('\uFFFD'))
             {
                 return Fail(FatalKind.NameContainsReplacementCharacter);
@@ -106,13 +106,13 @@ public static class ZipPrevalidator
                 return Fail(FatalKind.PathTooDeep);
             }
 
-            // ZIP の特殊エントリ (SPEC §4.4、DEC-7)。
+            // ZIP の特殊エントリ (docs/spec/zip.md#types、docs/RATIONALE.md#real-names)。
             if (ZipEntryTypeRules.Check(entry, path.IsDirectory) is { } typeError)
             {
                 return Fail(typeError);
             }
 
-            // 宣言展開量は MISSING 相当を含む全ファイルエントリに適用する (SPEC §11、DEC-6)。
+            // 宣言展開量は MISSING 相当を含む全ファイルエントリに適用する (docs/spec/zip.md#limits、docs/RATIONALE.md#zip-limits)。
             // ディレクトリエントリの Length は上で 0 であることを確認済み。
             if (!path.IsDirectory)
             {

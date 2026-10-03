@@ -23,7 +23,7 @@ internal sealed class ScriptedPrompt(bool interactive, params string?[] answers)
     }
 }
 
-// Output は標準出力、Error は標準エラー出力に相当する (SPEC §10.4)。
+// Output は標準出力、Error は標準エラー出力に相当する (docs/spec/cli.md#streams)。
 internal sealed record CommandRun<T>(T Outcome, string Output, string Error)
 {
     public IReadOnlyList<string> OutputLines => Output.Split(Environment.NewLine).SkipLast(1).ToList();

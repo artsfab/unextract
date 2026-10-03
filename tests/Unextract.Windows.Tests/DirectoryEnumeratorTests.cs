@@ -4,7 +4,7 @@ using static Unextract.Windows.Tests.TestFixture;
 
 namespace Unextract.Windows.Tests;
 
-// SPEC §6.2 の 1・2 の列挙を実 NTFS で確認する (照合・保持の規則は段階 C-2)。
+// docs/spec/filesystem.md#real-names の 1・2 の列挙を実 NTFS で確認する (照合・保持の規則は docs/spec/filesystem.md#real-names)。
 public class DirectoryEnumeratorTests(ITestOutputHelper output)
 {
     private const uint FileAttributeDirectory = 0x10;
@@ -73,7 +73,7 @@ public class DirectoryEnumeratorTests(ITestOutputHelper output)
         Assert.Equal(FileIdOf(junction), junctionEntry.FileId);
     }
 
-    // target ルート用ハンドルでも列挙できる (SPEC §6.2 の 1: target ルートは保持しているハンドルをそのまま使う)
+    // target ルート用ハンドルでも列挙できる (docs/spec/filesystem.md#real-names の 1: target ルートは保持しているハンドルをそのまま使う)
     [Fact]
     public void Enumerate_WorksWithTargetRootHandle()
     {

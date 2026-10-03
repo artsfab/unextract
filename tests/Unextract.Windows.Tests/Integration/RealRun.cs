@@ -67,7 +67,7 @@ internal static class RealRun
         public bool Opened(string relative) => Probe!.Opened.Any(p => p.EndsWith(@"\target\" + relative, StringComparison.Ordinal));
     }
 
-    // mode は実行全体のモード (SPEC §15)。afterResults は結果表示の直後に呼ぶ (実行中の変更の注入に使う)。
+    // mode は実行全体のモード (docs/SPEC.md#modes)。afterResults は結果表示の直後に呼ぶ (実行中の変更の注入に使う)。
     public static Result Analyze(string zipPath, string target, Limits? limits = null, RunMode mode = RunMode.Strict, Action? afterResults = null)
     {
         var output = new StringWriter();
@@ -139,7 +139,7 @@ internal static class RealRun
 
     public static byte[] Bytes(string text) => System.Text.Encoding.UTF8.GetBytes(text);
 
-    // 削除対象の分類 (Strict は MATCHED、Fast は SAME_SIZE。PLAN_TESTS のモード違いの再利用の原則)。
+    // 削除対象の分類 (Strict は MATCHED、Fast は SAME_SIZE。docs/TESTING.md#principles のモード適用)。
     public static Classification Candidate(RunMode mode) => mode == RunMode.Fast ? Classification.SameSize : Classification.Matched;
 
     // ディレクトリ配下の全項目の (相対パス → 種類・サイズ・SHA-256・更新日時)。

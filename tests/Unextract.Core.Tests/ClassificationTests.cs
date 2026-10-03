@@ -8,13 +8,13 @@ using static Unextract.Core.Tests.Fakes.PipelineHarness;
 
 namespace Unextract.Core.Tests;
 
-// target 側の分類 (SPEC §6、§7) を偽ファイルシステム上で確認する。ZIP は実際の ZipArchive で読む。
+// target 側の分類 (docs/spec/filesystem.md#classification、docs/spec/filesystem.md#special-files) を偽ファイルシステム上で確認する。ZIP は実際の ZipArchive で読む。
 public class ClassificationTests
 {
     private static readonly byte[] Hello = Bytes("hello");
     private static readonly byte[] World = Bytes("world!");
 
-    // 共通の安全性テストを両モードで実行する (PLAN_TESTS のモード違いの再利用の原則)。削除候補の期待は Candidate(mode) で読み替える。
+    // 共通の安全性テストを両モードで実行する (docs/TESTING.md#principles のモード適用)。削除候補の期待は Candidate(mode) で読み替える。
     public static TheoryData<RunMode> BothModes => new() { RunMode.Strict, RunMode.Fast };
 
     private static Classification Single(AnalysisResult result)
@@ -46,7 +46,7 @@ public class ClassificationTests
     }
 
     // T17: T01 と同じ4つを --fast で → SAME_SIZE、SAME_SIZE、MODIFIED (ZIP 内容を読まない)、SAME_SIZE。
-    // 同一内容と1 byte 変更を区別しない。0 byte に特例はない (SPEC §15.2)。
+    // 同一内容と1 byte 変更を区別しない。0 byte に特例はない (docs/SPEC.md#modes)。
     // ZIP エントリの GetContent・Open()・Crc32 は呼び出し記録に残らない。target の内容の読み取りは、読めば例外になるよう注入して確かめる。
     [Fact]
     public void T17_Fast_SizeOnlyWithoutReadingContent()
@@ -224,7 +224,7 @@ public class ClassificationTests
         Assert.DoesNotContain("other-", report, StringComparison.Ordinal);
     }
 
-    // §6.2 の 6: 同じディレクトリは1回だけ列挙する (ディレクトリごとの成分集合を先に集める)
+    // docs/spec/filesystem.md#real-names の 6: 同じディレクトリは1回だけ列挙する (ディレクトリごとの成分集合を先に集める)
     [Fact]
     public void RealNameCheck_EnumeratesEachDirectoryOnce()
     {
@@ -358,7 +358,7 @@ public class ClassificationTests
 
     // T09: ZIP にファイルがあり target はディレクトリ → SKIPPED_SPECIAL_FILE。
     // T16 (T09 の補強): そのディレクトリの FileStreamInfo が ERROR_HANDLE_EOF で失敗しても FATAL にならない。
-    // Directory を最初に判定し、ストリーム一覧などを取得しない (SPEC §7 の判定順序)。
+    // Directory を最初に判定し、ストリーム一覧などを取得しない (docs/spec/filesystem.md#special-files の判定順序)。
     [Theory]
     [MemberData(nameof(BothModes))]
     public void T09_T16_TargetDirectory_IsSkippedWithoutStreamQuery(RunMode mode)
@@ -409,7 +409,7 @@ public class ClassificationTests
     }
 
     // T10: 情報の取得失敗、存在確認後のオープン失敗、比較中の読み取り失敗 → SKIP ではなく全体 FATAL
-    // Fast では「比較中の読取失敗」を除く (Fast は target の内容を読まない。PLAN_TESTS のモード違いの再利用の原則)。
+    // Fast では「比較中の読取失敗」を除く (Fast は target の内容を読まない。docs/TESTING.md#principles のモード適用)。
     [Theory]
     [InlineData(FakeOp.Streams, FatalKind.TargetInfoFailed, RunMode.Strict)]
     [InlineData(FakeOp.Basic, FatalKind.TargetInfoFailed, RunMode.Strict)]
@@ -638,7 +638,7 @@ public class ClassificationTests
         }
     }
 
-    // A06・SPEC §8.2: analyze はスナップショット・削除候補・M0 を持たず、親 File ID も取得しない (親 File ID の照合は delete だけ)。
+    // A06・docs/spec/filesystem.md#baselines: analyze はスナップショット・削除候補・M0 を持たず、親 File ID も取得しない (親 File ID の照合は delete だけ)。
     // 各エントリの結果は、表示用の Target (期待パス、\\?\ 形式) だけを持つ。MISSING・DIRECTORY では実在しない位置でもよい。
     [Theory]
     [MemberData(nameof(BothModes))]
@@ -752,7 +752,7 @@ public class ClassificationTests
     }
 
     // R09: R08 と同じ差し替えで実測合計の上限を 0 にし、サイズ一致の内容比較候補を含む ZIP を --fast で実行する
-    // → FATAL にならず SAME_SIZE。実測展開量を計上しない (SPEC §15.2)。対照として同じ入力の Strict は FATAL。
+    // → FATAL にならず SAME_SIZE。実測展開量を計上しない (docs/SPEC.md#modes)。対照として同じ入力の Strict は FATAL。
     [Theory]
     [InlineData(RunMode.Fast)]
     [InlineData(RunMode.Strict)]

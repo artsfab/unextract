@@ -2,10 +2,10 @@ using Unextract.Core.Analysis;
 
 namespace Unextract.Core.Display;
 
-// analyze と delete に共通の表示の部品 (SPEC §10、PLAN.md §5)。純粋関数。
+// analyze と delete に共通の表示の部品 (docs/spec/cli.md#output、docs/spec/cli.md#output)。純粋関数。
 public static class ReportText
 {
-    // Fast の警告 (SPEC §15.6、PLAN.md §5.2、DEC-20)。analyze・delete のヘッダーの先頭行と、delete の [y/N] の直前で同じ文言を使う。
+    // Fast の警告 (docs/spec/cli.md#warning、docs/spec/cli.md#warning、docs/RATIONALE.md#fast)。analyze・delete のヘッダーの先頭行と、delete の [y/N] の直前で同じ文言を使う。
     public const string FastWarning =
         "警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、ZIP から正常に展開できることは確認していません。";
 
@@ -25,7 +25,7 @@ public static class ReportText
 
     public static string ProcessingProgress(int current, int total) => $"Processing {current} / {total}";
 
-    // ヘッダー (PLAN.md §5.2)。Fast では警告を最初の行に置く。archivePath は指定されたまま (表示用エスケープのみ)、
+    // ヘッダー (docs/spec/cli.md#warning)。Fast では警告を最初の行に置く。archivePath は指定されたまま (表示用エスケープのみ)、
     // targetFinalPath は保持用ハンドルの最終パス (\\?\ を除いて表示する)。
     public static IReadOnlyList<string> Header(string archivePath, string targetFinalPath, RunMode mode)
     {
@@ -42,7 +42,7 @@ public static class ReportText
         return lines;
     }
 
-    // 結果行 (SPEC §10.1、PLAN.md §5.1): 状態名を 20 桁に左詰め + 空白2個 + Entry + " -> " + Target + suffix。
+    // 結果行 (docs/spec/cli.md#result-lines、docs/spec/cli.md#result-lines): 状態名を 20 桁に左詰め + 空白2個 + Entry + " -> " + Target + suffix。
     // Entry は ZIP の FullName を変換しない (\ を \\ にしない)。危険な文字を含む Entry は、行末に転記できない印を付ける。
     // target は期待パス (\\?\ 形式) で、\\?\ を除いて表示する。suffix は SKIPPED_SPECIAL_FILE の理由、DELETE_FAILED の理由など。
     public static string Line(string status, string entry, string target, string? suffix = null)
@@ -53,7 +53,7 @@ public static class ReportText
         return escaped ? line + EscapedMark : line;
     }
 
-    // SKIPPED_SPECIAL_FILE の理由の表示 (PLAN.md §5.1)。
+    // SKIPPED_SPECIAL_FILE の理由の表示 (docs/spec/cli.md#result-lines)。
     public static string Describe(SkipReason reason) => reason switch
     {
         SkipReason.ParentReparsePoint => "親が reparse",

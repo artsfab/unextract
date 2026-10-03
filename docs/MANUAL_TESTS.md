@@ -1,8 +1,8 @@
-# unextract 手動テスト手順書 (M 系)
+# 手動テスト手順
 
-仕様の唯一の基準は [`SPEC.md`](SPEC.md)。本書は、自動テスト ([`PLAN_TESTS.md`](PLAN_TESTS.md)) では確認できない項目を、手順どおりに実施すれば誰でも同じ確認ができる形で定める。期待結果は原則として SPEC / PLAN_TESTS とリポジトリ直下の `README.md` に書かれた事実に従う。SPEC が具体的な文言や運用詳細を PLAN に委ねている項目については、確定済みの PLAN の記述に従う。SPEC・README に定めがなく実装の挙動にすぎない点は「観察」として分けて書き、合否の基準にしない。
+役割: 現行M01〜M13のfixture・実端末操作・観測方法。該当項目を実施するときに読む。実施状態は[OPEN_ISSUES](OPEN_ISSUES.md#manual-status)だけに記録する。
 
-2026-10-03 に実行モデルを改訂し (`analyze` / `delete`。SPEC 冒頭)、本書の手順を新しい CLI に合わせて書き直した。**新しい手順は、新方式の実装 (`PLAN.md` §3.2) の後に実施する。** 旧形式 (`unextract <archive.zip> --target <dir> [--dry-run]`) で 2026-10-02 に実施した記録は §6 に旧方式の記録として残す (旧手順の M07 は「確認待ち中の変更による停止」を確かめたもので、新方式では期待結果が変わった)。
+[前提](#prerequisites) / [fixture](#fixtures) / [項目](#cases) / [記録](#recording) / [手動に残す理由](#manual-purpose)
 
 > **安全上の注意 (必ず読む)**
 >
@@ -12,13 +12,14 @@
 
 ## 1. 目的と実施タイミング
 
-- 目的: 対話的なコンソールが必要な挙動 (`delete` の `[y/N]` の確認入力、Ctrl+C、進捗と逐次結果の表示、コードページごとの名前の表示、確認待ち中の外部変更、`--fast` の警告) を実際の端末で確認する。あわせて、改訂で生じた未実測の事項 (SPEC §13) のうち手動で確かめられるものを実測する (M09〜M13)。
-- 実施タイミング: 新方式の実装の後に1回。その後は、確認プロンプト・進捗表示・出力のエンコーディングに関わるコード (`src/Unextract.Cli` の `Program.cs`、`CliApplication.cs` の `ConsolePrompt`・`ProgressLine` など) を変更したときに行う。M09〜M13 の実測は、結果を `PLAN_VALIDATION.md` に記録したら、Windows の更新などで前提が変わったと考えられるときだけ再実施する。
+- 目的: 対話的なコンソールが必要な挙動 (`delete` の `[y/N]` の確認入力、Ctrl+C、進捗と逐次結果の表示、コードページごとの名前の表示、確認待ち中の外部変更、`--fast` の警告) を実際の端末で確認する。あわせて、[未実測の事項](OPEN_ISSUES.md#manual-status)のうち手動で確かめられるものを実測する (M09〜M13)。
+- 実施タイミング: 初回に確認する。その後は、確認プロンプト・進捗表示・出力のエンコーディングに関わるコード (`src/Unextract.Cli` の `Program.cs`、`CliApplication.cs` の `ConsolePrompt`・`ProgressLine` など) を変更したときに行う。M09〜M13 の実測は、結果を[OPEN_ISSUES](OPEN_ISSUES.md#manual-status)に反映したら、Windows の更新などで前提が変わったと考えられるときだけ再実施する。
 
+<a id="prerequisites"></a>
 ## 2. 前提
 
 - Windows 11。
-- 通常の PowerShell (Windows PowerShell 5.1 または PowerShell 7) を、Windows Terminal またはコンソールホストで開く。**Git Bash、VS Code などのエディタ内のターミナル、出力をパイプ・リダイレクトする実行は使わない** (標準入力・標準エラー出力がリダイレクトされると、確認と進捗の挙動が変わるため。SPEC §2、§10.4)。ただし M13 は、リダイレクトの挙動そのものを確かめる項目なので、手順どおりにリダイレクトする。M09・M12 は Windows PowerShell 5.1 を使う (.NET Framework の `FileStream` の `FileSystemRights` 指定を使うため)。
+- 通常の PowerShell (Windows PowerShell 5.1 または PowerShell 7) を、Windows Terminal またはコンソールホストで開く。**Git Bash、VS Code などのエディタ内のターミナル、出力をパイプ・リダイレクトする実行は使わない** (標準入力・標準エラー出力がリダイレクトされると、確認と進捗の挙動が変わるため。[引数と終了状態](spec/cli.md#arguments)、[出力先と進捗](spec/cli.md#streams))。ただし M13 は、リダイレクトの挙動そのものを確かめる項目なので、手順どおりにリダイレクトする。M09・M12 は Windows PowerShell 5.1 を使う (.NET Framework の `FileStream` の `FileSystemRights` 指定を使うため)。
 - 管理者権限は不要 (管理者として開かない)。
 - exe は、publish した単一ファイル版を推奨する (README の「配布ビルド」)。出力先はリポジトリの外にする。例:
 
@@ -30,6 +31,7 @@
   ビルド出力の `src\Unextract.Cli\bin\<構成>\net10.0-windows\unextract.exe` を使ってもよい。どちらを使ったかを結果に書く。
 - Python ランチャー `py` (fixture の作成に使う)。
 
+<a id="fixtures"></a>
 ## 3. fixture の作り方
 
 リポジトリ直下で次を実行する。exe のパスは表示されるコマンドに埋め込むためだけに使い、スクリプトは exe を実行しない。
@@ -78,11 +80,13 @@ py scripts\make_manual_fixtures.py "$exe"
 
 - 実行後にもう一度 `Get-ChildItem -Recurse -File "$s\target" | ForEach-Object FullName` を実行し、実行前と比べる。
 
+<a id="cases"></a>
 ## 5. 項目
 
+<a id="m01"></a>
 ### M01: `delete` の `[y/N]` に `n`
 
-- 目的: 確認で `y`/`Y` 以外を入力すると中止し、target のエントリに触れないこと (SPEC §2、§3.2)。
+- 目的: 確認で `y`/`Y` 以外を入力すると中止し、target のエントリに触れないこと ([引数と終了状態](spec/cli.md#arguments)、[確認](spec/cli.md#confirmation))。
 - シナリオ: `yn-n`
 - 手順:
   1. `$s = "$env:TEMP\unextract-manual\<日時>\yn-n"`
@@ -92,41 +96,45 @@ py scripts\make_manual_fixtures.py "$exe"
   5. `$LASTEXITCODE`
   6. `Get-ChildItem -Recurse -File "$s\target" | ForEach-Object FullName`
 - 期待結果:
-  - 確認の前に、ヘッダー (Archive、Target、Mode、凡例) と `対象: 全 6 エントリ` が表示され、**結果行 (`MATCHED`・`DELETED` など) は表示されない** (確認は最初のエントリの処理の前。SPEC §3.2、§10.3)。確認文は、最大 5 件のファイルエントリを1件ずつ検証して削除すること、途中で停止した場合に削除済みのファイルが戻らないことを示す (`PLAN.md` §5.4)。
-  - 中止し、削除0件。「中止しました。削除0件。」。終了コード 2 (SPEC §2)。
+  - 確認の前に、ヘッダー (Archive、Target、Mode、凡例) と `対象: 全 6 エントリ` が表示され、**結果行 (`MATCHED`・`DELETED` など) は表示されない** (確認は最初のエントリの処理の前。[確認](spec/cli.md#confirmation)、[delete表示](spec/cli.md#delete-output))。確認文は、最大 5 件のファイルエントリを1件ずつ検証して削除すること、途中で停止した場合に削除済みのファイルが戻らないことを示す ([確認表示](spec/cli.md#delete-output))。
+  - 中止し、削除0件。「中止しました。削除0件。」。終了コード 2 ([引数と終了状態](spec/cli.md#arguments))。
   - 手順 6 の一覧が手順 2 と同じ。
 
+<a id="m02"></a>
 ### M02: `delete` の `[y/N]` に空 Enter
 
-- 目的: 空入力は中止になること (SPEC §2)。
+- 目的: 空入力は中止になること ([引数と終了状態](spec/cli.md#arguments))。
 - シナリオ: `yn-enter`
 - 手順: M01 と同じ (シナリオ名を `yn-enter` にする)。手順 4 では何も入力せずに Enter だけを押す。
 - 期待結果: M01 と同じ (中止、削除0件、終了コード 2、target は変わらない)。
 
+<a id="m03"></a>
 ### M03: `delete` の `[y/N]` に `y`
 
-- 目的: `y` の明示入力でだけ逐次処理を始め、全バイト一致したファイルだけが削除され、結果が1件ずつ表示されること (SPEC §2、§8.3、§10.3)。
+- 目的: `y` の明示入力でだけ逐次処理を始め、全バイト一致したファイルだけが削除され、結果が1件ずつ表示されること ([引数と終了状態](spec/cli.md#arguments)、[削除順序](spec/filesystem.md#delete-flow)、[delete表示](spec/cli.md#delete-output))。
 - シナリオ: `yn-y`
 - 手順: M01 と同じ (シナリオ名を `yn-y` にする)。手順 4 で `y` を入力して Enter。**実行前に `--target` のパスを確認する。**
 - 期待結果:
-  - 処理した順に1行ずつ、`DELETED same1.txt -> ...`、`DELETED same2.txt -> ...`、`DELETED docs/deep.txt -> ...`、`MODIFIED changed.txt -> ...`、`MISSING missing.txt -> ...` の形の結果行が表示される (状態名の列は 20 桁、ZIP の順。`docs/` の DIRECTORY は行を出さない)。`unrelated.txt` は表示されない (SPEC §1)。
+  - 処理した順に1行ずつ、`DELETED same1.txt -> ...`、`DELETED same2.txt -> ...`、`DELETED docs/deep.txt -> ...`、`MODIFIED changed.txt -> ...`、`MISSING missing.txt -> ...` の形の結果行が表示される (状態名の列は 20 桁、ZIP の順。`docs/` の DIRECTORY は行を出さない)。`unrelated.txt` は表示されない ([対象と非目標](SPEC.md#scope))。
   - `same1.txt`、`same2.txt`、`docs\deep.txt` だけが削除される。`changed.txt`、`unrelated.txt`、`docs\` フォルダー、`archive.zip` は残る。
-  - 要約 `要約: 削除済み 3、MODIFIED 1、MISSING 1、SKIPPED_SPECIAL_FILE 0、DIRECTORY 1、DELETE_FAILED 0、未処理 0` が表示される。
-  - 終了コード 0 (SPEC §2)。
+  - 要約 `要約: 削除済み 3、MODIFIED 1、MISSING 1、SKIPPED_SPECIAL_FILE 0、DIRECTORY 1、DELETE_FAILED 0、処理対象外 0、未処理 0` が表示される。
+  - 終了コード 0 ([引数と終了状態](spec/cli.md#arguments))。
 
+<a id="m04"></a>
 ### M04: `delete` の `[y/N]` で Ctrl+C
 
-- 目的: 確認待ちでの中断で、何も削除されないこと (SPEC §10.4「Ctrl+C などの中断で未検証のファイルを削除しないことは守る」)。
+- 目的: 確認待ちでの中断で、何も削除されないこと ([出力先と進捗](spec/cli.md#streams)「Ctrl+C などの中断で未検証のファイルを削除しないことは守る」)。
 - シナリオ: `yn-ctrlc`
 - 手順: M01 と同じ (シナリオ名を `yn-ctrlc` にする)。手順 4 で何も入力せずに Ctrl+C を押す。
 - 期待結果:
   - target の一覧が実行前と同じ (削除0件)。
-  - 終了コードは SPEC に定めがない (Ctrl+C 専用の後処理は MVP に含めない)。**`$LASTEXITCODE` の値を事実として記録する** (合否の基準にしない)。
+  - 終了コードは SPEC に定めがない (Ctrl+C 専用の後処理は設けない)。**`$LASTEXITCODE` の値を事実として記録する** (合否の基準にしない)。
   - 観察: 表示されたメッセージ (あれば) と、終了後のプロンプトの状態を記録する。
 
+<a id="m05"></a>
 ### M05: 進捗と逐次結果の表示
 
-- 目的: `analyze` の `Checking n / total` と `delete` の `Processing n / total` が標準エラー出力に表示され、標準エラー出力をリダイレクトすると表示されないこと。`delete` で結果行と進捗が混ざって読めなくならないこと (SPEC §10.4)。
+- 目的: `analyze` の `Checking n / total` と `delete` の `Processing n / total` が標準エラー出力に表示され、標準エラー出力をリダイレクトすると表示されないこと。`delete` で結果行と進捗が混ざって読めなくならないこと ([出力先と進捗](spec/cli.md#streams))。
 - シナリオ: `progress` (500 エントリ)。M05 では削除を伴う実行を1回だけ行う。
 - 手順:
   1. `$s = "$env:TEMP\unextract-manual\<日時>\progress"`
@@ -139,13 +147,14 @@ py scripts\make_manual_fixtures.py "$exe"
 - 期待結果:
   - 手順 2: `Checking n / total` の形の進捗が表示され、結果行 (`MATCHED` 500 行) と合計行が続く。終了コード 0。
   - 手順 4: 進捗は表示されない。結果行と合計行は表示される。終了コード 0。
-  - 手順 6: `Processing n / total` の進捗と、`DELETED` の結果行 500 行が表示され、`要約: 削除済み 500、...、DELETE_FAILED 0、未処理 0` が表示される。**結果行が進捗の表示の途中に続いて崩れることがない。** 終了コード 0。
+  - 手順 6: `Processing n / total` の進捗と、`DELETED` の結果行 500 行が表示され、`要約: 削除済み 500、...、DELETE_FAILED 0、処理対象外 0、未処理 0` が表示される。**結果行が進捗の表示の途中に続いて崩れることがない。** 終了コード 0。
   - 観察 (合否の基準にしない): 進捗が1行の上書きで更新されるか。結果行の流れの中で進捗がどう見えるか。
 - 確認できないこと: 500 件では表示が速く、途中の値が目で追えないことがある。その場合は「最後の値だけ見えた」などと事実を記録する。
 
+<a id="m06"></a>
 ### M06: 日本語名の表示 (コードページ 932 / 65001)
 
-- 目的: 日本語名と CP437 由来の文字を含む名前が、コンソールのコードページによらず、Entry の列に変換されずに表示されること (SPEC §4.1、§10.1)。
+- 目的: 日本語名と CP437 由来の文字を含む名前が、コンソールのコードページによらず、Entry の列に変換されずに表示されること ([名前の復号](spec/zip.md#decoding)、[結果行](spec/cli.md#result-lines))。
 - シナリオ: `ja` (`analyze` だけを使い、削除しない)
 - 手順:
   1. `$s = "$env:TEMP\unextract-manual\<日時>\ja"`
@@ -162,9 +171,10 @@ py scripts\make_manual_fixtures.py "$exe"
   - 観察 (合否の基準にしない): 手順 5 の `chcp` の値 (unextract の実行後にコードページが実行前の値のままか)。
 - フォントによる表示: 文字が `□` (豆腐) で表示されるのは、端末のフォントにその文字がないためで、unextract の出力の問題ではない。この場合は「フォント由来の □」と備考に別記し、文字化け (別の文字や `?` に置き換わる) と区別する。
 
+<a id="m07"></a>
 ### M07: 確認待ち中の外部変更 (現在状態での判定)
 
-- 目的: `delete` が確認の後に各ファイルを**その時点の状態で**検証すること。確認待ちの間に変更されたファイルは、変更後の内容で判定され、削除されないこと (SPEC §2、§3.2、§8.3)。
+- 目的: `delete` が確認の後に各ファイルを**その時点の状態で**検証すること。確認待ちの間に変更されたファイルは、変更後の内容で判定され、削除されないこと ([引数と終了状態](spec/cli.md#arguments)、[確認](spec/cli.md#confirmation)、[削除順序](spec/filesystem.md#delete-flow))。
 - シナリオ: `stop`
 - 手順:
   1. `$s = "$env:TEMP\unextract-manual\<日時>\stop"`
@@ -179,12 +189,12 @@ py scripts\make_manual_fixtures.py "$exe"
   - `f01.txt`〜`f09.txt` は `DELETED`、`f10.txt` は `MODIFIED` (サイズが変わったため) と表示され、`f10.txt` だけが残る。
   - STOP にはならない (確認待ちの間はファイルを開いておらず、確認の後の検証が変更後の状態を見るため)。要約は削除済み 9、MODIFIED 1。
   - 終了コード 0。
-- 旧方式との違い: 旧方式では同じ操作で `f10.txt` の削除直前再検証が不一致になり停止した (§6 の旧記録)。新方式では確認が比較より前にあるため、期待結果が変わった。
 
+<a id="m08"></a>
 ### M08: `--fast` の警告と確認プロンプト
 
-- 目的: `--fast` の `analyze` のヘッダー、`delete` のヘッダー、`delete` の `[y/N]` の直前に Fast の警告が表示され、Strict では表示されないこと (SPEC §10.4、§15.6、`PLAN.md` §5.2)。
-- 機能部分は E2E PTY (`PLAN_TESTS.md` X28) で自動確認する。以下の手動手順は、実端末のフォント・折り返し・視認性の確認用として残す。
+- 目的: `--fast` の `analyze` のヘッダー、`delete` のヘッダー、`delete` の `[y/N]` の直前に Fast の警告が表示され、Strict では表示されないこと ([出力先と進捗](spec/cli.md#streams)、[Fast警告](spec/cli.md#warning))。
+- 機能部分は E2E PTY ([TESTING](TESTING.md#e2e) X28) で自動確認する。以下の手動手順は、実端末のフォント・折り返し・視認性の確認用として残す。
 - シナリオ: `yn-n` (どの実行も `n` で中止し、削除しない)。M01 の後に続けて使う場合は、M01 で target が変わっていないことを確かめてから使う。
 - 手順:
   1. `$s = "$env:TEMP\unextract-manual\<日時>\yn-n"`
@@ -195,14 +205,15 @@ py scripts\make_manual_fixtures.py "$exe"
   6. `& $exe delete "$s\archive.zip" --target "$s\target"` (Strict)。`[y/N]` の直前の行を記録して `n`。`$LASTEXITCODE`
   7. `Get-ChildItem -Recurse -File "$s\target" | ForEach-Object FullName`
 - 期待結果:
-  - 手順 3: ヘッダーの先頭行が Fast の警告 (`PLAN.md` §5.2 の文言)。結果は `SAME_SIZE` 4 (`same1.txt`、`same2.txt`、`docs/deep.txt`、`changed.txt`)、`MISSING` 1、`DIRECTORY` 1 で、`MATCHED` は表示されない。
+  - 手順 3: ヘッダーの先頭行が Fast の警告 ([Fast警告](spec/cli.md#warning) の文言)。結果は `SAME_SIZE` 4 (`same1.txt`、`same2.txt`、`docs/deep.txt`、`changed.txt`)、`MISSING` 1、`DIRECTORY` 1 で、`MATCHED` は表示されない。
   - 手順 4・5: ヘッダーの先頭行と、`[y/N]` の確認文の直前の行が、同じ Fast の警告。中止し、削除0件、終了コード 2。
   - 手順 6: 警告はどこにも表示されない。中止し、終了コード 2。
   - 手順 7 の一覧が手順 2 と同じ。
 
+<a id="m09"></a>
 ### M09: 比較用ハンドル相当と削除用ハンドル相当の同時オープン (実測)
 
-- 目的: 同じファイルを読み取り (`FILE_SHARE_READ` のみ) で開いている間に、`DELETE` アクセス付きで開けるかを記録する (SPEC §13 の未実測事項。新方式は同時に開かないため、結果は設計に影響しない)。
+- 目的: 同じファイルを読み取り (`FILE_SHARE_READ` のみ) で開いている間に、`DELETE` アクセス付きで開けるかを記録する ([未確認事項](OPEN_ISSUES.md#manual-status)。製品は同時に開かないため、結果は設計に影響しない)。
 - 注意: .NET の `FileStream` による近似であり、製品のハンドル構成 (フラグ) と完全には同じではない。製品と同じ構成での確認が必要になった場合は Win テストのヘルパーで行う。
 - シナリオ: `handles` (Windows PowerShell 5.1 で実施)
 - 手順:
@@ -210,11 +221,14 @@ py scripts\make_manual_fixtures.py "$exe"
   2. `$a = New-Object System.IO.FileStream($f, [IO.FileMode]::Open, [Security.AccessControl.FileSystemRights]::Read, [IO.FileShare]::Read, 4096, [IO.FileOptions]::None)`
   3. `try { $b = New-Object System.IO.FileStream($f, [IO.FileMode]::Open, [Security.AccessControl.FileSystemRights]'Read, Delete', [IO.FileShare]::Read, 4096, [IO.FileOptions]::None); 'opened'; $b.Dispose() } catch { $_.Exception.InnerException.Message; $_.Exception.HResult }`
   4. `$a.Dispose()`
-- 記録: 手順 3 で開けたか、開けなければエラーの内容と HRESULT。(推定は共有違反で失敗。推定と異なっても合否の基準にせず、結果を `PLAN_VALIDATION.md` に記録する。)
+- 記録: 手順 3 で開けたか、開けなければエラーの内容と HRESULT。(推定は共有違反で失敗。推定と異なっても合否の基準にせず、結果を [OPEN_ISSUES](OPEN_ISSUES.md#manual-status) に記録する。)
 
+<a id="m10"></a>
 ### M10: `delete` の途中の Ctrl+C (実測)
 
-- 目的: 逐次処理の途中で中断したとき、表示された `DELETED` の行と、実際に削除されたファイルが一致すること、未検証のファイルが削除されないことを確かめる。削除の指示の後・クローズの前に中断した場合の扱い (推定では削除が成立する) は、再現できた場合だけ記録する (SPEC §13)。
+> **実施前保留**: 差1件許容の根拠と測定方法は[未解決](OPEN_ISSUES.md#procedure-review)。許容を緩めず、レビューが終わるまで下の手順で合格判定しない。
+
+- 目的: 逐次処理の途中で中断したとき、表示された `DELETED` の行と、実際に削除されたファイルが一致すること、未検証のファイルが削除されないことを確かめる。削除の指示の後・クローズの前に中断した場合の扱い (推定では削除が成立する) は、再現できた場合だけ記録する ([実施状態](OPEN_ISSUES.md#manual-status))。
 - シナリオ: `progress`
 - 手順:
   1. `$s = "$env:TEMP\unextract-manual\<日時>\progress"`
@@ -223,18 +237,20 @@ py scripts\make_manual_fixtures.py "$exe"
   4. `(Get-ChildItem -Recurse -File "$s\target").Count`
   5. `(Select-String -Path "$env:TEMP\unextract-manual\<日時>\m10.txt" -Pattern '^DELETED ').Count`
 - 期待結果:
-  - target に残ったファイルは、`DELETED` と表示されていないファイルだけである (手順 4 の件数 + 手順 5 の件数 が 500、または差が1件以内。1件の差は表示の前後の瞬間に中断した場合で、どちらの向きかを記録する)。
+  - target に残ったファイルは、`DELETED` と表示されていないファイルだけである (手順 4 の件数 + 手順 5 の件数 が 500、または差が1件以内という許容案は[保留中](OPEN_ISSUES.md#procedure-review)であり、合否基準に使わない。差の向きと件数を事実として記録する)。
   - 観察 (合否の基準にしない): 終了コード、中断時に表示されたもの。中断の瞬間が削除の指示とクローズの間だったかは外から判別できないため、差が出た場合は「判別できない」と記録する。
 - 確認できないこと: 削除の指示の後・クローズの前の中断を意図して起こすことはできない。この組み合わせが観測できなければ未確認のまま残す。
 
+<a id="m11"></a>
 ### M11: 書き込み可能なメモリマップ (実測、手順未確立)
 
-- 目的: 他のプロセスがファイルを書き込み可能にマップした後でファイルハンドルだけを閉じた場合に、削除用ハンドルを開いている間に内容が書き換わり得るかを確かめる (SPEC §12、§13)。
+- 目的: 他のプロセスがファイルを書き込み可能にマップした後でファイルハンドルだけを閉じた場合に、削除用ハンドルを開いている間に内容が書き換わり得るかを確かめる ([既知の限界](spec/filesystem.md#limitations)、[実施状態](OPEN_ISSUES.md#manual-status)、[手順保留](OPEN_ISSUES.md#procedure-review))。
 - 状態: **手順未確立**。PowerShell だけで再現する手順を決められていない。再現方法 (Win テストのヘルパーを含む) が決まるまで、未実施・未確認として残す。成立とも不成立とも見なさない。
 
+<a id="m12"></a>
 ### M12: 祖先ディレクトリの改名と read-only の DELETE オープン (実測)
 
-- 目的: (a) 配下のファイルを `DELETE` アクセス付き・`FILE_SHARE_READ` のみで開いている間に、祖先ディレクトリを改名できるか、(b) read-only 属性のファイルを `DELETE` アクセス付きで開けるかを記録する (SPEC §13 の未実測事項)。製品と同じ構成での実測は Win テスト S26・S37 で行い、本項は近似による手動の確認である。
+- 目的: (a) 配下のファイルを `DELETE` アクセス付き・`FILE_SHARE_READ` のみで開いている間に、祖先ディレクトリを改名できるか、(b) read-only 属性のファイルを `DELETE` アクセス付きで開けるかを記録する (OPEN_ISSUESの未確認範囲)。製品と同じ構成での実測は Win テスト S26・S37 で行い、本項は近似による手動の確認である。
 - シナリオ: `handles` (Windows PowerShell 5.1 で実施)
 - 手順 (a):
   1. `$d = "$env:TEMP\unextract-manual\<日時>\handles\target"`
@@ -243,13 +259,16 @@ py scripts\make_manual_fixtures.py "$exe"
   4. 1つ目のウィンドウで `$h.Dispose()`
 - 手順 (b):
   1. `try { $r = New-Object System.IO.FileStream("$d\ro.txt", [IO.FileMode]::Open, [Security.AccessControl.FileSystemRights]'Read, Delete', [IO.FileShare]::Read, 4096, [IO.FileOptions]::None); 'opened'; $r.Dispose() } catch { $_.Exception.InnerException.Message; $_.Exception.HResult }`
-- 記録: (a) 改名が成功したか (失敗ならエラーの内容)。(b) 開けたか (開けなければエラーの内容と HRESULT)。どちらも推定を合否の基準にせず、結果を `PLAN_VALIDATION.md` に記録する。製品の安全性はどちらの結果でも削除しない側に倒れる (改名できた場合は最終確認の最終パス不一致で STOP、read-only は事前判定またはハンドル上の判定で SKIPPED、開けなければ DELETE_FAILED)。
-- 列挙の属性とハンドルの属性の一致 (SPEC §13) は Win テスト S38 で実測する (手動の手順は設けない)。
+- 記録: (a) 改名が成功したか (失敗ならエラーの内容)。(b) 開けたか (開けなければエラーの内容と HRESULT)。どちらも推定を合否の基準にせず、結果を [OPEN_ISSUES](OPEN_ISSUES.md#manual-status) に記録する。製品の安全性はどちらの結果でも削除しない側に倒れる (改名できた場合は最終確認の最終パス不一致で STOP、read-only は事前判定またはハンドル上の判定で SKIPPED、開けなければ DELETE_FAILED)。
+- 列挙の属性とハンドルの属性の一致 ([観測の範囲](OPEN_ISSUES.md#observations)) は Win テスト S38 で実測する (手動の手順は設けない)。
 
+<a id="m13"></a>
 ### M13: PowerShell 5.1 のリダイレクトと `--entries` (実測)
 
-- 目的: `analyze` の出力を PowerShell で保存して entries を作ったときの文字コードと、`delete --entries` の扱い (UTF-16 なら入力エラーと案内、UTF-8 なら受理) を確かめる (SPEC §3.3、README の「`--entries`」、PLAN_TESTS L18)。
-- シナリオ: `ja` (Windows PowerShell 5.1。削除を伴う実行は手順 6 の1回だけ)
+> **実施前保留**: M13の手順6の2コマンドを同じfixtureで続けられる条件は[未解決](OPEN_ISSUES.md#procedure-review)。保存形式と第1実行の拒否を確認し、推定が外れた場合の独立fixture/続行条件を決めるまで第2実行へ進まない。
+
+- 目的: `analyze` の出力を PowerShell で保存して entries を作ったときの文字コードと、`delete --entries` の扱い (UTF-16 なら入力エラーと案内、UTF-8 なら受理) を確かめる ([entries](spec/cli.md#entries)、README の「`--entries`」、TESTINGのL18)。
+- シナリオ: `ja` (Windows PowerShell 5.1。手順6の第1実行が拒否される推定に依存するため、先に冒頭の保留を確認)
 - 手順:
   1. `$s = "$env:TEMP\unextract-manual\<日時>\ja"`
   2. `& $exe analyze "$s\archive.zip" --target "$s\target" > "$s\redirect.txt"`
@@ -262,57 +281,19 @@ py scripts\make_manual_fixtures.py "$exe"
   - `entries-redirect.txt` が UTF-16 なら、手順 6 の1つ目は入力エラー (UTF-8 で保存するよう案内)、削除0件、終了コード 1。
   - `entries-utf8.txt` では、日本語名と `café░.txt` が文字化けせずに保存されていれば受理され、2件が `DELETED` になり終了コード 0。文字化けしていれば ZIP に一致するエントリが無い入力エラー (削除0件) になる。どちらだったかを記録する (PowerShell がネイティブコマンドの出力をどの文字コードで読むかは未確認であるため)。
 
-## 6. 結果の記録
 
-- 下の表に、項目ごとに1行記入する。複数回実施したときは行を追加する。
-- 「実際の出力」は要点だけを短く書く。長い出力は貼らない。
-- 判定は「合」「不合」「保留」「未実施」「記録」(実測項目で、期待値を定めず結果を記録したもの) のいずれか。
-  - 保留: 実施したが、fixture や手順書の誤りで製品の挙動を判定できなかった。原因と再実施の予定を備考に書く。
-- **期待と違った点は、直さずにそのまま事実として書く。** 想定外の結果が出たら、その項目の記録だけをして以後の項目を止め、Issue または報告にする (実装・文書をその場で直さない)。
-- fixture や手順書の誤りで保留した場合は、その原因と無関係な項目は続行してよい。製品の想定外の挙動が出た場合は、従来どおり記録して停止する。
-- 実測項目 (M09〜M13) の結果は `PLAN_VALIDATION.md` にも記録する。
-- バージョンは `(Get-Item $exe).VersionInfo.ProductVersion`、OS ビルドは `[Environment]::OSVersion.Version` で確認できる。
+<a id="recording"></a>
+## 結果の記録方法
 
-### 6.1 新方式 (`analyze` / `delete`) の記録
+実施状態は[OPEN_ISSUES](OPEN_ISSUES.md#manual-status)の対応行を更新する。結果の表をここへ複製せず、長い出力・完了履歴を積まない。項目 (M06のコードページ/M12のa,bを含む)、実施日、製品version、exeがpublishか通常buildか、OS build、PowerShell版と端末、短い出力/観測、終了コード、判定、前提と次の確認を記す。versionは `(Get-Item $exe).VersionInfo.ProductVersion`、OSは `[Environment]::OSVersion.Version` で確認する。
 
-| 項目 | 実施日 | unextract のバージョン | exe (publish 版 / ビルド出力) | OS ビルド | 端末 (PowerShell の版と Windows Terminal / コンソールホスト) | 実際の出力 (短く) | 終了コード | 判定 | 備考 |
-|---|---|---|---|---|---|---|---|---|---|
-| M01 | | | | | | | | 未実施 | |
-| M02 | | | | | | | | 未実施 | |
-| M03 | | | | | | | | 未実施 | |
-| M04 | | | | | | | | 未実施 | |
-| M05 | | | | | | | | 未実施 | |
-| M06 (932) | | | | | | | | 未実施 | |
-| M06 (65001) | | | | | | | | 未実施 | |
-| M07 | | | | | | | | 未実施 | |
-| M08 | | | | | | | | 未実施 | |
-| M09 | | | | | | | | 未実施 | 実測 |
-| M10 | | | | | | | | 未実施 | 実測 |
-| M11 | | | | | | | | 未実施 | 手順未確立 |
-| M12 (a) | | | | | | | | 未実施 | 実測 |
-| M12 (b) | | | | | | | | 未実施 | 実測 |
-| M13 | | | | | | | | 未実施 | 実測 |
+観測範囲が変わった場合だけ、[限定付き観測](OPEN_ISSUES.md#observations)の該当行も更新する。
 
-### 6.2 旧方式の記録 (2026-10-02、旧形式の CLI。変更しない)
+判定は合/不合/保留/未実施/記録 (期待を確定しない実測)を区別する。保留はfixture/手順の誤りで製品を判定できない状態。期待と異なる事実はその場で直さず記録し、製品の想定外なら以後を止めて報告する。fixture/手順にだけ原因がある保留なら無関係項目は続行できる。前提不成立を合格と書かない。
+<a id="manual-purpose"></a>
+## 自動化と手動に残す理由
 
-以下は旧形式 (`unextract <archive.zip> --target <dir> [--dry-run] [--fast] [--yes]`) と当時の手順書で実施した記録である。手順と期待結果は当時のもの (M01〜M03 は全件の結果表示の後の確認、M05 は `--dry-run` と `Deleting n / total`、M06 は `--dry-run`、M07 は確認待ち中の変更による削除直前再検証の停止)。
-
-| 項目 | 実施日 | unextract のバージョン | exe (publish 版 / ビルド出力) | OS ビルド | 端末 (PowerShell の版と Windows Terminal / コンソールホスト) | 実際の出力 (短く) | 終了コード | 判定 | 備考 |
-|---|---|---|---|---|---|---|---|---|---|
-| M01 | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | `n` で中止。削除0件。target 変更なし。 | 2 | 合 | MATCHED 3、MODIFIED 1、MISSING 1、DIRECTORY 1。`unrelated.txt` は結果に含まれず。 |
-| M02 | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | 空 Enter で中止。削除0件。target 変更なし。 | 2 | 合 | target の5ファイルがすべて残存。 |
-| M03 | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | MATCHED 3件を削除。DELETE_FAILED 0、未処理0。 | 0 | 合 | `same1.txt`、`same2.txt`、`docs/deep.txt` を削除。`changed.txt`、`unrelated.txt` は残存。 |
-| M04 | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | 確認待ちで Ctrl+C。削除0件。target 変更なし。 | -1073741510 | 合 | メッセージなしで PowerShell プロンプトへ復帰。終了コードは観察値。 |
-| M05 | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | MATCHED 500。通常時は進捗表示、stderr リダイレクト時は進捗非表示。削除済み500、DELETE_FAILED 0、未処理0。 | 0 | 合 | 削除時に `Deleting 500 / 500` を確認。 |
-| M06 (932) | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | MATCHED 2、MISSING 2。日本語名は正常表示。 | 0 | 保留 | fixture 生成スクリプトの名前の誤記 (`cafeé░.txt`)。製品の出力は fixture と一致し文字化けなし。スクリプト修正後に再実施。 |
-| M06 (932、再実施) | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | MATCHED 2、MISSING 2。`資料/報告書.txt`、`café░.txt` を正常表示。 | 0 | 合 | fixture 修正後に再生成して実施。実行後のコードページ 932 を確認。 |
-| M06 (65001) | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | MATCHED 2、MISSING 2。`資料/報告書.txt`、`café░.txt` を正常表示。 | 0 | 合 | fixture 修正後に再生成して実施。実行後のコードページ 65001 を確認。 |
-| M07 | 2026-10-02 | `0.1.0+004ee0fb64904af4040471ae6995dcbc25392817` | publish 版 | `10.0.26300.0` | Windows PowerShell 5.1.26100.9444 | `f10.txt` の同一性再検証で不一致となり停止。削除済み9、DELETE_FAILED 0、未処理0。 | 1 | 合 | 確認待ち中に別 PowerShell から `f10.txt` を変更。`f01.txt`〜`f09.txt` は削除済みで、`f10.txt` のみ残存。削除済みファイルのロールバックなし。 |
-| M08 (実端末の視覚確認) | | | | | | | | 未実施 | 機能部分は Fast / Strict とも E2E PTY で自動確認済み (旧方式。新方式では X28)。ここはフォント・折り返し・視認性だけを記録する。 |
-
-## 7. 自動化する項目と、手動に残した理由
-
-exe を別プロセスとして起動する E2E (`tests/Unextract.E2E.Tests`、[`PLAN_TESTS.md`](PLAN_TESTS.md) の §11) で、次を自動で確認する (新方式の実装後)。
+exe を別プロセスとして起動する E2E (`tests/Unextract.E2E.Tests`、[TESTINGのE2E](TESTING.md#e2e)) で、次を自動で確認する。
 
 | 確認内容 | 自動テスト |
 |---|---|
@@ -329,4 +310,4 @@ exe を別プロセスとして起動する E2E (`tests/Unextract.E2E.Tests`、[
 | 実際の `[y/N]` → `n` → 終了コード 2・非削除、Fast の警告の順序 | X28 (PTY) |
 | 逐次処理中の競合 (プロセス内のフックで注入) | `Unextract.Windows.Tests` の S21〜S29 |
 
-手動に残した理由: X 系の E2E はリダイレクト実行で非対話であり、PTY は機能の確認に限る。実端末での操作 (M01〜M03、M07)、Ctrl+C (M04、M10)、進捗と逐次結果の見え方 (M05)、コードページとフォントによる表示 (M06)、警告の視認性 (M08)、PowerShell の挙動 (M13) は手動で確認する。M09・M11・M12 は、製品と同じ構成での実測を Win テスト (S26、S37、S38) で行い、手動は近似による補助の確認である。
+手動に残した理由: X 系の E2E はリダイレクト実行で非対話であり、PTY は機能の確認に限る。実端末での操作 (M01〜M03、M07)、Ctrl+C (M04、M10)、進捗と逐次結果の見え方 (M05)、コードページとフォントによる表示 (M06)、警告の視認性 (M08)、PowerShell の挙動 (M13) は手動で確認する。M09・M11・M12 のうちM12はS26/S37に対する近似補助である。M09は設計非依存の同時open調査、M11は手順未確立であり、S26/S37/S38が代替したとは扱わない。

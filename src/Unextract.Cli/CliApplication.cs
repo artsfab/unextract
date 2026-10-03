@@ -26,8 +26,8 @@ internal sealed record CliEnvironment(
 }
 
 // unextract analyze <archive.zip> --target <dir> [--fast]
-// unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]   (SPEC §2、§3)
-// 出力先 (SPEC §10.4): 結果行・ヘッダー・合計・要約は stdout、入力エラー・FATAL・STOP の原因・内部エラーと進捗は stderr。
+// unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]   (docs/spec/cli.md#arguments、docs/SPEC.md#execution)
+// 出力先 (docs/spec/cli.md#streams): 結果行・ヘッダー・合計・要約は stdout、入力エラー・FATAL・STOP の原因・内部エラーと進捗は stderr。
 internal static class CliApplication
 {
     public static ExitStatus Run(IReadOnlyList<string> args, TextWriter stdout, TextWriter stderr, CliEnvironment? environment = null)
@@ -98,7 +98,7 @@ internal static class CliApplication
     }
 }
 
-// 進捗 (Checking n / total、Processing n / total) を stderr の1行に CR で上書き表示する (PLAN.md §5.6)。端末への出力が多くなりすぎない
+// 進捗 (Checking n / total、Processing n / total) を stderr の1行に CR で上書き表示する (docs/spec/cli.md#streams)。端末への出力が多くなりすぎない
 // よう、最初・100 件ごと・最後だけ新しい件数を書く。結果行などを書く前に Clear で行を消し、次の Report で直前の表示を書き直す。
 internal sealed class ProgressLine(TextWriter writer, Func<int, int, string> format) : IDisposable
 {
@@ -177,7 +177,7 @@ internal sealed class ProgressAwareWriter(TextWriter inner, ProgressLine progres
     public override void Flush() => inner.Flush();
 }
 
-// 確認プロンプト (SPEC §2、§3.2)。
+// 確認プロンプト (docs/spec/cli.md#arguments、docs/spec/cli.md#confirmation)。
 internal sealed class ConsolePrompt : IConfirmationPrompt
 {
     public bool IsInteractive => !Console.IsInputRedirected;

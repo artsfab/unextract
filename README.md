@@ -1,12 +1,14 @@
 # unextract
 
+本書は利用者向け要約です。仕様の正本は [SPECと担当仕様](docs/SPEC.md)、変更別の入口は [docs/README](docs/README.md)です。
+
 ZIP 内のファイルと照合して、target 内の対応するファイルだけを削除する Windows 11 用の CLI です。既定の Strict モードでは、**削除する直前に、ZIP 内のファイルと全バイト一致すると検証できたファイルだけ**を削除します。`--fast` を指定した Fast モードでは、**パスとサイズだけで判定し、内容は確認しません** (下記「Fast モード」)。
 
 > **注意: `unextract delete` はファイルを実際に削除します。ごみ箱を使わない完全削除で、unextract に復旧手段はありません。** 必ず先に `unextract analyze` で結果を確認してください。
 
-> **実装状況 (2026-10-03)**: 改訂した仕様 (`analyze` / `delete`) を実装しました。旧形式 (`unextract <archive.zip> --target <dir> [--dry-run]`) と `--dry-run` は入力エラーになります。新しいバージョン番号はリリース時に決めます。手動確認 (`docs/MANUAL_TESTS.md` の M 系) は未実施です。
+> 検証・手動確認の現在の状態は [OPEN_ISSUES](docs/OPEN_ISSUES.md)を参照してください。旧形式 (`unextract <archive.zip> --target <dir> [--dry-run]`) と `--dry-run` は入力エラーになります。
 
-仕様は [`docs/SPEC.md`](docs/SPEC.md) が唯一の基準です。この README は SPEC の利用者向けの要約で、食い違う場合は SPEC が正です。設計文書の一覧は [`docs/README.md`](docs/README.md) にあります。
+仕様上の基準は [SPEC](docs/SPEC.md) とその担当仕様 (CLI・ZIP・ファイル安全性) です。この README と食い違う場合は担当仕様を確認してください。文書の一覧と読む経路は [docs/README](docs/README.md) にあります。
 
 ## 位置づけ
 
@@ -94,7 +96,7 @@ unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--ye
    - Strict では、同じハンドルから読んで ZIP の内容と全バイト比較します (1回だけ)。内容が違えば `MODIFIED` として残します。
    - 削除の直前に、開いた直後の状態 (サイズ、日時、属性、リンク数、ADS、親フォルダー、パスなど) から何も変わっていないことを確かめます。
    - 同じハンドルに削除を指示し、削除が成立したことを確かめます。
-4. **途中で安全に判定できないものが見つかった場合**: そのファイルを削除せず、**以後の処理を止めます (STOP)**。**それまでに削除したファイルは元に戻りません。** 残りのエントリには触れません。
+4. **途中で安全に判定できないものが見つかった場合**: 削除指示前ならそのファイルを残し、**以後の処理を止めます (STOP)**。指示後に成立を確認できない場合は、そのファイルが削除された可能性があります。**それまでに削除したファイルは元に戻りません。** 残りのエントリには触れません。
 
 ### 分類と結果
 
@@ -108,7 +110,7 @@ unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--ye
 | `DIRECTORY` | ZIP のフォルダーのエントリ | 削除しない (`delete` では件数だけ表示) |
 | `DELETED` | (`delete`) 検証して削除した | — |
 | `DELETE_FAILED` | (`delete`) 他のプログラムが使用中、権限が無いなどで削除用に開けず、改めて調べると同じファイルに見えたもの。削除せずに残し、次へ進みます (Strict でも内容は確認していません) | — |
-| `STOPPED` | (`delete`) 安全に判定できず、処理を止めたファイル。削除していません | — |
+| `STOPPED` | (`delete`) 安全に判定できず、処理を止めたファイル。指示前は非削除、指示後に成立不明なら削除された可能性あり | — |
 | FATAL | (`analyze`) 判定できなかったもの、内容を読む ZIP エントリの異常 (Strict) | — |
 
 ### 表示の形式
@@ -126,7 +128,7 @@ SKIPPED_SPECIAL_FILE  cache/data.bin -> D:\Work\A\cache\data.bin (ADS)
 - **Entry はそのまま `--entries` に書けます。** `\` などの文字も変換していません。端末で誤解を招く特殊な文字を含む名前だけはエスケープして表示し、行末に「`--entries` へそのまま転記できません」という印を付けます。
 - **Target は確認用**です。`MISSING` では、実在しない (そこにあるはずの) 場所を示します。`--entries` には Target ではなく Entry を書きます。
 - `analyze` は、分類ごと (Strict: `MATCHED`、`MODIFIED`、`MISSING`、`SKIPPED_SPECIAL_FILE`、`DIRECTORY`) にまとめて表示し、最後に合計の件数を表示します。Strict では `SAME_SIZE` を、Fast では `MATCHED` を (0件としても) 表示しません。
-- `delete` は、処理した順に1行ずつ表示し、最後に削除済み・`MODIFIED`・`MISSING`・`SKIPPED_SPECIAL_FILE`・`DIRECTORY`・`DELETE_FAILED`・未処理の件数を要約します。途中で止まった場合は、それまでに削除したファイルが戻らないことと、未処理の件数を明示します。
+- `delete` は、処理した順に1行ずつ表示し、最後に削除済み・`MODIFIED`・`MISSING`・`SKIPPED_SPECIAL_FILE`・`DIRECTORY`・`DELETE_FAILED`・処理対象外・未処理の件数を要約します。途中で止まった場合は、それまでに削除したファイルが戻らないことと、未処理の件数を明示します。
 
 ### 終了コード
 
@@ -175,7 +177,7 @@ PowerShell 7 の `>` やコマンドプロンプト (`cmd`) の `>` は UTF-8 �
 ## 重要な注意
 
 - **削除はごみ箱を使わない完全削除です。復旧手段はありません。**
-- `delete` は1件ずつ削除します。**途中で STOP した場合、それまでに削除したファイルは戻りません。** 削除前に全体を確認したい場合は、`analyze` を先に実行してください。
+- `delete` は1件ずつ削除します。**途中で STOP した場合、それまでに削除したファイルは戻りません。指示後に成立を確認できないSTOPでは、対象が削除された可能性があります。** 削除前に全体を確認したい場合は、`analyze` を先に実行してください。
 - 削除するのは検証済みの個別のファイルだけです。**フォルダーは削除しません** (ZIP にフォルダーとして含まれていても、ファイルの削除後に空になっても)。**ZIP 自身と、ZIP にない target 内のファイルも削除しません** (ZIP にないファイルは表示も集計もしません)。
 
 ## Fast モード (`--fast`)
@@ -214,7 +216,7 @@ FATAL のときは、判定済みのエントリの結果、原因のエント�
 
 ### delete が途中で STOP する場合
 
-上の analyze の FATAL の条件 (比較中の共有違反を除く) は、`delete` ではそのファイルの処理の時点で STOP になります。加えて次の場合も STOP します。STOP したファイルは削除せず、以後の処理を行いません。**それまでに削除したファイルは戻りません。**
+上の analyze の FATAL の条件 (比較中の共有違反を除く) は、`delete` ではそのファイルの処理の時点で STOP になります。加えて次の場合も STOP します。削除指示前のSTOPならそのファイルを残し、以後の処理を行いません。**それまでに削除したファイルは戻りません。指示後に成立を確認できないSTOPでは、対象が削除された可能性があります。**
 
 - 削除用に開いた直後や削除の直前の確認で、違うファイルに見える・親フォルダーやパスが変わった・属性・ADS・hardlink が変わった、などの不一致があった場合。
 - ファイルやフォルダーが消えた、原因のわからないエラー。
@@ -223,7 +225,7 @@ FATAL のときは、判定済みのエントリの結果、原因のエント�
 `DELETE_FAILED` と STOP の違い:
 
 - `DELETE_FAILED`: 他のプログラムが使用中 (共有違反)、権限が無いなどで削除用に開けず、改めて調べると同じファイルに見える場合です。そのファイルを削除せずに残して、次のファイルへ進みます。最後まで処理しても、`DELETE_FAILED` が1件以上あればエラー (1) で終わります。
-- STOP: 違うファイルに見える、調べられない、などの場合です。そのファイルを残し、以後の処理を行いません。
+- STOP: 違うファイルに見える、調べられない、などの場合です。以後の処理を止めます。指示前ならそのファイルを残し、指示後に成立を確認できなければ削除された可能性を表示します。
 
 その他の注意:
 
@@ -249,18 +251,13 @@ FATAL のときは、判定済みのエントリの結果、原因のエント�
 - **ZIP の読み取り**: .NET の `ZipArchive` を使い、独自の ZIP 構造パーサは作りません。独自パーサは攻撃面と実装量を増やし、Strict の削除の安全性の根拠 (読み出したデータと target の全バイト一致) にも必要ないためです。unextract は ZIP の完全な健全性を証明しません。内容を読まないエントリの破損は検出しません (Fast ではどのエントリの内容も読みません)。
 - **CRC-32**: `ZipArchive` が CRC を検証しないため、Strict では内容を読むエントリについて unextract が検証します。偶発的な破損・切り詰め・ZIP の記録と実データの食い違いを見つけるための補助検査であり、ZIP の作成者が書き換えられる値なので、**悪意をもって作られた ZIP への防御ではありません**。Strict の削除の根拠は全バイト一致です。
 - **性能 (Strict)**: `delete` は、削除するファイルについて ZIP の展開と target の読み取りを1回行います。`analyze` の後に `delete` を実行すると、そのファイルの I/O は合計で約2倍になります。巨大なファイルでは削除用に開いている時間が長くなり、その間そのファイルは他のプログラムから書き込めません。
-- **既知の限界 (SPEC §12)**:
+- **[既知の限界](docs/spec/filesystem.md#limitations)**:
   - `analyze` から `delete` までの間の変更は、`delete` が実行時の状態で判定します (Strict では内容が違えば `MODIFIED`)。
   - 削除用に開いている間、他のプログラムは書き込み・改名・削除のために開けません。
   - 削除用に開いている間でも、属性の変更・ADS の作成・hardlink の追加は防げません。削除の直前に再確認して STOP しますが、再確認から削除の指示までのごく短い間に起きた場合は防げません (ADS はファイルと一緒に削除され、追加された hardlink の名前とデータは残り、read-only の付与は削除の失敗として STOP します)。
   - 読み取りはできても削除の権限が無いファイルは、`analyze` では分類されますが、`delete` では `DELETE_FAILED` などになります。
   - `ZipArchive` が ZIP を開くときのメモリ使用量 (Central Directory 全体の読み込み) は上限で制限できません。メモリ不足の場合は削除前に異常終了します。
-- **未確認の事項**: 次は実機で確認できていません。**成立とは見なさず、判定できなければ削除しない側 (STOP または `SKIPPED_SPECIAL_FILE`) に倒れます。**
-  - 削除の直前にファイルが symlink に差し替えられた場合
-  - クラウド placeholder (OneDrive などのオンラインのみのファイル) が関わる場合
-  - EFS で暗号化されたファイルの削除
-  - USN 機能を持たないファイルシステム (NTFS 以外は対象外)
-  - 改訂した実行モデルで新たに確認が必要になった事項 (処理中のファイルの祖先フォルダーの改名、`delete` の途中の Ctrl+C の扱いなど。SPEC §13)
+- **未確認の事項**: 実施状態・限定付き観測・次の確認は [OPEN_ISSUES](docs/OPEN_ISSUES.md) に集約しています。未確認を成立とは見なさず、判定できなければ削除しない側へ倒します。非NTFS・USN機能のないFSは対象外です。
 - JSON 出力、ログファイル、詳細な終了コード、上限を変更するオプションはありません。
 
 ## 開発者向け
@@ -279,11 +276,11 @@ dotnet test -c Release --no-build --logger "console;verbosity=detailed"
   - 8.3 の短い名前が生成されないボリューム (T06 と列挙のテスト)
   - `fsutil file setCaseSensitiveInfo` でフォルダー単位の大文字小文字の区別を有効にできない環境 (T15。権限や Windows の機能の構成によります)
   - `compact /c` または `fsutil sparse setflag` で属性を設定できない環境 (T08)
-- テスト計画は [`docs/PLAN_TESTS.md`](docs/PLAN_TESTS.md) です。改訂した実行モデルのテスト (A・S・L・K 系など) は実装済みで、結果は [`docs/PLAN_VALIDATION.md`](docs/PLAN_VALIDATION.md) にあります。
+- 検証の案内は [TESTING](docs/TESTING.md)、未確認・手動実施状態は [OPEN_ISSUES](docs/OPEN_ISSUES.md) にあります。
 
 ### E2E テストと手動テスト
 
-`tests/Unextract.E2E.Tests` は、ビルド済みの `unextract.exe` を別プロセスとして起動し、終了コード・標準出力・標準エラー出力と target の結果を確かめます (`docs/PLAN_TESTS.md` の X 系)。確認プロンプトの機能部分は Windows PTY で確認します。通常 build を含む全体検証 (`dotnet test unextract.sln`) に含まれます。配布形態の publish 版 E2E / PTY 検証には、次の wrapper を使います。
+`tests/Unextract.E2E.Tests` は、ビルド済みの `unextract.exe` を別プロセスとして起動し、終了コード・標準出力・標準エラー出力と target の結果を確かめます ([TESTING](docs/TESTING.md#e2e) の X 系)。確認プロンプトの機能部分は Windows PTY で確認します。通常 build を含む全体検証 (`dotnet test unextract.sln`) に含まれます。配布形態の publish 版 E2E / PTY 検証には、次の wrapper を使います。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-e2e-tests.ps1

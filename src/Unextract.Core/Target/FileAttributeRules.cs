@@ -1,6 +1,6 @@
 namespace Unextract.Core.Target;
 
-// target のファイル属性の許可集合 (SPEC §7、DEC-5)。Win32 に依存せず、属性値 (uint) だけで判定する。
+// target のファイル属性の許可集合 (docs/spec/filesystem.md#special-files、docs/RATIONALE.md#special-precheck)。Win32 に依存せず、属性値 (uint) だけで判定する。
 // 許可リスト方式: 許可集合以外のビットが1つでもあれば特殊 (SKIPPED_SPECIAL_FILE) とする。
 // 未定義・将来のビットも許可集合に含まれないため特殊になる。属性値の取得に失敗した場合の扱い (FATAL) は呼び出し側。
 public static class FileAttributeRules

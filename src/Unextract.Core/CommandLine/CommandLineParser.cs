@@ -19,8 +19,8 @@ public sealed record CommandLineParseResult(CommandLineOptions? Options, string?
 }
 
 // unextract analyze <archive.zip> --target <dir> [--fast]
-// unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]   (SPEC §2)
-// 副作用のない純粋関数。パスの存在や種類は検査しない。旧形式 (サブコマンドなし) と --dry-run は入力エラーとし、互換動作を設けない (DEC-32)。
+// unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]   (docs/spec/cli.md#arguments)
+// 副作用のない純粋関数。パスの存在や種類は検査しない。旧形式 (サブコマンドなし) と --dry-run は入力エラーとし、互換動作を設けない (docs/RATIONALE.md#confirmation)。
 public static class CommandLineParser
 {
     public static readonly IReadOnlyList<string> UsageLines =

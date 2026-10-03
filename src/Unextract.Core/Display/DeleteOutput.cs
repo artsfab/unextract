@@ -3,7 +3,7 @@ using Unextract.Core.Deletion;
 
 namespace Unextract.Core.Display;
 
-// delete の表示 (SPEC §10.3、PLAN.md §5.4)。純粋関数。結果行・要約は標準出力、STOP の原因とエラーで終わる理由は標準エラー出力。
+// delete の表示 (docs/spec/cli.md#delete-output、docs/spec/cli.md#delete-output)。純粋関数。結果行・要約は標準出力、STOP の原因とエラーで終わる理由は標準エラー出力。
 public static class DeleteOutput
 {
     public const string Cancelled = "中止しました。削除0件。";
@@ -16,8 +16,8 @@ public static class DeleteOutput
     public static string Targets(int totalEntries, int targetEntries, bool entriesSelected) =>
         entriesSelected ? $"対象: {totalEntries} エントリ中 {targetEntries} エントリ (--entries)" : $"対象: 全 {totalEntries} エントリ";
 
-    // 確認プロンプト (SPEC §3.2、§10.3)。fileEntries は処理対象のファイルエントリの件数 (削除される最大件数)。
-    // Fast では [y/N] の直前に警告を置く (SPEC §10.4 の (3))。
+    // 確認プロンプト (docs/spec/cli.md#confirmation、docs/spec/cli.md#delete-output)。fileEntries は処理対象のファイルエントリの件数 (削除される最大件数)。
+    // Fast では [y/N] の直前に警告を置く (docs/spec/cli.md#streams の (3))。
     public static string ConfirmationPrompt(int fileEntries, RunMode mode)
     {
         var warning = mode == RunMode.Fast ? ReportText.FastWarning + Environment.NewLine : string.Empty;

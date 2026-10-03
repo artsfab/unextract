@@ -2,7 +2,7 @@ using Unextract.Core.Target;
 
 namespace Unextract.Core.Tests;
 
-// テスト T07・T08 のうち、属性値だけによる許可・スキップの判定 (SPEC §7)。偽の属性値で全ビットを確認する。
+// テスト T07・T08 のうち、属性値だけによる許可・スキップの判定 (docs/spec/filesystem.md#special-files)。偽の属性値で全ビットを確認する。
 public class FileAttributeRulesTests
 {
     private static readonly uint[] AllowedBits =
@@ -62,7 +62,7 @@ public class FileAttributeRulesTests
         }
     }
 
-    // テスト T07: SPEC §7 のスキップ例の各ビット (単独、および許可集合全体との組み合わせ)
+    // テスト T07: docs/spec/filesystem.md#special-files のスキップ例の各ビット (単独、および許可集合全体との組み合わせ)
     [Theory]
     [InlineData(0x1u)]          // READONLY
     [InlineData(0x4u)]          // SYSTEM

@@ -3,7 +3,7 @@ using CoreTarget = Unextract.Core.Target;
 
 namespace Unextract.Windows;
 
-// target ルートの保持用ハンドル、または列挙用ハンドル (SPEC §8.1)。SafeFileHandle を所有し、Dispose で閉じる。
+// target ルートの保持用ハンドル、または列挙用ハンドル (docs/spec/filesystem.md#handles)。SafeFileHandle を所有し、Dispose で閉じる。
 internal sealed class WindowsDirectoryHandle(SafeFileHandle handle) : CoreTarget.IDirectoryHandle
 {
     public CoreTarget.ProbeResult<CoreTarget.DirectoryHandleInfo> GetInfo()
@@ -66,21 +66,21 @@ internal sealed class WindowsDirectoryHandle(SafeFileHandle handle) : CoreTarget
     }
 }
 
-// 比較用ハンドル (SPEC §8.1)。
+// 比較用ハンドル (docs/spec/filesystem.md#handles)。
 internal sealed class WindowsComparisonHandle(SafeFileHandle handle) : WindowsFileHandle(handle);
 
-// 削除用ハンドル (SPEC §8.1 の表の「削除用」の行)。同一性の再検証・2回目の全バイト比較・最終確認・削除の指示・成立確認を
-// 全てこのハンドルで行う (SPEC §8.3)。Dispose で閉じる。削除の指示が成立していれば、閉じた時点で名前が消える。
+// 削除用ハンドル (docs/spec/filesystem.md#handles の表の「削除用」の行)。同一性の照合・Strictの1回の全バイト比較・最終確認・削除の指示・成立確認を
+// 全てこのハンドルで行う (docs/spec/filesystem.md#delete-flow)。Dispose で閉じる。削除の指示が成立していれば、閉じた時点で名前が消える。
 internal sealed class WindowsDeletionHandle(SafeFileHandle handle) : WindowsFileHandle(handle), CoreTarget.IDeletionHandle
 {
     // FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS。これ以外の flags は API を呼ばずに失敗とする
-    // (IGNORE_READONLY_ATTRIBUTE (0x10) を含む値を誤って渡さないための二重の確認。SPEC §8.3 の 5)。
+    // (IGNORE_READONLY_ATTRIBUTE (0x10) を含む値を誤って渡さないための二重の確認。docs/spec/filesystem.md#delete-flow の削除指示)。
     internal const uint DeletePosixSemantics = 0x3;
 
     private const int ErrorInvalidParameter = 87;
 
     // SetFileInformationByHandle(FileDispositionInfoEx) の唯一の呼び出し箇所。成功は削除の成立を意味しない
-    // (成立は同じハンドルの DeletePending で確かめる。SPEC §8.3 の 6)。
+    // (成立は同じハンドルの DeletePending で確かめる。docs/spec/filesystem.md#delete-flow の成立確認)。
     public unsafe CoreTarget.ProbeResult<bool> SetDispositionEx(uint flags)
     {
         const string operation = "SetFileInformationByHandle(FileDispositionInfoEx)";
@@ -141,7 +141,7 @@ internal abstract class WindowsFileHandle(SafeFileHandle handle) : CoreTarget.IC
     }
 
     // データストリームを持たないディレクトリでは ERROR_HANDLE_EOF (38) の失敗になる。Core は Directory を先に判定し、
-    // ディレクトリではこれを呼ばない (SPEC §7)。ファイルで 38 が返った場合はそのまま失敗として返す。
+    // ディレクトリではこれを呼ばない (docs/spec/filesystem.md#special-files)。ファイルで 38 が返った場合はそのまま失敗として返す。
     public CoreTarget.ProbeResult<IReadOnlyList<CoreTarget.StreamEntry>> GetStreams()
     {
         var streams = FileInformation.GetStreams(handle);

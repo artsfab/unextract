@@ -1,6 +1,6 @@
 namespace Unextract.Core.Results;
 
-// 終了状態の3区分 (SPEC §2)。細分化した終了コード体系は設けない。
+// 終了状態の3区分 (docs/spec/cli.md#arguments)。細分化した終了コード体系は設けない。
 public enum ExitStatus
 {
     Success,

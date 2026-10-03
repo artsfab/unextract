@@ -3,7 +3,7 @@ using static Unextract.Windows.Tests.TestFixture;
 
 namespace Unextract.Windows.Tests;
 
-// 比較用ハンドルからの情報取得 (SPEC §8.1、§8.2) を実 NTFS で確認する。
+// 比較用ハンドルからの情報取得 (docs/spec/filesystem.md#handles、docs/spec/filesystem.md#baselines) を実 NTFS で確認する。
 public class FileInformationTests
 {
     private const uint FileAttributeDirectory = 0x10;
@@ -200,7 +200,7 @@ public class FileInformationTests
         Assert.Equal(@"\\?\" + dir, Ok(FileInformation.GetFinalPath(handle)));
     }
 
-    // 確認 9: FILE_READ_ATTRIBUTES だけのハンドルでも FSCTL_READ_FILE_USN_DATA が成功する (SPEC §13 PoC 4 の再現)
+    // 確認 9: FILE_READ_ATTRIBUTES だけのハンドルでも FSCTL_READ_FILE_USN_DATA が成功する (docs/RATIONALE.md#current-state PoC 4 の再現)
     [Fact]
     public void ParentFileId_WorksWithReadAttributesOnlyHandle()
     {

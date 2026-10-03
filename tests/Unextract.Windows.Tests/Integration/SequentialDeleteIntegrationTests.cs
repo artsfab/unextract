@@ -10,7 +10,7 @@ using static Unextract.Windows.Tests.TestFixture;
 
 namespace Unextract.Windows.Tests.Integration;
 
-// delete の逐次処理の実 NTFS テスト (PLAN_TESTS.md の S 系の Win、A07・A08・L16 と実測項目 S26・S34・S37・S38)。実際に削除する。
+// delete の逐次処理の実 NTFS テスト (docs/TESTING.md の S 系の Win、A07・A08・L16 と実測項目 S26・S34・S37・S38)。実際に削除する。
 // - 削除してよいのは、各テストが自分で作った一意な fixture (bin/.../fixtures/<一意名>/) の中のファイルだけ。fixture を最初に確定し、
 //   削除の指示の直前に毎回 DeletionGuard が削除用ハンドルの最終パスと親を確かめる (RealRun.Delete)。
 // - junction は同じ fixture 内の別ディレクトリを指すものだけを作る。symlink は作らない。
@@ -19,7 +19,7 @@ namespace Unextract.Windows.Tests.Integration;
 // 競合は DeleteHooks で注入する: H1 = 削除用オープンの直前 (列挙の後)、H2 = オープン直後、H3 = 全バイト比較中 (Strict のみ)、
 // H4 = 最終確認の直前、H5 = 削除の指示の直前。「別プロセス」は HelperProcess (このテストアセンブリのビルド済み実行ファイル) で行う。
 // 属性・ADS・hardlink の変更は同一プロセスで行う (削除用ハンドルを開いている間でも別プロセスから同じ変更ができ、同じく検出されることは
-// SPEC §13 の PoC 6 で確認済み)。
+// docs/RATIONALE.md#sharing-limits の PoC 6 で確認済み)。
 public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
 {
     private static readonly byte[] A = Bytes("alpha content");
@@ -110,7 +110,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     }
 
     // S01: 検証済みのファイルだけを個別に削除。ZIP、ZIP にない target のファイル、MODIFIED・特殊なファイル、ディレクトリは残る。
-    // Fast では同じサイズで内容違いの changed.txt も削除される (SPEC §15.3、§15.5)。
+    // Fast では同じサイズで内容違いの changed.txt も削除される (docs/SPEC.md#modes、docs/SPEC.md#modes)。
     [Theory]
     [InlineData(RunMode.Strict)]
     [InlineData(RunMode.Fast)]
@@ -151,7 +151,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     }
 
     // S09: delete 自身が ZIP を DELETE を共有せず保持するため、削除用オープンは共有違反 (32)。
-    // 識別確認が列挙由来の基準と一致 → DELETE_FAILED、終了 1、ZIP を残し後続を削除する (SPEC §8.1・§8.4)。
+    // 識別確認が列挙由来の基準と一致 → DELETE_FAILED、終了 1、ZIP を残し後続を削除する (docs/spec/filesystem.md#handles・docs/spec/filesystem.md#failure-boundary)。
     // 2026-10-03 の人間判断で正式な回帰要件に確定。analyze は SKIPPED (ZIP 自身)。
     [Theory]
     [InlineData(RunMode.Strict)]
@@ -672,7 +672,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
 
     // S34 (実測): ACL で対象の DELETE だけを拒否する (親の DELETE_CHILD は許可のまま)。拒否する時点を (a) delete の実行前、(b) H3 (比較中)。
     // 結果 (DELETED / STOP、終了状態) を記録する。判定は誤削除がないこと (対象以外が残り、STOP なら対象も残ること)。
-    // PLAN.md §4 の推定: (a) 削除される、(b) ChangeTime の変化で最終確認により STOP。
+    // docs/OPEN_ISSUES.md#observations の観測範囲: (a) 削除される、(b) ChangeTime の変化で最終確認により STOP。
     [Theory]
     [InlineData("before-run", RunMode.Strict)]
     [InlineData("during-compare", RunMode.Strict)]
@@ -891,7 +891,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     // A08: analyze の後、delete の前に、MATCHED のファイルを (a) 内容だけ書き換える (File ID・サイズ・日時・属性を書き戻す)、(b) 削除して同名で
     // 作り直す (同じ内容 / 違う内容)、(c) ADS を追加、(d) read-only を付ける。
     // Strict: (a) MODIFIED、(b) 同じ内容なら DELETED・違う内容なら MODIFIED、(c) SKIPPED (ADS)、(d) SKIPPED (属性、事前判定で開かない)。
-    // Fast: (a) DELETED (SPEC §15.5)、(b) サイズで判定 (同じサイズの違う内容も DELETED)、(c)(d) Strict と同じ。analyze の結果を許可証として使わない。
+    // Fast: (a) DELETED (docs/SPEC.md#modes)、(b) サイズで判定 (同じサイズの違う内容も DELETED)、(c)(d) Strict と同じ。analyze の結果を許可証として使わない。
     [Theory]
     [InlineData(RunMode.Strict)]
     [InlineData(RunMode.Fast)]

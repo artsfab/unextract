@@ -391,7 +391,7 @@ public class CliApplicationTests
         }
     }
 
-    // DELETE_FAILED だけがあり STOP がない → エラー (1)。STOP → エラー (1)。要約は stdout、理由は stderr (SPEC §2、§10.3、DEC-18)。
+    // DELETE_FAILED だけがあり STOP がない → エラー (1)。STOP → エラー (1)。要約は stdout、理由は stderr (docs/spec/cli.md#arguments、docs/spec/cli.md#delete-output、docs/RATIONALE.md#open-failures)。
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -4,7 +4,7 @@ using Unextract.Core.Zip;
 
 namespace Unextract.Core.Analysis;
 
-// 実名の確認 (SPEC §6.2)。確認済みの親ディレクトリをハンドルで開き、項目を列挙して ZIP の成分名と序数比較する。
+// 実名の確認 (docs/spec/filesystem.md#real-names)。確認済みの親ディレクトリをハンドルで開き、項目を列挙して ZIP の成分名と序数比較する。
 // - 「そのディレクトリ直下で探す成分名の集合」を全ファイルエントリから先に集め、同じディレクトリは1回だけ列挙する。
 // - 序数比較で完全一致した項目だけを記録し、照合しなかった名前は保持しない (RetainedNames で確認できる)。
 // - 1回の列挙で同じ名前が複数回返った場合は最初の1件を採用する。返らなかった名前は見つからない (MISSING)。
@@ -89,7 +89,7 @@ internal sealed class RealNameResolver
         var wanted = _wanted.GetValueOrDefault(key) ?? [];
         if (directoryItem is null)
         {
-            // target ルートは保持しているハンドルをそのまま使う (SPEC §6.2 の 1)。閉じない。
+            // target ルートは保持しているハンドルをそのまま使う (docs/spec/filesystem.md#real-names の 1)。閉じない。
             return Collect(_root.Handle, wanted);
         }
 

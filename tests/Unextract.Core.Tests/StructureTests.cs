@@ -3,7 +3,7 @@ using static Unextract.Core.Tests.TestHelpers;
 
 namespace Unextract.Core.Tests;
 
-// SPEC §4.3。ZIP 内部の構造衝突は target の実在状態と無関係に全体 FATAL
+// docs/spec/zip.md#structure。ZIP 内部の構造衝突は target の実在状態と無関係に全体 FATAL
 // (target に a/ がない場合の MISSING (テスト T02) とは別概念。この段階の入力は target を持たない)。
 public class StructureTests
 {

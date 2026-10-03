@@ -5,7 +5,7 @@ using static Unextract.Core.Tests.Fixtures.FakeEntries;
 
 namespace Unextract.Core.Tests;
 
-// --entries の形式と照合 (SPEC §3.3、§11、テスト L01〜L09・L14・L15 の純粋関数の部分)。
+// --entries の形式と照合 (docs/spec/cli.md#entries、テスト L01〜L09・L14・L15 の純粋関数の部分)。
 // Runner を通した削除0件・target に触れないことは DeleteRunnerTests の L 系で確かめる。
 public class EntriesListTests
 {

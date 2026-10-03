@@ -5,7 +5,7 @@ using Unextract.Core.Zip;
 namespace Unextract.Core.Analysis;
 
 // analyze のエントリ処理の入力。Entries は ZIP 事前検証 (ZipPrevalidator) を通過した全エントリ (ZIP 内の順序)。
-// Progress は (n, total) で各エントリの判定の前に呼ばれる (Checking n / total)。Mode は実行全体のモード (SPEC §15)。
+// Progress は (n, total) で各エントリの判定の前に呼ばれる (Checking n / total)。Mode は実行全体のモード (docs/SPEC.md#modes)。
 public sealed record AnalyzeRequest(
     IReadOnlyList<ValidatedZipEntry> Entries,
     IZipContentProvider Contents,
@@ -16,8 +16,8 @@ public sealed record AnalyzeRequest(
     Action<int, int>? Progress = null,
     RunMode Mode = RunMode.Strict);
 
-// analyze のエントリ処理 (SPEC §3.4、§6、§7)。完全な非破壊操作で、比較用ハンドルだけを使う。
-// 削除の能力を型として持たない (IDeletionProbe を受け取らない。PLAN.md §1)。削除候補・スナップショットを作らない。
+// analyze のエントリ処理 (docs/SPEC.md#execution、docs/spec/filesystem.md#classification、docs/spec/filesystem.md#special-files)。完全な非破壊操作で、比較用ハンドルだけを使う。
+// 削除の能力を型として持たない (IDeletionProbe を受け取らない。docs/ARCHITECTURE.md#dependencies)。削除候補・スナップショットを作らない。
 public static class Analyzer
 {
     public static AnalysisResult Run(AnalyzeRequest request) => new AnalyzeRun(request).Execute();
@@ -74,7 +74,7 @@ internal sealed class AnalyzeRun
         return new AnalysisResult(entries.Count, results, null);
     }
 
-    // SPEC §6.1 の手順1〜9 (手順3 の事前判定は delete だけ)。
+    // docs/spec/filesystem.md#resolution の実名解決とanalyze分類。deleteの事前判定と削除順序は同文書のdelete-flow。
     private Outcome Classify(ValidatedZipEntry entry, string expectedPath)
     {
         // 手順1・2: 親成分と最終成分の実名確認。
@@ -93,7 +93,7 @@ internal sealed class AnalyzeRun
         var opened = _request.Probe.OpenForComparison(expectedPath);
         if (!opened.Succeeded)
         {
-            // 存在を確認した後に開けない (共有違反、見つからない、アクセス拒否を含む) は FATAL (DEC-9、DEC-27)。
+            // 存在を確認した後に開けない (共有違反、見つからない、アクセス拒否を含む) は FATAL (docs/RATIONALE.md#open-failures、docs/RATIONALE.md#open-failures)。
             return Outcome.Fail(FatalKind.ComparisonOpenFailed, opened.Describe());
         }
 
@@ -107,7 +107,7 @@ internal sealed class AnalyzeRun
             return Outcome.Fail(failure.Kind, failure.Detail);
         }
 
-        // 手順6・7: §7 の特殊判定とサイズ。
+        // 手順6・7: docs/spec/filesystem.md#special-files の特殊判定とサイズ。
         var inspection = HandleInspector.Inspect(handle, identity.Id, entry.Entry.Length, _request.ArchiveIdentity, stopOnDeletePending: false);
         switch (inspection.Kind)
         {

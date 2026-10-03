@@ -7,7 +7,7 @@ namespace Unextract.Core.Tests.Fakes;
 
 // 実 ZIP (ZipArchive で読む) と偽の target で delete のエントリ処理 (逐次削除) を実行する。target は C:\target。
 // Prepare (確認を含む) は通さない (Runner を通したテストは DeleteRunnerTests)。
-// 実行のたびに、どの経路でも成り立つべき約束 (PLAN_TESTS §0 の「同じハンドル」) を確かめる。
+// 実行のたびに、どの経路でも成り立つべき約束 (docs/TESTING.md#principles の「同じハンドル」) を確かめる。
 internal sealed class DeleteHarness : IDisposable
 {
     public const string TargetPath = PipelineHarness.TargetPath;
@@ -89,7 +89,7 @@ internal sealed class DeleteHarness : IDisposable
         Assert.Equal(1, Fs.OpenHandleCount);
 
         // delete は比較用ハンドルを開かない。パスを使う呼び出しは、各エントリの OpenForDeletion 1回 (と、その失敗時の
-        // CheckIdentity 1回) だけ (PLAN_TESTS §0 の「同じハンドル」)。
+        // CheckIdentity 1回) だけ (docs/TESTING.md#principles の「同じハンドル」)。
         var calls = Fs.Calls.Skip(start).ToList();
         Assert.DoesNotContain(calls, c => c.StartsWith("OpenComparison ", StringComparison.Ordinal));
         Assert.Equal(comparisons, Fs.ComparisonOpenCount);

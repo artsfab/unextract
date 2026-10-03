@@ -5,9 +5,9 @@ namespace Unextract.Windows;
 
 public sealed record ProtectedLocationsResult(TargetLocationPolicy? Policy, FatalError? Error);
 
-// 拒否対象の実パス (SPEC §2、§3 の手順1)。Environment.GetFolderPath で得たパスを FILE_READ_ATTRIBUTES のみのハンドルで開き、
+// 拒否対象の実パス (docs/spec/cli.md#arguments、docs/spec/filesystem.md#target-root のtarget確認)。Environment.GetFolderPath で得たパスを FILE_READ_ATTRIBUTES のみのハンドルで開き、
 // GetFinalPathNameByHandleW の最終パス (\\?\ 形式) に直す。取得・解決に失敗したら、安全を確認できないため入力エラー。
-// 新しい P/Invoke は使わない (C-1 の CreateFileW と GetFinalPathNameByHandleW だけ)。
+// 新しい P/Invoke は使わない (CreateFileW と GetFinalPathNameByHandleW だけ)。
 public static class ProtectedLocations
 {
     // ユーザープロファイルはそのものだけを拒否する。

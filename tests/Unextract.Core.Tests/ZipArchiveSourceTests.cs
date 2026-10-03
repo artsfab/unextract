@@ -292,7 +292,7 @@ public class ZipArchiveSourceTests
         }
     }
 
-    // ZIP は FileShare.Read で開いて Dispose まで保持し、他者の書き込み・改名を拒否する (SPEC §3 の 1)。
+    // ZIP は FileShare.Read で開いて Dispose まで保持し、他者の書き込み・改名を拒否する (docs/SPEC.md#prepare のZIP保持)。
     [Fact]
     public void OpenedArchive_RejectsWritersAndRenameUntilDisposed()
     {

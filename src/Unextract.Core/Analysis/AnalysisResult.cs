@@ -2,7 +2,7 @@ using Unextract.Core.Results;
 
 namespace Unextract.Core.Analysis;
 
-// SKIPPED_SPECIAL_FILE の理由 (SPEC §6.1 の親成分の表、§7)。表示の分類は変えない。
+// SKIPPED_SPECIAL_FILE の理由 (docs/spec/filesystem.md#resolution の親成分の表、docs/spec/filesystem.md#special-files)。表示の分類は変えない。
 public enum SkipReason
 {
     ParentReparsePoint,
@@ -15,10 +15,10 @@ public enum SkipReason
 }
 
 // 判定済みの1エントリ。Target は target 内の対応する場所 (期待パス、\\?\ 形式)。MISSING では実在しない期待位置。
-// 表示 (SPEC §10.1) だけに使い、delete の入力にしない。
+// 表示 (docs/spec/cli.md#result-lines) だけに使い、delete の入力にしない。
 public sealed record EntryResult(ZipEntryRef Entry, string Target, Classification Classification, SkipReason? SkipReason = null);
 
-// analyze の結果 (SPEC §3.4、§10.2)。結果は ZIP 内の順序で決定的。削除候補・スナップショットを持たない (削除の許可証にしない)。
+// analyze の結果 (docs/SPEC.md#execution、docs/spec/cli.md#analyze-output)。結果は ZIP 内の順序で決定的。削除候補・スナップショットを持たない (削除の許可証にしない)。
 // FATAL 時は、最初の FATAL の直前までが判定済み、FATAL の原因エントリ、それ以降が未判定。
 public sealed class AnalysisResult
 {

@@ -4,14 +4,14 @@ using Unextract.Core.Results;
 
 namespace Unextract.Core.Commands;
 
-// AfterResults はテスト用の差し込み口 (PLAN.md §4: 結果表示の直後)。製品 CLI からは設定しない。
+// AfterResults はテスト用の差し込み口 (docs/TESTING.md#hooks: 結果表示の直後)。製品 CLI からは設定しない。
 public sealed record AnalyzeCommandRequest(string ArchivePath, string TargetPath, RunMode Mode, CommandContext Context, Action? AfterResults = null);
 
 // Analysis は Prepare の後の結果 (Prepare の入力エラー・ZIP を開けない場合は null)。PrepareError は Prepare の失敗の原因
 // (entries の入力エラーでは null。原因は標準エラー出力に書く)。
 public sealed record AnalyzeCommandOutcome(ExitStatus Status, AnalysisResult? Analysis, FatalError? PrepareError = null);
 
-// unextract analyze (SPEC §2、§3、§10.2)。完全な非破壊操作で、削除用ハンドルを開かず何も削除しない。
+// unextract analyze (docs/spec/cli.md#arguments、docs/SPEC.md#execution、docs/spec/cli.md#analyze-output)。完全な非破壊操作で、削除用ハンドルを開かず何も削除しない。
 // 削除の能力を型として持たない (IDeletionProbe を受け取らない)。結果は削除の許可証として保存・信用されない (delete は参照しない)。
 public static class AnalyzeCommand
 {

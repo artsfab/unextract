@@ -6,7 +6,7 @@ using static Unextract.Core.Tests.Fakes.PipelineHarness;
 
 namespace Unextract.Core.Tests;
 
-// analyze の表示 (SPEC §10.1・§10.2、PLAN.md §5.1〜§5.3) と結果行の表示用エスケープ (テスト O08〜O12)。
+// analyze の表示 (docs/spec/cli.md#result-lines・docs/spec/cli.md#analyze-output、docs/spec/cli.md#output) と結果行の表示用エスケープ (テスト O08〜O12)。
 public class AnalyzeOutputTests
 {
     private static readonly byte[] Hello = Bytes("hello");
@@ -132,7 +132,7 @@ public class AnalyzeOutputTests
         Assert.Equal("エントリ #3 \"a\\u{0001}\\\\b\\\"c\": 制御文字を含みます", fatal.Describe());
     }
 
-    // O11: Fast はヘッダーの先頭行に警告。Strict では出ない。ヘッダーの形式 (PLAN.md §5.2)。
+    // O11: Fast はヘッダーの先頭行に警告。Strict では出ない。ヘッダーの形式 (docs/spec/cli.md#warning)。
     [Theory]
     [MemberData(nameof(BothModes))]
     public void O11_HeaderAndFastWarning(RunMode mode)
@@ -208,7 +208,7 @@ public class AnalyzeOutputTests
         Assert.Empty(AnalyzeOutput.FormatFatal(harness.Run()));
     }
 
-    // SKIPPED_SPECIAL_FILE の理由の表示 (PLAN.md §5.1)。
+    // SKIPPED_SPECIAL_FILE の理由の表示 (docs/spec/cli.md#result-lines)。
     [Theory]
     [InlineData(SkipReason.ParentReparsePoint, " (親が reparse)")]
     [InlineData(SkipReason.Directory, " (ディレクトリ)")]

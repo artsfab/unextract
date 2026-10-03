@@ -9,7 +9,7 @@ internal enum ResolutionKind
     // 最終成分の列挙項目が見つかった。
     Found,
 
-    // 親成分の分類表の MISSING の行、または最終成分が見つからない (SPEC §6.1 の手順1・2)。
+    // 親成分の分類表の MISSING の行、または最終成分が見つからない (docs/spec/filesystem.md#resolution の手順1・2)。
     Missing,
 
     // 親成分が reparse point (SKIPPED_SPECIAL_FILE)。
@@ -19,7 +19,7 @@ internal enum ResolutionKind
     Failed,
 }
 
-// SPEC §6.1 の手順1・2 の結果。Found のとき Item は最終成分の列挙項目、ParentFileId は手順1でたどった親ディレクトリの File ID
+// docs/spec/filesystem.md#resolution の手順1・2 の結果。Found のとき Item は最終成分の列挙項目、ParentFileId は手順1でたどった親ディレクトリの File ID
 // (target ルート直下なら target ルートの File ID、それ以外は親を見つけた列挙項目の File ID)。
 internal readonly record struct Resolution(ResolutionKind Kind, DirectoryItem Item, FileId ParentFileId, FatalKind? FatalKind, string? Detail)
 {
@@ -32,20 +32,20 @@ internal readonly record struct Resolution(ResolutionKind Kind, DirectoryItem It
     public static Resolution Fail(FatalKind kind, string? detail) => new(ResolutionKind.Failed, default, default, kind, detail);
 }
 
-// 親成分と最終成分の解決 (SPEC §6.1 の手順1・2、§6.2)。analyze と delete が共有する。
-// 実名の確認は RealNameResolver に委ね、同じディレクトリは1回の実行で1回だけ列挙する (delete でも結果を再利用する。DEC-25)。
+// 親成分と最終成分の解決 (docs/spec/filesystem.md#resolution の手順1・2、docs/spec/filesystem.md#real-names)。analyze と delete が共有する。
+// 実名の確認は RealNameResolver に委ね、同じディレクトリは1回の実行で1回だけ列挙する (delete でも結果を再利用する。docs/RATIONALE.md#current-state)。
 internal sealed class TargetResolver
 {
     private const uint FileAttributeReparsePoint = 0x400;
 
-    // 親成分の「想定外の種類」(SPEC §6.1 の表): FILE_ATTRIBUTE_DEVICE を持つ項目は NTFS のディレクトリ項目として扱えない。
+    // 親成分の「想定外の種類」(docs/spec/filesystem.md#resolution の表): FILE_ATTRIBUTE_DEVICE を持つ項目は NTFS のディレクトリ項目として扱えない。
     private const uint FileAttributeDevice = 0x40;
     private const uint FileAttributeDirectory = 0x10;
 
     private readonly TargetRoot _root;
 
     // entries は処理対象のエントリ (analyze は全エントリ、delete は全エントリまたは --entries で選んだもの)。
-    // 列挙で探す名前はこのファイルエントリからだけ集める (SPEC §3.3、§6.2 の 3)。
+    // 列挙で探す名前はこのファイルエントリからだけ集める (docs/spec/cli.md#entries、docs/spec/filesystem.md#real-names の 3)。
     public TargetResolver(IFileSystemProbe probe, TargetRoot root, IEnumerable<ValidatedZipEntry> entries)
     {
         _root = root;

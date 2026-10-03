@@ -19,7 +19,7 @@ public readonly record struct VolumeInformation(string FileSystemName)
     public bool IsNtfs => FileSystemName == "NTFS";
 }
 
-// SPEC §8.2 のスナップショット項目。全て同じハンドルから取得する。
+// docs/spec/filesystem.md#baselines のM0項目。全て同じハンドルから取得する。
 public sealed record FileSnapshot(
     ulong VolumeSerialNumber,
     FileId128 FileId,
@@ -35,7 +35,7 @@ public sealed record FileSnapshot(
     uint ReparseTag,
     string FinalPath);
 
-// ハンドルからの情報取得 (SPEC §8.1、§8.2)。どの関数も、API が失敗したら部分的な値を返さず失敗を返す。
+// ハンドルからの情報取得 (docs/spec/filesystem.md#handles、docs/spec/filesystem.md#baselines)。どの関数も、API が失敗したら部分的な値を返さず失敗を返す。
 public static unsafe class FileInformation
 {
     // FILE_STREAM_INFO の取得バッファ。足りなければ倍にし、上限を超えたら失敗とする。
@@ -51,7 +51,7 @@ public static unsafe class FileInformation
     // GetFinalPathNameByHandleW の flags: FILE_NAME_NORMALIZED (0) | VOLUME_NAME_DOS (0)
     internal const uint FinalPathFlags = 0;
 
-    // SPEC §7 の reparse point 属性 (FILE_ATTRIBUTE_REPARSE_POINT)。
+    // docs/spec/filesystem.md#special-files の reparse point 属性 (FILE_ATTRIBUTE_REPARSE_POINT)。
     public const uint FileAttributeReparsePoint = 0x400;
 
     public static Win32Result<FileSnapshot> ReadSnapshot(SafeFileHandle handle)
@@ -187,9 +187,9 @@ public static unsafe class FileInformation
     }
 
     // FSCTL_READ_FILE_USN_DATA (入力 Min 2 / Max 3) で USN_RECORD_V3 を受け取り、親ディレクトリの File ID を返す。
-    // USN ジャーナルが非アクティブなボリュームでも動作する (SPEC §13、PoC 4)。
+    // USN ジャーナルが非アクティブなボリュームでも動作する (docs/RATIONALE.md#current-state、PoC 4)。
     // hardlink では開いた名前とは別のリンクの親 ID を返す場合がある。delete はリンク数2以上の
-    // 非削除判定を先に行い、その場合はこの値を開いた名前の親として照合しない (SPEC §8.3)。
+    // 非削除判定を先に行い、その場合はこの値を開いた名前の親として照合しない (docs/spec/filesystem.md#delete-flow)。
     public static Win32Result<FileId128> GetParentFileId(SafeFileHandle handle)
     {
         ArgumentNullException.ThrowIfNull(handle);

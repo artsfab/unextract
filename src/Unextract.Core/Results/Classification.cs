@@ -1,7 +1,7 @@
 namespace Unextract.Core.Results;
 
-// target 側の分類 (SPEC §6)。全体 FATAL は分類ではなく FatalError で表す。
-// 削除候補は Strict では Matched、Fast では SameSize (SPEC §6、§15.3)。SameSize は内容の一致を意味しない。
+// target 側の分類 (docs/spec/filesystem.md#classification)。全体 FATAL は分類ではなく FatalError で表す。
+// 削除候補は Strict では Matched、Fast では SameSize (docs/spec/filesystem.md#classification、docs/SPEC.md#modes)。SameSize は内容の一致を意味しない。
 public enum Classification
 {
     Matched,

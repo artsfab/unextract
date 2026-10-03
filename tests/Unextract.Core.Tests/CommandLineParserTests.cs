@@ -3,7 +3,7 @@ using Unextract.Core.CommandLine;
 
 namespace Unextract.Core.Tests;
 
-// CLI の引数 (SPEC §2、テスト K01〜K06)。
+// CLI の引数 (docs/spec/cli.md#arguments、テスト K01〜K06)。
 public class CommandLineParserTests
 {
     private static CommandLineOptions Ok(params string[] args)
@@ -135,7 +135,7 @@ public class CommandLineParserTests
         Assert.Equal(error, Error(args));
     }
 
-    // K06: 使い方の表示は両サブコマンドの形 (PLAN.md §5.5)。
+    // K06: 使い方の表示は両サブコマンドの形 (docs/spec/cli.md#input-errors)。
     [Fact]
     public void K06_Usage()
     {

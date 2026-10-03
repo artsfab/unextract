@@ -10,7 +10,7 @@ public sealed class PtyConfirmationCollection;
 [Collection("PTY confirmation")]
 public sealed class PtyConfirmationTests
 {
-    // PLAN.md §5.2・§5.4 の指定を独立した期待値として保持する (製品定数は参照しない)。
+    // docs/spec/cli.md#warning の指定を独立した期待値として保持する (製品定数は参照しない)。
     private const string Warning =
         "警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、ZIP から正常に展開できることは確認していません。";
 

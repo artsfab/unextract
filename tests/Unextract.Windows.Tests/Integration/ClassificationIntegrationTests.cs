@@ -7,7 +7,7 @@ using static Unextract.Windows.Tests.TestFixture;
 
 namespace Unextract.Windows.Tests.Integration;
 
-// 実 ZIP と実 NTFS の target での analyze の分類 (SPEC §6、§7)。fixture はテストの出力先の fixtures/ の下に毎回ユニークな名前で作り、
+// 実 ZIP と実 NTFS の target での analyze の分類 (docs/spec/filesystem.md#classification、docs/spec/filesystem.md#special-files)。fixture はテストの出力先の fixtures/ の下に毎回ユニークな名前で作り、
 // 削除しない。junction は同じ fixture 内の別ディレクトリを指すものだけ。symlink は作らない (特権が必要)。
 // 前提が成り立たない項目は「前提不成立」と出力して、その項目の確認を行わずに終える (成功・失敗のどちらにも数えないよう報告する)。
 public class ClassificationIntegrationTests(ITestOutputHelper output)
@@ -229,7 +229,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     }
 
     // T11: 比較対象を別のハンドルが書き込みで開いたままにする → 比較用オープンが共有違反 (32) で analyze は FATAL。
-    // ここでは同一プロセス内の別ハンドルで模擬する。別プロセスでも同じ結果 (32) になることは SPEC §13 の PoC 5 で確認済み。
+    // ここでは同一プロセス内の別ハンドルで模擬する。別プロセスでも同じ結果 (32) になることは docs/RATIONALE.md#sharing-limits の PoC 5 で確認済み。
     [Theory]
     [InlineData(RunMode.Strict)]
     [InlineData(RunMode.Fast)]
@@ -362,7 +362,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
 
     // C15 (実機): C01・C02・C03・C07 (代表) を --fast で、target の3状態 (不存在 / サイズ ≠ N / サイズ = N) で実行する。
     // analyze と delete (確認に y) の両方。不存在は MISSING、サイズ ≠ N は MODIFIED、サイズ = N は FATAL ではなく
-    // SAME_SIZE で、delete では削除される (SPEC §15.3)。ZIP の Open() が呼ばれないことは Core の C15 で確かめる。
+    // SAME_SIZE で、delete では削除される (docs/SPEC.md#modes)。ZIP の Open() が呼ばれないことは Core の C15 で確かめる。
     // 同じ fixture の Strict の delete は、サイズ = N で STOP (S13) になり削除しない。
     [Theory]
     [InlineData("C01")]
@@ -421,7 +421,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     }
 
     // T17 (実機): T01 と同じ4つ (同一内容、1 byte 変更、サイズ違い、0 byte) を --fast で → SAME_SIZE、SAME_SIZE、MODIFIED、SAME_SIZE。
-    // 同一内容と1 byte 変更を区別しない。0 byte に特例はない (SPEC §15.2)。内容を読まないことは Core の T17 で確かめる。
+    // 同一内容と1 byte 変更を区別しない。0 byte に特例はない (docs/SPEC.md#modes)。内容を読まないことは Core の T17 で確かめる。
     [Fact]
     public void T17_Fast_SizeOnly_OnRealTarget()
     {

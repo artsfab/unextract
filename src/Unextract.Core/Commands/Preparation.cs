@@ -6,11 +6,11 @@ using Unextract.Core.Zip;
 
 namespace Unextract.Core.Commands;
 
-// 拒否対象の最終パスを求めた結果 (SPEC §3.1 の手順4)。求められなければ Error (入力エラー)。
+// 拒否対象の最終パスを求めた結果 (docs/SPEC.md#prepare の手順4)。求められなければ Error (入力エラー)。
 public sealed record TargetLocationPolicyResult(TargetLocationPolicy? Policy, FatalError? Error);
 
 // analyze と delete に共通の実行環境。OpenArchive と Contents はテストでの差し替え用 (既定は ZipArchiveSource.Open とその内容)。
-// Progress は (n, total) で各エントリの処理の前に呼ばれる。Output は標準出力、ErrorOutput は標準エラー出力 (SPEC §10.4)。
+// Progress は (n, total) で各エントリの処理の前に呼ばれる。Output は標準出力、ErrorOutput は標準エラー出力 (docs/spec/cli.md#streams)。
 public sealed record CommandContext(
     IFileSystemProbe Probe,
     Func<TargetLocationPolicyResult> ResolveProtectedLocations,
@@ -36,7 +36,7 @@ internal enum PrepareStage
 // target ルートを開いた後の FATAL (ZIP 全体の事前検査、ZIP 自身の個体) では、analyze の表示のために TargetFinalPath と全エントリ数を持つ。
 internal sealed record PrepareFailure(PrepareStage Stage, string Message, FatalError? Fatal = null, string? TargetFinalPath = null, int TotalEntries = 0);
 
-// Prepare を終えた状態 (SPEC §3.1)。実行全体で保持するハンドルは ZIP と target ルートの2つだけ。Dispose で両方を閉じる。
+// Prepare を終えた状態 (docs/SPEC.md#prepare)。実行全体で保持するハンドルは ZIP と target ルートの2つだけ。Dispose で両方を閉じる。
 // Targets は処理対象 (analyze は全エントリ、delete は全エントリまたは --entries で選んだエントリ。ZIP の順)。
 internal sealed class Prepared(ZipArchiveSource source, TargetRoot root, IReadOnlyList<ValidatedZipEntry> entries, IReadOnlyList<ValidatedZipEntry> targets, VolumeFileId archiveIdentity)
     : IDisposable
@@ -60,8 +60,8 @@ internal sealed class Prepared(ZipArchiveSource source, TargetRoot root, IReadOn
     }
 }
 
-// Prepare (SPEC §3.1 の手順2〜9。手順1 の引数の検査は CLI)。どの段階の失敗でも target のエントリ (target ルート以外の列挙、
-// 比較用・削除用ハンドルのオープン) には触れず、削除は0件である (SPEC §3.5、DEC-26)。
+// Prepare (docs/SPEC.md#prepare の手順2〜9。手順1 の引数の検査は CLI)。どの段階の失敗でも target のエントリ (target ルート以外の列挙、
+// 比較用・削除用ハンドルのオープン) には触れず、削除は0件である (docs/SPEC.md#zero-deletions、docs/RATIONALE.md#current-state)。
 internal static class Preparation
 {
     public static (Prepared? Prepared, PrepareFailure? Failure) Run(string archivePath, string targetPath, string? entriesPath, CommandContext context)

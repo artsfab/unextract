@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace Unextract.Core.Tests.Fixtures;
 
 // テスト専用の fixture 生成器: ZipFixture で作った正常な ZIP の Central Directory と EOCD を
-// 書き換える。製品コードの ZIP パーサを兼ねない (PLAN.md §1)。
+// 書き換える。製品コードの ZIP パーサを兼ねない (docs/ARCHITECTURE.md#dependencies)。
 // 対象は ZIP64 EOCD を持たない ZIP だけ。Local Header とデータを書き換えるのは、暗号化フラグ・圧縮方式
 // (Central Directory と同じ値にそろえる) と、データの破損 (CorruptData) だけ。
 internal sealed class ZipPatcher

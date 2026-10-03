@@ -4,7 +4,7 @@ using Unextract.Core.Tests.Fakes;
 
 namespace Unextract.Core.Tests;
 
-// target の確認 (SPEC §2、§3 の手順1、§8.1) を偽ファイルシステムで確認する。テスト P06〜P08 の Core 部分。
+// target の確認 (docs/spec/cli.md#arguments、docs/spec/filesystem.md#target-root のtarget確認、docs/spec/filesystem.md#handles) を偽ファイルシステムで確認する。テスト P06〜P08 の Core 部分。
 public class TargetRootTests
 {
     private static readonly TargetLocationPolicy Policy = new(
@@ -47,7 +47,7 @@ public class TargetRootTests
         Assert.Equal(new VolumeFileId(FakeFileSystem.DefaultVolumeSerial, fs.Get(@"C:\target").Id), root.Id);
         Assert.Equal(@"\\?\C:\target\a\b.txt", root.ExpectedPath(["a", "b.txt"]));
 
-        // 確認用ハンドル → 保持用ハンドルの順 (SPEC §3 の手順1)。
+        // 確認用ハンドル → 保持用ハンドルの順 (docs/spec/filesystem.md#target-root のtarget確認)。
         Assert.Equal(@"ConfirmTarget C:\TARGET", fs.Calls[0]);
         Assert.Equal(@"OpenTargetRoot C:\TARGET", fs.Calls[1]);
     }
@@ -80,7 +80,7 @@ public class TargetRootTests
         Assert.DoesNotContain(fs.Calls, c => c.StartsWith("OpenTargetRoot", StringComparison.Ordinal));
     }
 
-    // 祖先の reparse は許し、target は解決後の最終パスで固定する (SPEC §2)
+    // 祖先の reparse は許し、target は解決後の最終パスで固定する (docs/spec/cli.md#arguments)
     [Fact]
     public void AncestorReparse_IsAllowedAndFinalPathIsResolved()
     {

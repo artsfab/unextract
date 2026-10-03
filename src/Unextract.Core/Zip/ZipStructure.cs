@@ -2,7 +2,7 @@ using Unextract.Core.Results;
 
 namespace Unextract.Core.Zip;
 
-// ZIP 内部の構造の検査 (SPEC §4.3)。明示ディレクトリと、親成分から生じる暗黙ディレクトリを木で持ち、
+// ZIP 内部の構造の検査 (docs/spec/zip.md#structure)。明示ディレクトリと、親成分から生じる暗黙ディレクトリを木で持ち、
 // 成分ごとに OrdinalIgnoreCase で引いて、序数で異なれば大文字小文字の衝突とする。
 internal sealed class ZipStructure
 {

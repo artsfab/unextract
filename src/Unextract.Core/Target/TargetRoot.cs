@@ -2,16 +2,16 @@ using Unextract.Core.Results;
 
 namespace Unextract.Core.Target;
 
-// 拒否する位置 (SPEC §2)。値は最終パス (\\?\ 形式) で与える。
+// 拒否する位置 (docs/spec/filesystem.md#target-root)。値は最終パス (\\?\ 形式) で与える。
 // ExactPaths はそのものだけを拒否し (ユーザープロファイル)、SubtreePaths はそのものと配下を拒否する
 // (Windows ディレクトリ、Program Files、Program Files (x86)、ProgramData)。比較は大小文字を区別しない。
-// 実際の値 (既知のフォルダーの最終パス) を求めるのは呼び出し側 (段階 C-3)。
+// 実際の値 (既知のフォルダーの最終パス) を求めるのは呼び出し側。
 public sealed record TargetLocationPolicy(IReadOnlyList<string> ExactPaths, IReadOnlyList<string> SubtreePaths)
 {
     public static TargetLocationPolicy None { get; } = new([], []);
 }
 
-// 確認済みで保持している target ルート (SPEC §3 の手順1)。Dispose で保持用ハンドルを閉じる。
+// 確認済みで保持している target ルート (docs/spec/filesystem.md#target-root のtarget確認)。Dispose で保持用ハンドルを閉じる。
 public sealed class TargetRoot : IDisposable
 {
     internal TargetRoot(IDirectoryHandle handle, DirectoryHandleInfo info)
@@ -25,7 +25,7 @@ public sealed class TargetRoot : IDisposable
 
     public VolumeFileId Id { get; }
 
-    // 保持用ハンドルから取得した \\?\ 形式の最終パス。期待パスはこれに "\" と ZIP の成分を連結して作る (SPEC §8.1)。
+    // 保持用ハンドルから取得した \\?\ 形式の最終パス。期待パスはこれに "\" と ZIP の成分を連結して作る (docs/spec/filesystem.md#handles)。
     public string FinalPath { get; }
 
     public string ExpectedPath(IEnumerable<string> components) => FinalPath + "\\" + string.Join('\\', components);
@@ -35,7 +35,7 @@ public sealed class TargetRoot : IDisposable
 
 public sealed record TargetRootResult(TargetRoot? Root, FatalError? Error);
 
-// target の確認 (SPEC §2、§3 の手順1、§8.1)。失敗は全て入力エラー (FatalError) として返す。
+// target の確認 (docs/spec/cli.md#arguments、docs/spec/filesystem.md#target-root のtarget確認、docs/spec/filesystem.md#handles)。失敗は全て入力エラー (FatalError) として返す。
 public static class TargetRootValidator
 {
     private const int ErrorFileNotFound = 2;
@@ -80,7 +80,7 @@ public static class TargetRootValidator
         return new TargetRootResult(new TargetRoot(handle, info), null);
     }
 
-    // 最終パスの形式と位置の判定 (SPEC §2、§8.1)。target の最終パスは \\?\X:\... の形だけを受け付ける。
+    // 最終パスの形式と位置の判定 (docs/spec/cli.md#arguments、docs/spec/filesystem.md#handles)。target の最終パスは \\?\X:\... の形だけを受け付ける。
     internal static FatalKind? CheckFinalPath(string finalPath, TargetLocationPolicy policy)
     {
         if (finalPath.StartsWith(UncPrefix, StringComparison.OrdinalIgnoreCase))

@@ -3,7 +3,7 @@ using static Unextract.Core.Tests.TestHelpers;
 
 namespace Unextract.Core.Tests;
 
-// SPEC §4.2。入力は偽のエントリ一覧だけで、target を持たない (target 外へアクセスし得ない)。
+// docs/spec/zip.md#paths。入力は偽のエントリ一覧だけで、target を持たない (target 外へアクセスし得ない)。
 public class EntryPathTests
 {
     // テスト Z01: target の外へ出得る名前、絶対/ドライブ/UNC/デバイスパス、ADS のコロン
@@ -129,7 +129,7 @@ public class EntryPathTests
         Assert.True(result.Entries[1].IsDirectory);
     }
 
-    // SPEC §4.1: 復号後の名前に U+FFFD を含めば全体 FATAL (実 ZIP での確認はテスト Z07)
+    // docs/spec/zip.md#decoding: 復号後の名前に U+FFFD を含めば全体 FATAL (実 ZIP での確認はテスト Z07)
     [Fact]
     public void ReplacementCharacter_IsFatal()
     {

@@ -2,7 +2,7 @@ using System.IO.Compression;
 
 namespace Unextract.Core.Zip;
 
-// ZIP エントリの内容へのアクセス (SPEC §5.2)。実体は ZipArchiveEntry のアダプタ。
+// ZIP エントリの内容へのアクセス (docs/spec/zip.md#verification)。実体は ZipArchiveEntry のアダプタ。
 public interface IZipEntryContent
 {
     bool IsEncrypted { get; }

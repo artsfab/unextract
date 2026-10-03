@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Unextract.Core.Display;
 
-// 名前を端末に安全に表示するためのエスケープ (SPEC §10、テスト O04)。
+// 名前を端末に安全に表示するためのエスケープ (docs/spec/cli.md#output、テスト O04)。
 // 制御文字、書式文字 (双方向制御など)、行・段落区切り、孤立サロゲート、U+FFFD を \u{XXXX} で表す。
 // 表記を一意にするため、\ と " も \\ と \" にする。
 public static class SafeDisplay
@@ -59,9 +59,9 @@ public static class SafeDisplay
         return builder?.ToString() ?? text;
     }
 
-    // 結果行の Entry と Target の表示用エスケープ (SPEC §10.1、PLAN.md §5.1)。端末上で危険・誤認しやすい文字 (制御文字 (C0、DEL、
+    // 結果行の Entry と Target の表示用エスケープ (docs/spec/cli.md#result-lines、docs/spec/cli.md#result-lines)。端末上で危険・誤認しやすい文字 (制御文字 (C0、DEL、
     // C1)、書式文字 (双方向制御などの Cf)、行・段落区切り、孤立サロゲート) だけを \u{XXXX} で表す。\ と " は変換しない
-    // (表示された Entry をそのまま --entries に書けるようにするため。DEC-33)。escaped はエスケープした文字があったか。
+    // (表示された Entry をそのまま --entries に書けるようにするため。docs/RATIONALE.md#entries-display)。escaped はエスケープした文字があったか。
     public static string EscapeForList(string text, out bool escaped)
     {
         ArgumentNullException.ThrowIfNull(text);

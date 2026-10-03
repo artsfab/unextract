@@ -3,16 +3,16 @@ using Unextract.Core.Target;
 
 namespace Unextract.Core.Analysis;
 
-// 開いたハンドルの照合の基準 (SPEC §6.1 の手順4・5)。Id は列挙項目の File ID と target ルートのボリュームシリアル、
+// 開いたハンドルの照合の基準 (analyze は docs/spec/filesystem.md#resolution、delete は docs/spec/filesystem.md#delete-flow)。Id は列挙項目の File ID と target ルートのボリュームシリアル、
 // ExpectedPath は target の最終パス + "\" + ZIP の成分 (\\?\ 形式)。ParentFileId は delete だけが照合する
-// 「手順1でたどった親ディレクトリの File ID」(analyze は null)。delete ではこれが列挙由来の基準 (SPEC §8.2) になる。
+// 「手順1でたどった親ディレクトリの File ID」(analyze は null)。delete ではこれが列挙由来の基準 (docs/spec/filesystem.md#baselines) になる。
 internal sealed record IdentityBaseline(VolumeFileId Id, FileId? ParentFileId, string ExpectedPath);
 
 // 照合・検査の失敗 (analyze は FATAL、delete は STOP)。
 internal readonly record struct HandleFailure(FatalKind Kind, string? Detail);
 
-// delete の M0 (SPEC §8.2)。削除用ハンドルを開いた直後、内容比較の前に同じハンドルから取得した値。
-// エントリの処理の間だけ持ち、最終確認 (SPEC §8.3 の手順7) の比較基準に使う。エントリをまたいで保持しない。
+// delete の M0 (docs/spec/filesystem.md#baselines)。削除用ハンドルを開いた直後、内容比較の前に同じハンドルから取得した値。
+// エントリの処理の間だけ持ち、最終確認 (docs/spec/filesystem.md#delete-flow の手順7) の比較基準に使う。エントリをまたいで保持しない。
 // Directory と DeletePending が false であることは M0 の前提 (記録しない)。
 internal sealed record HandleState(
     VolumeFileId Id,
@@ -28,14 +28,14 @@ internal sealed record HandleState(
 
 internal enum InspectionKind
 {
-    // 安全な通常ファイルでサイズが Length と一致 (内容比較候補、SPEC §5.1)。
+    // 安全な通常ファイルでサイズが Length と一致 (内容比較候補、docs/spec/zip.md#read-scope)。
     Candidate,
     SkippedSpecialFile,
     Modified,
     Failed,
 }
 
-// SPEC §6.1 の手順6・7 (§7 の特殊判定とサイズ) の結果。Candidate と Modified のとき、ハンドルから取得した値を持つ。
+// docs/spec/filesystem.md#resolution の手順6・7 (docs/spec/filesystem.md#special-files の特殊判定とサイズ) の結果。Candidate と Modified のとき、ハンドルから取得した値を持つ。
 internal readonly record struct Inspection(
     InspectionKind Kind,
     SkipReason? SkipReason,
@@ -51,7 +51,7 @@ internal readonly record struct Inspection(
         new(InspectionKind.Failed, null, new HandleFailure(kind, detail), default, default, default, null);
 }
 
-// 比較用ハンドル (analyze) と削除用ハンドル (delete) に共通の、開いたハンドル上の照合と検査 (SPEC §6.1 の手順4〜7、§7、§8.3 の手順4・5・7)。
+// 比較用ハンドル (analyze) と削除用ハンドル (delete) に共通の、開いたハンドル上の照合と検査 (docs/spec/filesystem.md#resolution の手順4〜7、docs/spec/filesystem.md#special-files、docs/spec/filesystem.md#delete-flow の手順4・5・7)。
 // IDeletionHandle は IComparisonHandle を継承するため、両方のハンドルに同じ関数を使う。パスは使わない。
 internal static class HandleInspector
 {
@@ -89,7 +89,7 @@ internal static class HandleInspector
             (default, string.Empty, new HandleFailure(kind, detail));
     }
 
-    // 手順6・7: §7 の特殊判定とサイズ。最初に Directory を判定し、ディレクトリなら他の情報を取得しない。
+    // 手順6・7: docs/spec/filesystem.md#special-files の特殊判定とサイズ。最初に Directory を判定し、ディレクトリなら他の情報を取得しない。
     // ディレクトリでない対象では、以降の取得 API が1つでも失敗したら (ERROR_HANDLE_EOF を含む) 失敗。
     // stopOnDeletePending は delete のときだけ true (DeletePending なら失敗。analyze は判定項目にしない)。
     public static Inspection Inspect(IComparisonHandle handle, VolumeFileId id, long length, VolumeFileId archiveIdentity, bool stopOnDeletePending,
@@ -142,7 +142,7 @@ internal static class HandleInspector
         return new Inspection(kind, null, null, standard.Value, basic.Value, tag.Value, streams.Value);
     }
 
-    // M0 (SPEC §8.2): 照合 (手順4) と検査 (手順5) で同じハンドルから取得した値。
+    // M0 (docs/spec/filesystem.md#baselines): 照合 (手順4) と検査 (手順5) で同じハンドルから取得した値。
     public static HandleState State(VolumeFileId id, FileId parentFileId, string finalPath, Inspection inspection) => new(
         id,
         parentFileId,
@@ -155,10 +155,10 @@ internal static class HandleInspector
         inspection.Streams!,
         inspection.Tag.ReparseTag);
 
-    // delete の最終確認 (SPEC §8.3 の手順7): 同じハンドルで M0 の全項目 (File ID とボリュームシリアル、親 File ID、最終パス、
+    // delete の最終確認 (docs/spec/filesystem.md#delete-flow の手順7): 同じハンドルで M0 の全項目 (File ID とボリュームシリアル、親 File ID、最終パス、
     // EndOfFile、LastWriteTime、ChangeTime、属性、リンク数、ストリーム一覧、reparse 状態) を再取得して完全に一致すること、
     // Directory と DeletePending が false であることを確かめる。親 File ID と最終パスは、片方だけでは検出できない差し替えが
-    // あるため、どちらも省略しない (DEC-13、DEC-29)。不一致の項目名 (取得の失敗はその説明) を返す。一致すれば null。
+    // あるため、どちらも省略しない (docs/RATIONALE.md#identity-path、docs/RATIONALE.md#identity-path)。不一致の項目名 (取得の失敗はその説明) を返す。一致すれば null。
     public static string? FinalCheck(IComparisonHandle handle, HandleState m0)
     {
         var id = handle.GetVolumeFileId();
@@ -266,7 +266,7 @@ internal static class HandleInspector
         return null;
     }
 
-    // SPEC §7 の特殊判定 (Directory は判定済み)。どれか1つでも該当すれば SKIPPED_SPECIAL_FILE。
+    // docs/spec/filesystem.md#special-files の特殊判定 (Directory は判定済み)。どれか1つでも該当すれば SKIPPED_SPECIAL_FILE。
     private static SkipReason? SpecialReason(
         VolumeFileId id,
         VolumeFileId archiveIdentity,

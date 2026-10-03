@@ -11,7 +11,7 @@ using static Unextract.Core.Tests.Fakes.PipelineHarness;
 
 namespace Unextract.Core.Tests;
 
-// analyze・delete の実行の流れ (SPEC §2、§3、§10) を Prepare と確認を含めて偽ファイルシステムで確認する
+// analyze・delete の実行の流れ (docs/spec/cli.md#arguments、docs/SPEC.md#execution、docs/spec/cli.md#output) を Prepare と確認を含めて偽ファイルシステムで確認する
 // (P・A・S02・S03・L・O13〜O15 の Core の部分)。
 public class CommandTests
 {

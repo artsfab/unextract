@@ -9,7 +9,7 @@ using Unextract.Core.Zip;
 
 namespace Unextract.Core.Tests;
 
-// テスト C01〜C13: ZIP 内容の検証と CRC (SPEC §5)。ZIP は実際の ZipArchive で読み、target だけを偽で表す。
+// テスト C01〜C13: ZIP 内容の検証と CRC (docs/spec/zip.md#content)。ZIP は実際の ZipArchive で読み、target だけを偽で表す。
 // 同じ壊れたエントリ x.bin (宣言 Length = N) を、target の状態 (不存在 / サイズ ≠ N / サイズ = N) だけを変えて分類する。
 public class ContentVerificationTests
 {
@@ -92,7 +92,7 @@ public class ContentVerificationTests
 
     // C15: C01〜C08 と、C11 の CRC を 0 以外に書き換えた0バイトエントリを --fast で、target の3状態で実行する。
     // analyze --fast と delete --fast --yes の両方を Prepare から行う。不存在は MISSING、サイズ ≠ N は MODIFIED、サイズ = N は FATAL ではなく
-    // SAME_SIZE で、delete では削除される (SPEC §15.3)。どの列でも ZIP の GetContent・Open()・Crc32 は呼ばれない
+    // SAME_SIZE で、delete では削除される (docs/SPEC.md#modes)。どの列でも ZIP の GetContent・Open()・Crc32 は呼ばれない
     // (呼び出し記録。CRC は Open() した内容からしか計算しない)。
     [Theory]
     [MemberData(nameof(FastCases))]
@@ -238,8 +238,8 @@ public class ContentVerificationTests
     }
 
     // C13: ランタイム回帰検知。C01・C03・C07 の fixture を ZipArchive 単体で読み、例外の有無を記録する。
-    // PLAN_VALIDATION.md V2 の記録: C01 は例外なしで全バイト、C03 は例外なしで短く終わる、C07 は Open() が成功し平文を読める。
-    // この期待が崩れたら V2 の記録を更新する (どちらでも unextract の結果は FATAL のまま: C01_C08 で確認)。
+    // docs/RATIONALE.md#zip-content の記録: C01 は例外なしで全バイト、C03 は例外なしで短く終わる、C07 は Open() が成功し平文を読める。
+    // この期待が崩れたら docs/RATIONALE.md#zip-content の観測範囲を確認する (どちらでも unextract の結果は FATAL のまま: C01_C08 で確認)。
     [Theory]
     [InlineData("C01", false, 7000)]
     [InlineData("C03", false, -1)]
@@ -321,7 +321,7 @@ public class ContentVerificationTests
     }
 
     // C02: Deflate データの途中を破損する。破損の位置によっては Deflate が例外なく早く終わる (C03 と同じくバイト数不足で検出) ため、
-    // 中央から後ろへ1バイトずつ試し、ZipArchive が InvalidDataException を出す最初の位置を使う (PLAN_TESTS C02 の期待)。
+    // 中央から後ろへ1バイトずつ試し、ZipArchive が InvalidDataException を出す最初の位置を使う (docs/TESTING.md#regressions のC02検証要件)。
     private static byte[] CorruptDeflateMidway(byte[] deflate)
     {
         var compressed = (int)new ZipPatcher(deflate).GetCompressedSize(0);

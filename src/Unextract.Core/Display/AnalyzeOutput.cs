@@ -3,7 +3,7 @@ using Unextract.Core.Results;
 
 namespace Unextract.Core.Display;
 
-// analyze の結果表示 (SPEC §10.2、PLAN.md §5.3)。ヘッダー (ReportText.Header) の後に続く行を作る純粋関数。
+// analyze の結果表示 (docs/spec/cli.md#analyze-output、docs/spec/cli.md#analyze-output)。ヘッダー (ReportText.Header) の後に続く行を作る純粋関数。
 // Format は標準出力、FormatFatal は標準エラー出力の行。
 public static class AnalyzeOutput
 {
@@ -20,7 +20,7 @@ public static class AnalyzeOutput
         Classification.Directory,
     ];
 
-    // Fast は削除対象のカテゴリーだけを入れ替える (MATCHED の位置に SAME_SIZE。SPEC §10.2、DEC-21)。
+    // Fast は削除対象のカテゴリーだけを入れ替える (MATCHED の位置に SAME_SIZE。docs/spec/cli.md#analyze-output、docs/RATIONALE.md#fast)。
     private static readonly Classification[] FastCategories =
     [
         Classification.SameSize,

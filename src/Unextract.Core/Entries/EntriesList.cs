@@ -19,8 +19,8 @@ public sealed record EntriesParseResult(IReadOnlyList<EntriesLine>? Lines, Entri
 // 照合の結果。Selected は選ばれたエントリ (ZIP の順)。
 public sealed record EntriesMatchResult(IReadOnlyList<ValidatedZipEntry>? Selected, EntriesError? Error);
 
-// --entries の読み込み・形式の検査 (SPEC §3.1 の手順3、§3.3) と、事前検証を通過したエントリとの照合 (手順8)。
-// --entries は delete の処理対象を狭めるフィルタで、安全性の判断材料にしない (DEC-30)。文字列からパスを組み立てない。
+// --entries の読み込み・形式の検査 (docs/SPEC.md#prepare の手順3、docs/spec/cli.md#entries) と、事前検証を通過したエントリとの照合 (手順8)。
+// --entries は delete の処理対象を狭めるフィルタで、安全性の判断材料にしない (docs/RATIONALE.md#entries-display)。文字列からパスを組み立てない。
 // 最初のエラーで中止し、行番号と安全に表示できる形の行内容と理由を返す。
 public static class EntriesList
 {
@@ -167,7 +167,7 @@ public static class EntriesList
         return new EntriesParseResult(lines, null);
     }
 
-    // 各行を事前検証を通過したエントリの FullName と序数比較で照合する (SPEC §3.3)。大小文字と区切りを補正しない。
+    // 各行を事前検証を通過したエントリの FullName と序数比較で照合する (docs/spec/cli.md#entries)。大小文字と区切りを補正しない。
     // 一致するエントリが無い行、ディレクトリエントリを指定した行は入力エラー。大小文字・区切りだけが違うエントリがあればヒントにする。
     public static EntriesMatchResult Match(IReadOnlyList<EntriesLine> lines, IReadOnlyList<ValidatedZipEntry> entries)
     {
@@ -204,7 +204,7 @@ public static class EntriesList
         var text = $"ZIP に一致するエントリがありません ({Quote(name)})";
         var normalized = Normalize(name);
 
-        // §4.3 により、大小文字・区切りだけが違うエントリは ZIP の中に高々1つ。
+        // docs/spec/zip.md#structure により、大小文字・区切りだけが違うエントリは ZIP の中に高々1つ。
         var near = entries.FirstOrDefault(e => string.Equals(Normalize(e.Entry.FullName), normalized, StringComparison.OrdinalIgnoreCase));
         if (near is null)
         {

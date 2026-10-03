@@ -26,9 +26,9 @@ internal readonly record struct ContentOutcome(ContentVerdict Verdict, FatalKind
     public static ContentOutcome Fail(FatalKind kind, string? detail = null) => new(ContentVerdict.Fatal, kind, detail);
 }
 
-// エントリ内容の検証基準 (SPEC §5.2) による比較。analyze と delete が同じ実装を共有し (PLAN.md §1)、1回の実行で1つのインスタンスを使う。
+// エントリ内容の検証基準 (docs/spec/zip.md#verification) による比較。analyze と delete が同じ実装を共有し (docs/ARCHITECTURE.md#dependencies)、1回の実行で1つのインスタンスを使う。
 // 違反時の扱い (analyze は FATAL / MODIFIED、delete は STOP / MODIFIED) は呼び出し側が決める。各エントリの内容は1回の実行で高々1回しか
-// 読まない (Strict の delete でも比較は1回)。実測展開量の累計 (SPEC §11) はその実行の全ての比較で数える。
+// 読まない (Strict の delete でも比較は1回)。実測展開量の累計 (docs/spec/zip.md#limits) はその実行の全ての比較で数える。
 // 1. IsEncrypted が false (Open() の前に確認)
 // 2. Open() と読み取り中に例外が発生しない (種類を問わない)
 // 3. 読み出したバイト数が Length を超えた時点で直ちに異常 (それ以上読まない)
@@ -50,15 +50,15 @@ public sealed class ContentComparer
         _limits = limits;
     }
 
-    // その実行の全バイト比較で実際に読んだ量の累計 (SPEC §11)。
+    // その実行の全バイト比較で実際に読んだ量の累計 (docs/spec/zip.md#limits)。
     public long TotalRead { get; private set; }
 
     // 全バイト比較 (Compare) の回数 (内容比較候補ごとに1回であることの確認用)。
     internal int Comparisons { get; private set; }
 
-    // 内容比較候補の内容検証 (SPEC §6.1 の手順8、§8.3 の手順6)。analyze と delete が共有し、Strict と Fast の処理差はここの1か所だけ
-    // (DEC-34)。Strict はエントリ内容の検証基準 (§5.2) で同じハンドルから読んで比較する。Fast は ZIP エントリも target も読まずに
-    // NotRead (SAME_SIZE) を返す。Fast で §5.2 の FATAL・STOP と実測展開量の計上が起きないのは、Compare を呼ばないことの帰結。
+    // 内容比較候補の内容検証 (docs/spec/filesystem.md#resolution の手順8、docs/spec/filesystem.md#delete-flow の手順6)。analyze と delete が共有し、Strict と Fast の処理差はここの1か所だけ
+    // (docs/RATIONALE.md#fast)。Strict はエントリ内容の検証基準 (docs/spec/zip.md#verification) で同じハンドルから読んで比較する。Fast は ZIP エントリも target も読まずに
+    // NotRead (SAME_SIZE) を返す。Fast で docs/spec/zip.md#verification の FATAL・STOP と実測展開量の計上が起きないのは、Compare を呼ばないことの帰結。
     internal ContentOutcome Verify(RunMode mode, IZipContentProvider contents, int index, IComparisonHandle target) =>
         mode == RunMode.Fast ? ContentOutcome.NotRead : Compare(contents.GetContent(index), target);
 

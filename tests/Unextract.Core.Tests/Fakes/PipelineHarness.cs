@@ -79,7 +79,7 @@ internal sealed class PipelineHarness : IDisposable
 
     public string ArchiveLocation { get; set; } = ArchivePath;
 
-    // analyze のモード (SPEC §15)。共通の安全性テストを Fast でも実行するために切り替える。
+    // analyze のモード (docs/SPEC.md#modes)。共通の安全性テストを Fast でも実行するために切り替える。
     public RunMode Mode { get; set; } = RunMode.Strict;
 
     public ZipArchiveSource Source => _source;
@@ -110,7 +110,7 @@ internal sealed class PipelineHarness : IDisposable
         Assert.Equal(Fs.ComparisonOpenCount, Fs.ComparisonCloseCount);
         Assert.True(Fs.MaxConcurrentComparisons <= 1);
 
-        // analyze は非破壊: 削除用オープン・識別確認・削除の指示を一度も呼ばない (PLAN_TESTS §0)。
+        // analyze は非破壊: 削除用オープン・識別確認・削除の指示を一度も呼ばない (docs/TESTING.md#principles)。
         Assert.DoesNotContain(Fs.Calls.Skip(start), IsDeletionCall);
         return result;
     }
@@ -128,6 +128,6 @@ internal sealed class PipelineHarness : IDisposable
 
     public static byte[] Bytes(string text) => System.Text.Encoding.UTF8.GetBytes(text);
 
-    // 削除候補の分類 (PLAN_TESTS のモード違いの再利用の原則: MATCHED を SAME_SIZE に読み替える)。
+    // 削除候補の分類 (docs/TESTING.md#principles のモード適用: MATCHED を SAME_SIZE に読み替える)。
     public static Classification Candidate(RunMode mode) => mode == RunMode.Fast ? Classification.SameSize : Classification.Matched;
 }
