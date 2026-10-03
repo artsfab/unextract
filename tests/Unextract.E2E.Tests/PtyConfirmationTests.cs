@@ -5,20 +5,26 @@ namespace Unextract.E2E.Tests;
 [CollectionDefinition("PTY confirmation", DisableParallelization = true)]
 public sealed class PtyConfirmationCollection;
 
-// M08 の yn-n と O07 の実コンソール部分。偽 prompt の経路、--yes / 非対話は既存 Core テストが担当する。
+// X28 (旧 M08 / O07 の PTY テストの置き換え): delete の対話実行で、確認の表示後に n を送る (Strict、Fast)。偽 prompt の経路、
+// --yes / 非対話は Core・E2E のテストが担当する。
 [Collection("PTY confirmation")]
 public sealed class PtyConfirmationTests
 {
-    // PLAN.md §4 の指定を独立した期待値として保持する (製品定数は参照しない)。
+    // PLAN.md §5.2・§5.4 の指定を独立した期待値として保持する (製品定数は参照しない)。
     private const string Warning =
         "警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、ZIP から正常に展開できることは確認していません。";
+
+    private const string Prompt =
+        "最大 5 件のファイルエントリを1件ずつ検証し、条件を満たしたものをその場で完全に削除します。\n"
+        + "途中で停止した場合、それまでに削除したファイルは元に戻りません。\n"
+        + "続行しますか? ";
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task M08_O07_InteractiveWarningAndCancelWithN(bool fast)
+    public async Task X28_InteractiveDeleteWarningAndCancelWithN(bool fast)
     {
-        var fixtureName = $"M08_O07_yn-n_{(fast ? "Fast" : "Strict")}";
+        var fixtureName = $"X28_yn-n_{(fast ? "Fast" : "Strict")}";
         var fixture = E2EFixture.Create(fixtureName);
         using var timeout = new CancellationTokenSource(UnextractProcess.Timeout);
         PtyProcess? terminal = null;
@@ -41,40 +47,28 @@ public sealed class PtyConfirmationTests
             terminal = await PtyProcess.StartAsync(fixture, fast, timeout.Token);
             await terminal.WaitForAsync("[y/N]", timeout.Token);
             var output = terminal.Output;
+
             // 入力前に、非対話中止でなく実際に prompt が出たことを検証する。
             Assert.Contains("[y/N]", output, StringComparison.Ordinal);
+            Assert.Contains("対象: 全 6 エントリ\n", output, StringComparison.Ordinal);
+            var prompt = output.IndexOf("[y/N]", StringComparison.Ordinal);
             if (fast)
             {
+                // ヘッダーの先頭行と確認の直前の行の計2回。最後の警告から確認文・[y/N] までに別の出力が無い。
                 Assert.Equal(2, output.Split(Warning, StringSplitOptions.None).Length - 1);
-                Assert.Contains(Warning + "\nSAME_SIZE (4):", output, StringComparison.Ordinal);
+                Assert.StartsWith(Warning + "\nArchive: ", output.TrimStart(), StringComparison.Ordinal);
                 var lastWarning = output.LastIndexOf(Warning, StringComparison.Ordinal);
-                var prompt = output.IndexOf("[y/N]", StringComparison.Ordinal);
-                // warning の次の行は確認文だけ。進捗・空行・他のメッセージの挿入も失敗させる。
-                Assert.Equal(Warning + "\n4 件のファイルを削除します。よろしいですか? ", output[lastWarning..prompt]);
+                Assert.Equal(Warning + "\n" + Prompt, output[lastWarning..prompt]);
             }
             else
             {
                 Assert.DoesNotContain("警告:", output, StringComparison.Ordinal);
                 Assert.DoesNotContain("--fast", output, StringComparison.Ordinal);
+                Assert.EndsWith("\n" + Prompt, output[..prompt], StringComparison.Ordinal);
             }
 
-            var report = Report.Parse(new ProcessResult(0, output, ""));
-            if (fast)
-            {
-                report.AssertCategory("SAME_SIZE", "same1.txt", "same2.txt", "docs/deep.txt", "changed.txt");
-                report.AssertCategory("MODIFIED");
-                Assert.False(report.Has("MATCHED"));
-            }
-            else
-            {
-                report.AssertCategory("MATCHED", "same1.txt", "same2.txt", "docs/deep.txt");
-                report.AssertCategory("MODIFIED", "changed.txt");
-                Assert.False(report.Has("SAME_SIZE"));
-            }
-
-            report.AssertCategory("MISSING", "missing.txt");
-            report.AssertCategory("DIRECTORY", "docs/");
-            report.AssertCategory("SKIPPED_SPECIAL_FILE");
+            // 確認は最初のエントリの処理の前 (案 A): 結果行はまだ出ていない。
+            Assert.Empty(Report.Parse(output).AllEntries);
             Assert.DoesNotContain("unrelated.txt", output, StringComparison.Ordinal);
             await terminal.SendNoAsync(timeout.Token);
             await terminal.WaitForAsync("中止しました。削除0件。", timeout.Token);

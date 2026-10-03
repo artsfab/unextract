@@ -1,4 +1,4 @@
-"""unextract 手動確認 (docs/MANUAL_TESTS.md の M01〜M08) 用 fixture 生成スクリプト。
+"""unextract 手動確認 (docs/MANUAL_TESTS.md の M01〜M13) 用 fixture 生成スクリプト。
 
 使い方 (リポジトリ直下で):
     py scripts/make_manual_fixtures.py "<unextract.exe のパス>"
@@ -7,10 +7,14 @@
 - 既存のファイルは削除も上書きもしない (毎回新しい日時フォルダを作る)。
 - 実在データは使わない。作るのは小さなテスト用ファイルだけ。exe は実行しない。
 - 最後に、各シナリオの項目 ID・期待と実行コマンド (PowerShell 用) を表示する。
-- M08 (--fast の [y/N] 直前の警告) は yn-n シナリオを使う。M08 は表示に出さないため、コマンドは手順書 (MANUAL_TESTS.md の M08) のものを使う。
+- コマンドは analyze / delete のサブコマンド形式 (2026-10-03 改訂の CLI) で表示する。
+- M08 (--fast の警告)、M10 (delete の途中の Ctrl+C)、M13 (PowerShell 5.1 と --entries) は既存のシナリオを使い、
+  M09・M12 (ハンドルの実測) は handles シナリオの target だけを使う (unextract は実行しない)。
+  これらのコマンドは手順書 (MANUAL_TESTS.md) のものを使う。
 - 表示が文字化けする・UnicodeEncodeError になる場合は、PowerShell で $env:PYTHONIOENCODING = 'utf-8' を設定してから実行する。
 """
 import os
+import stat
 import struct
 import sys
 import tempfile
@@ -57,7 +61,7 @@ def basic(name):
 
 
 def stop_scenario():
-    """確認待ち中に f10.txt を別ウィンドウで書き換える用 (f01..f09 は先に削除される)。"""
+    """確認待ち中に f10.txt を別ウィンドウで書き換える用 (確認の後、f10 は現在の内容で判定され MODIFIED で残る)。"""
     d = os.path.join(BASE, "stop")
     entries = [(f"f{i:02d}.txt", f"data{i}".encode()) for i in range(1, 11)]
     make_zip(os.path.join(d, "archive.zip"), entries)
@@ -111,6 +115,17 @@ def crc_scenario():
     return d
 
 
+
+def handles_scenario():
+    """M09・M12 用。unextract は実行しない。target\\sub\\held.txt と、read-only の target\\ro.txt。"""
+    d = os.path.join(BASE, "handles")
+    write(os.path.join(d, "target", "sub", "held.txt"), b"held")
+    ro = os.path.join(d, "target", "ro.txt")
+    write(ro, b"readonly")
+    os.chmod(ro, stat.S_IREAD)  # Windows では FILE_ATTRIBUTE_READONLY になる
+    return d
+
+
 scenarios = {
     "yn-n": basic("yn-n"),
     "yn-enter": basic("yn-enter"),
@@ -120,24 +135,39 @@ scenarios = {
     "ja": japanese_scenario(),
     "stop": stop_scenario(),
     "crc": crc_scenario(),
+    "handles": handles_scenario(),
 }
 
 print(f"作成先: {BASE}\n")
 tips = {
-    "yn-n": "M01: [y/N] に n + Enter → 中止、削除 0 件、終了コード 2",
-    "yn-enter": "M02: [y/N] に空 Enter → 中止、削除 0 件、終了コード 2",
-    "yn-y": "M03: [y/N] に y + Enter → same1.txt / same2.txt / docs\\deep.txt だけ削除、終了コード 0",
-    "yn-ctrlc": "M04: [y/N] で Ctrl+C → 何も削除されない (終了コードは事実として記録)",
-    "progress": "M05: --dry-run で Checking n / total、--yes で Deleting n / total が1行で更新される。2> $null では出ない",
-    "ja": "M06: --dry-run を chcp 932 と chcp 65001 の両方で実行し、日本語名の表示を見る",
-    "stop": "M07: [y/N] で止めて、別ウィンドウで target\\f10.txt に追記 → y。f01〜f09 は削除済み、f10 で停止、終了コード 1",
-    "crc": "参考 (E2E の X04 で自動化済み): --dry-run で FATAL (判定済み a.txt, b.txt / 原因 bad.txt / 未判定 2 件)、終了コード 1",
+    "yn-n": "M01: delete の [y/N] に n + Enter → 中止、削除 0 件、終了コード 2 (確認の前に結果行は出ない)",
+    "yn-enter": "M02: delete の [y/N] に空 Enter → 中止、削除 0 件、終了コード 2",
+    "yn-y": "M03: delete の [y/N] に y + Enter → same1.txt / same2.txt / docs\\deep.txt だけ DELETED、終了コード 0",
+    "yn-ctrlc": "M04: delete の [y/N] で Ctrl+C → 何も削除されない (終了コードは事実として記録)",
+    "progress": "M05: analyze で Checking n / total、delete --yes で Processing n / total。2> $null では出ない。M10 (途中の Ctrl+C) にも使う",
+    "ja": "M06: analyze を chcp 932 と chcp 65001 の両方で実行し、日本語名の表示を見る。M13 (PowerShell 5.1 と --entries) にも使う",
+    "stop": "M07: delete の [y/N] で止めて、別ウィンドウで target\\f10.txt に追記 → y。f01〜f09 は DELETED、f10 は MODIFIED で残る、終了コード 0",
+    "crc": "参考 (E2E の X19): analyze は FATAL (判定済み a.txt, b.txt / 原因 bad.txt / 未判定 2 件)。delete --yes は a, b を削除して bad で STOP",
+    "handles": "M09・M12: unextract は実行しない。手順書のとおり Windows PowerShell 5.1 でファイルを開いて確かめる",
+}
+commands = {
+    "yn-n": ["delete"], "yn-enter": ["delete"], "yn-y": ["delete"], "yn-ctrlc": ["delete"],
+    "progress": ["analyze", "delete --yes"],
+    "ja": ["analyze"],
+    "stop": ["delete"],
+    "crc": ["analyze", "delete --yes"],
+    "handles": [],
 }
 for k, d in scenarios.items():
     z = os.path.join(d, "archive.zip")
     t = os.path.join(d, "target")
-    opt = " --dry-run" if k in ("progress", "ja", "crc") else ""
     print(f"[{k}] {tips[k]}")
-    print(f'  & "{EXE}" "{z}" --target "{t}"{opt}\n')
-print("注意: y / --yes の実行は fixture の MATCHED を実際に削除する (復旧不可)。"
+    for c in commands[k]:
+        sub, _, opt = c.partition(" ")
+        opt = f" {opt}" if opt else ""
+        print(f'  & "{EXE}" {sub} "{z}" --target "{t}"{opt}')
+    if not commands[k]:
+        print(f"  target: {t}")
+    print()
+print("注意: delete で y / --yes を実行すると fixture のファイルを実際に削除する (復旧不可)。"
       "再実行するときは、このスクリプトをもう一度実行して新しい fixture を作る。")

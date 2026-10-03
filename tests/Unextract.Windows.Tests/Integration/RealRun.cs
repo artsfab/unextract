@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using Unextract.Core.Analysis;
+using Unextract.Core.Commands;
 using Unextract.Core.Deletion;
 using Unextract.Core.Results;
 using Unextract.Core.Target;
@@ -9,93 +10,117 @@ using Unextract.Core.Zip;
 
 namespace Unextract.Windows.Tests.Integration;
 
-// 実 ZIP と実 NTFS の target で、Windows の probe を接続した runner を実行する。
-// Run は削除しない (dry-run、または通常実行で確認に n と答える)。RunDeleting は実際に削除する: 削除フェーズに
-// DeletionGuard を組み込み、削除の指示の直前に毎回、削除用ハンドルの最終パスが fixture 内であることを確かめる。
+// 実 ZIP と実 NTFS の target で、Windows の probe を接続した analyze・delete を実行する (Prepare と確認を含む)。
+// Analyze は削除しない (削除の能力を型として持たない)。Delete は実際に削除する: 削除の指示の直前 (H5) に毎回 DeletionGuard で、
+// 削除用ハンドルの最終パスが fixture 内であることを確かめる。削除用オープンは記録する (事前判定で開かないことの確認用)。
 internal static class RealRun
 {
     // 確認で answer を返す。返す前に awaiting (確認待ち中の変更の注入) を呼ぶ。
     private sealed class ScriptedPrompt(string? answer, Action? awaiting = null) : IConfirmationPrompt
     {
-        public int AskCount { get; private set; }
-
         public bool IsInteractive => true;
 
         public string? Ask(string prompt)
         {
-            AskCount++;
             awaiting?.Invoke();
             return answer;
         }
     }
 
-    // 削除しない実行で削除フェーズに入ったら失敗にする。
-    private sealed class NoDeletion : IDeletionPhase
+    // 削除用オープンと識別確認を記録して、Windows の probe にそのまま委ねる。
+    public sealed class RecordingDeletionProbe(IDeletionProbe inner) : IDeletionProbe
     {
-        public DeletionReport Delete(DeletionRequest request) => throw new InvalidOperationException("削除フェーズには入らない");
+        public List<string> Opened { get; } = [];
+
+        public List<string> IdentityChecked { get; } = [];
+
+        public ProbeResult<IDeletionHandle> OpenForDeletion(string path)
+        {
+            Opened.Add(path);
+            return inner.OpenForDeletion(path);
+        }
+
+        public ProbeResult<IdentityCheckInfo> CheckIdentity(string path)
+        {
+            IdentityChecked.Add(path);
+            return inner.CheckIdentity(path);
+        }
     }
 
-    public sealed record Result(RunOutcome Outcome, string Output, string Error = "")
+    public sealed record Result(ExitStatus Status, AnalysisResult? AnalysisOrNull, DeleteReport? ReportOrNull, FatalError? PrepareError, string Output, string Error)
     {
-        public DeletionReport Deletion => Outcome.Deletion ?? throw new InvalidOperationException(Output + Error);
+        public RecordingDeletionProbe? Probe { get; init; }
 
-        public IEnumerable<string> DeletedNames => Deletion.Deleted.Select(e => e.Name);
+        public AnalysisResult Analysis => AnalysisOrNull ?? throw new InvalidOperationException(Output + Error);
 
-        public AnalysisResult Analysis => Outcome.Analysis ?? throw new InvalidOperationException(Output);
+        public DeleteReport Report => ReportOrNull ?? throw new InvalidOperationException(Output + Error);
 
         public Classification Of(string name) => Analysis.Results.Single(r => r.Entry.Name == name).Classification;
 
         public SkipReason? SkipOf(string name) => Analysis.Results.Single(r => r.Entry.Name == name).SkipReason;
+
+        public DeleteEntryResult ResultOf(string name) => Report.Results.Single(r => r.Entry.Name == name);
+
+        public IEnumerable<string> DeletedNames => Report.Results.Where(r => r.Status == DeleteStatus.Deleted).Select(r => r.Entry.Name);
+
+        // target からの相対パス (\ 区切り) の対象を削除用に開こうとしたか。
+        public bool Opened(string relative) => Probe!.Opened.Any(p => p.EndsWith(@"\target\" + relative, StringComparison.Ordinal));
     }
 
-    // mode は実行全体のモード (SPEC §15)。共通の安全性テストを Fast でも実行するために切り替える。
-    // hooks は runner のテスト用の差し込み口 (解析完了直後など。実行中の変更の注入に使う)。
-    public static Result Run(string zipPath, string target, bool dryRun = true, Limits? limits = null, RunMode mode = RunMode.Strict, RunHooks? hooks = null)
+    // mode は実行全体のモード (SPEC §15)。afterResults は結果表示の直後に呼ぶ (実行中の変更の注入に使う)。
+    public static Result Analyze(string zipPath, string target, Limits? limits = null, RunMode mode = RunMode.Strict, Action? afterResults = null)
     {
-        var opened = ZipArchiveSource.Open(zipPath);
-        using var source = opened.Source ?? throw new InvalidOperationException(opened.Fatal!.Describe());
-        var policy = ProtectedLocations.Resolve();
-        Assert.True(policy.Policy is not null, policy.Error?.Describe());
         var output = new StringWriter();
         var error = new StringWriter();
-        var outcome = UnextractRunner.Run(new RunRequest(
-            source, zipPath, target, dryRun, AssumeYes: false, new WindowsFileSystemProbe(), policy.Policy,
-            limits ?? Limits.Default, new ScriptedPrompt("n"), new NoDeletion(), output, error, Hooks: hooks, Mode: mode));
-        return new Result(outcome, output.ToString(), error.ToString());
+        var outcome = AnalyzeCommand.Run(new AnalyzeCommandRequest(zipPath, target, mode, Context(limits, output, error), afterResults));
+        return new Result(outcome.Status, outcome.Analysis, null, outcome.PrepareError, output.ToString(), error.ToString());
     }
 
-    // 実際に削除する実行。確認には y と答え、その直前に awaiting を呼ぶ (確認待ち中の変更)。
-    // hooks.BeforeDisposition の後に guard.Check を必ず呼ぶ (違反なら例外 → 削除フェーズはその対象で停止し、削除しない)。
-    public static Result RunDeleting(
-        string zipPath, string target, DeletionGuard guard, Action? awaiting = null, DeletionHooks? hooks = null, RunMode mode = RunMode.Strict)
+    // 実際に削除する実行。確認には answer (既定は y) と答え、その直前に awaiting を呼ぶ。entriesPath は --entries。
+    // hooks.BeforeDisposition の後に guard.Check を必ず呼ぶ (違反なら例外 → そのエントリで STOP し、削除しない)。
+    public static Result Delete(
+        string zipPath,
+        string target,
+        DeletionGuard guard,
+        RunMode mode = RunMode.Strict,
+        DeleteHooks? hooks = null,
+        string? entriesPath = null,
+        Action? awaiting = null,
+        string? answer = "y")
     {
-        var opened = ZipArchiveSource.Open(zipPath);
-        using var source = opened.Source ?? throw new InvalidOperationException(opened.Fatal!.Describe());
-        var policy = ProtectedLocations.Resolve();
-        Assert.True(policy.Policy is not null, policy.Error?.Describe());
-        hooks ??= new DeletionHooks();
+        hooks ??= new DeleteHooks();
         var userBeforeDisposition = hooks.BeforeDisposition;
-        var guarded = new DeletionHooks
+        var guarded = new DeleteHooks
         {
             BeforeOpen = hooks.BeforeOpen,
-            AfterRevalidation = hooks.AfterRevalidation,
-            DuringRecompare = hooks.DuringRecompare,
+            AfterOpen = hooks.AfterOpen,
+            DuringCompare = hooks.DuringCompare,
             BeforeFinalCheck = hooks.BeforeFinalCheck,
-            BeforeDisposition = (file, handle) =>
+            BeforeDisposition = (entry, handle) =>
             {
-                userBeforeDisposition?.Invoke(file, handle);
+                userBeforeDisposition?.Invoke(entry, handle);
                 guard.Check(handle);
             },
         };
-        var probe = new WindowsFileSystemProbe();
-        var prompt = new ScriptedPrompt("y", awaiting);
+        var probe = new RecordingDeletionProbe(new WindowsFileSystemProbe());
         var output = new StringWriter();
         var error = new StringWriter();
-        var outcome = UnextractRunner.Run(new RunRequest(
-            source, zipPath, target, DryRun: false, AssumeYes: false, probe, policy.Policy, Limits.Default, prompt,
-            new DeletionPhase(probe, guarded), output, error, Mode: mode));
+        var outcome = DeleteCommand.Run(new DeleteCommandRequest(
+            zipPath, target, mode, entriesPath, AssumeYes: false, probe, new ScriptedPrompt(answer, awaiting), Context(null, output, error), Hooks: guarded));
         Assert.Empty(guard.Violations);
-        return new Result(outcome, output.ToString(), error.ToString());
+        return new Result(outcome.Status, null, outcome.Report, outcome.PrepareError, output.ToString(), error.ToString()) { Probe = probe };
+    }
+
+    private static CommandContext Context(Limits? limits, TextWriter output, TextWriter error)
+    {
+        var locations = ProtectedLocations.Resolve();
+        Assert.True(locations.Policy is not null, locations.Error?.Describe());
+        return new CommandContext(
+            new WindowsFileSystemProbe(),
+            () => new TargetLocationPolicyResult(locations.Policy, locations.Error),
+            limits ?? Limits.Default,
+            output,
+            error);
     }
 
     // ZIP を path に書く (FileMode.CreateNew: 既存のファイルを上書きしない)。
@@ -114,7 +139,7 @@ internal static class RealRun
 
     public static byte[] Bytes(string text) => System.Text.Encoding.UTF8.GetBytes(text);
 
-    // 削除候補の分類 (Strict は MATCHED、Fast は SAME_SIZE。PLAN_TESTS のモード違いの再利用の原則)。
+    // 削除対象の分類 (Strict は MATCHED、Fast は SAME_SIZE。PLAN_TESTS のモード違いの再利用の原則)。
     public static Classification Candidate(RunMode mode) => mode == RunMode.Fast ? Classification.SameSize : Classification.Matched;
 
     // ディレクトリ配下の全項目の (相対パス → 種類・サイズ・SHA-256・更新日時)。

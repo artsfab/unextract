@@ -25,6 +25,15 @@ public sealed record Limits
 
     public long MaxTotalDeclaredLength { get; init; } = 68_719_476_736;
 
-    // 初回分類の内容比較候補で実際に読んだ量の累計 (段階 C で使う)。
+    // その実行の全バイト比較 (analyze・delete) で実際に読んだ量の累計。
     public long MaxTotalReadLength { get; init; } = 68_719_476_736;
+
+    // --entries のファイルの大きさ (バイト)。超えるファイルは全体を読まない (SPEC §3.3、§11)。
+    public long MaxEntriesFileBytes { get; init; } = 134_217_728;
+
+    // --entries の1行のバイト数 (UTF-8、行末の改行を除く)。
+    public int MaxEntriesLineBytes { get; init; } = 4_096;
+
+    // --entries の行数。
+    public int MaxEntriesLines { get; init; } = 100_000;
 }

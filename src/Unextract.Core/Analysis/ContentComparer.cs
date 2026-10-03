@@ -10,6 +10,9 @@ internal enum ContentVerdict
     Match,
     Mismatch,
     Fatal,
+
+    // Fast: 内容を読んでいない (SAME_SIZE)。
+    NotRead,
 }
 
 internal readonly record struct ContentOutcome(ContentVerdict Verdict, FatalKind? FatalKind = null, string? Detail = null)
@@ -18,20 +21,14 @@ internal readonly record struct ContentOutcome(ContentVerdict Verdict, FatalKind
 
     public static ContentOutcome Mismatch { get; } = new(ContentVerdict.Mismatch);
 
+    public static ContentOutcome NotRead { get; } = new(ContentVerdict.NotRead);
+
     public static ContentOutcome Fail(FatalKind kind, string? detail = null) => new(ContentVerdict.Fatal, kind, detail);
 }
 
-// 比較の回。初回比較 (SPEC §6.1 の手順7) か、削除直前の2回目の比較 (§8.3 の 3) か。
-internal enum ComparisonPass
-{
-    Initial,
-    Recheck,
-}
-
-// エントリ内容の検証基準 (SPEC §5.2) による比較。初回比較と削除直前の2回目の比較で、同じインスタンスを共有する
-// (PLAN.md §1。runner が1つ作り、初回分類と削除フェーズの両方に渡す)。
-// 違反時の扱い (初回は FATAL / MODIFIED、2回目は停止) は呼び出し側が決める。2つの回の違いは、実測展開量の累計
-// (SPEC §11) を初回分類だけで数えることだけで、下の 1〜6 の検査は同じ。
+// エントリ内容の検証基準 (SPEC §5.2) による比較。analyze と delete が同じ実装を共有し (PLAN.md §1)、1回の実行で1つのインスタンスを使う。
+// 違反時の扱い (analyze は FATAL / MODIFIED、delete は STOP / MODIFIED) は呼び出し側が決める。各エントリの内容は1回の実行で高々1回しか
+// 読まない (Strict の delete でも比較は1回)。実測展開量の累計 (SPEC §11) はその実行の全ての比較で数える。
 // 1. IsEncrypted が false (Open() の前に確認)
 // 2. Open() と読み取り中に例外が発生しない (種類を問わない)
 // 3. 読み出したバイト数が Length を超えた時点で直ちに異常 (それ以上読まない)
@@ -53,24 +50,21 @@ public sealed class ContentComparer
         _limits = limits;
     }
 
-    // 初回分類の内容比較候補で実際に読んだ量の累計 (SPEC §11)。2回目の比較で読んだ量は数えない。
+    // その実行の全バイト比較で実際に読んだ量の累計 (SPEC §11)。
     public long TotalRead { get; private set; }
 
-    // 回ごとの比較の回数 (初回と2回目で同じインスタンスが使われていることの確認用)。
-    internal int InitialComparisons { get; private set; }
+    // 全バイト比較 (Compare) の回数 (内容比較候補ごとに1回であることの確認用)。
+    internal int Comparisons { get; private set; }
 
-    internal int RecheckComparisons { get; private set; }
+    // 内容比較候補の内容検証 (SPEC §6.1 の手順8、§8.3 の手順6)。analyze と delete が共有し、Strict と Fast の処理差はここの1か所だけ
+    // (DEC-34)。Strict はエントリ内容の検証基準 (§5.2) で同じハンドルから読んで比較する。Fast は ZIP エントリも target も読まずに
+    // NotRead (SAME_SIZE) を返す。Fast で §5.2 の FATAL・STOP と実測展開量の計上が起きないのは、Compare を呼ばないことの帰結。
+    internal ContentOutcome Verify(RunMode mode, IZipContentProvider contents, int index, IComparisonHandle target) =>
+        mode == RunMode.Fast ? ContentOutcome.NotRead : Compare(contents.GetContent(index), target);
 
-    internal ContentOutcome Compare(IZipEntryContent content, IComparisonHandle target, ComparisonPass pass = ComparisonPass.Initial)
+    internal ContentOutcome Compare(IZipEntryContent content, IComparisonHandle target)
     {
-        if (pass == ComparisonPass.Initial)
-        {
-            InitialComparisons++;
-        }
-        else
-        {
-            RecheckComparisons++;
-        }
+        Comparisons++;
 
         if (content.IsEncrypted)
         {
@@ -121,13 +115,10 @@ public sealed class ContentComparer
                     return ContentOutcome.Fail(FatalKind.ContentTooLong, $"宣言 {length} バイト");
                 }
 
-                if (pass == ComparisonPass.Initial)
+                TotalRead += n;
+                if (TotalRead > _limits.MaxTotalReadLength)
                 {
-                    TotalRead += n;
-                    if (TotalRead > _limits.MaxTotalReadLength)
-                    {
-                        return ContentOutcome.Fail(FatalKind.TotalReadLengthTooLarge);
-                    }
+                    return ContentOutcome.Fail(FatalKind.TotalReadLengthTooLarge);
                 }
 
                 var chunk = _zipBuffer.AsSpan(0, n);

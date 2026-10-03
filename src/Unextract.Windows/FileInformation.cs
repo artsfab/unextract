@@ -188,6 +188,8 @@ public static unsafe class FileInformation
 
     // FSCTL_READ_FILE_USN_DATA (入力 Min 2 / Max 3) で USN_RECORD_V3 を受け取り、親ディレクトリの File ID を返す。
     // USN ジャーナルが非アクティブなボリュームでも動作する (SPEC §13、PoC 4)。
+    // hardlink では開いた名前とは別のリンクの親 ID を返す場合がある。delete はリンク数2以上の
+    // 非削除判定を先に行い、その場合はこの値を開いた名前の親として照合しない (SPEC §8.3)。
     public static Win32Result<FileId128> GetParentFileId(SafeFileHandle handle)
     {
         ArgumentNullException.ThrowIfNull(handle);

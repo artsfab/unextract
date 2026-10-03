@@ -1,4 +1,5 @@
 using Unextract.Core.Analysis;
+using Unextract.Core.Deletion;
 using Unextract.Core.Results;
 using Xunit.Abstractions;
 using static Unextract.Windows.Tests.Integration.RealRun;
@@ -6,7 +7,7 @@ using static Unextract.Windows.Tests.TestFixture;
 
 namespace Unextract.Windows.Tests.Integration;
 
-// 実 ZIP と実 NTFS の target での初回分類 (SPEC §6、§7)。fixture はテストの出力先の fixtures/ の下に毎回ユニークな名前で作り、
+// 実 ZIP と実 NTFS の target での analyze の分類 (SPEC §6、§7)。fixture はテストの出力先の fixtures/ の下に毎回ユニークな名前で作り、
 // 削除しない。junction は同じ fixture 内の別ディレクトリを指すものだけ。symlink は作らない (特権が必要)。
 // 前提が成り立たない項目は「前提不成立」と出力して、その項目の確認を行わずに終える (成功・失敗のどちらにも数えないよう報告する)。
 public class ClassificationIntegrationTests(ITestOutputHelper output)
@@ -38,7 +39,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
 
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(("keep.txt", Hello), ("gone.txt", Hello)));
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
         Assert.Null(result.Analysis.Fatal);
         Assert.Equal(2, result.Analysis.Results.Count);
@@ -59,7 +60,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
         File.WriteAllBytes(Path.Combine(target, "Dir", "a.txt"), Hello);
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(("file.txt", Hello), ("dir/a.txt", Hello)));
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
         Assert.Null(result.Analysis.Fatal);
         Assert.Equal(Classification.Missing, result.Of("file.txt"));
@@ -89,7 +90,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
         output.WriteLine($"8.3 名: {shortFile}, {shortDir}");
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip((shortFile, Hello), ($"{shortDir}/inner.txt", Hello)));
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
         Assert.Null(result.Analysis.Fatal);
         Assert.Equal(Classification.Missing, result.Of(shortFile));
@@ -133,7 +134,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
             "archive.txt", "normal.txt", "hidden.txt", "notindexed.txt", "folder.txt"];
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(names.Select(n => (n, (byte[]?)Hello)).ToArray()));
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
         Assert.Null(result.Analysis.Fatal);
         Assert.Equal(SkipReason.AlternateDataStream, result.SkipOf("ads.txt"));
@@ -175,7 +176,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
 
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(("x.txt", Hello)));
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
         Assert.Null(result.Analysis.Fatal);
         Assert.Equal(Candidate(mode), result.Of("x.txt"));
@@ -191,7 +192,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
         var zip = WriteZip(Path.Combine(target, "archive.zip"), Zip(("archive.zip", Hello)));
         var hash = Hash(zip);
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
         Assert.Null(result.Analysis.Fatal);
         Assert.Equal(SkipReason.ArchiveItself, result.SkipOf("archive.zip"));
@@ -216,7 +217,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
             Path.Combine(dir, "archive.zip"),
             Zip(("m1/b/c.txt", Hello), ("M2/b/c.txt", Hello), ("m3/b/c.txt", Hello), ("j/b/c.txt", Hello)));
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
         Assert.Null(result.Analysis.Fatal);
         Assert.Equal(Classification.Missing, result.Of("m1/b/c.txt"));
@@ -227,7 +228,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
         Assert.Equal(elsewhereBefore, Snapshot(elsewhere));
     }
 
-    // T11: 比較対象を別のハンドルが書き込みで開いたままにする → 比較用オープンが共有違反 (32) で全体 FATAL、削除候補なし。
+    // T11: 比較対象を別のハンドルが書き込みで開いたままにする → 比較用オープンが共有違反 (32) で analyze は FATAL。
     // ここでは同一プロセス内の別ハンドルで模擬する。別プロセスでも同じ結果 (32) になることは SPEC §13 の PoC 5 で確認済み。
     [Theory]
     [InlineData(RunMode.Strict)]
@@ -243,16 +244,15 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
         Result result;
         using (new FileStream(editing, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
         {
-            result = Run(zip, target, mode: mode);
+            result = Analyze(zip, target, mode: mode);
         }
 
         var fatal = Assert.IsType<FatalError>(result.Analysis.Fatal);
         Assert.Equal(FatalKind.ComparisonOpenFailed, fatal.Kind);
         Assert.Contains("Win32 エラー 32", fatal.Describe(), StringComparison.Ordinal);
         Assert.Equal("editing.txt", fatal.Entry!.Name);
-        Assert.Empty(result.Analysis.DeletionCandidates);
         Assert.Contains("\"editing.txt\"", result.Error, StringComparison.Ordinal);
-        Assert.Equal(ExitStatus.Error, result.Outcome.Status);
+        Assert.Equal(ExitStatus.Error, result.Status);
     }
 
     // T12 (実機): 判定終了後に target のハンドルが開いていない (別ハンドルで書き込み・改名ができる)
@@ -268,8 +268,8 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
         File.WriteAllBytes(Path.Combine(target, "sub", "x.txt"), Hello);
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(("same.txt", Hello), ("sub/x.txt", Hello)));
 
-        var result = Run(zip, target, mode: mode);
-        Assert.Equal(2, result.Analysis.DeletionCandidates.Count);
+        var result = Analyze(zip, target, mode: mode);
+        Assert.Equal([Candidate(mode), Candidate(mode)], result.Analysis.Results.Select(r => r.Classification));
 
         using (new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
         {
@@ -305,21 +305,24 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
             return;
         }
 
-        Result RunOne(string name, string content, string zipName) =>
-            Run(WriteZip(Path.Combine(dir, zipName), Zip(($"cs/{name}", Bytes(content)))), target, mode: mode);
+        Result AnalyzeOne(string name, string content, string zipName) =>
+            Analyze(WriteZip(Path.Combine(dir, zipName), Zip(($"cs/{name}", Bytes(content)))), target, mode: mode);
 
-        var upper = RunOne("Foo", "upper", "upper.zip");
-        var lower = RunOne("foo", "lower", "lower.zip");
-        var other = RunOne("FOO", "upper", "other.zip");
+        var upper = AnalyzeOne("Foo", "upper", "upper.zip");
+        var lower = AnalyzeOne("foo", "lower", "lower.zip");
+        var other = AnalyzeOne("FOO", "upper", "other.zip");
 
         Assert.Equal(Candidate(mode), upper.Of("cs/Foo"));
         Assert.Equal(Candidate(mode), lower.Of("cs/foo"));
         Assert.Equal(Classification.Missing, other.Of("cs/FOO"));
-        var upperId = upper.Analysis.DeletionCandidates[0].Snapshot.FileId;
-        var lowerId = lower.Analysis.DeletionCandidates[0].Snapshot.FileId;
-        Assert.NotEqual(upperId, lowerId);
-        Assert.EndsWith(@"\cs\Foo", upper.Analysis.DeletionCandidates[0].ExpectedPath, StringComparison.Ordinal);
-        Assert.EndsWith(@"\cs\foo", lower.Analysis.DeletionCandidates[0].ExpectedPath, StringComparison.Ordinal);
+        Assert.EndsWith(@"\cs\Foo", upper.Analysis.Results[0].Target, StringComparison.Ordinal);
+        Assert.EndsWith(@"\cs\foo", lower.Analysis.Results[0].Target, StringComparison.Ordinal);
+
+        // delete でも、それぞれ正しい個体を削除・残す。foo だけを削除し、Foo (内容 upper) は残る。
+        var deleting = Delete(Path.Combine(dir, "lower.zip"), target, new DeletionGuard(dir), mode: mode);
+        Assert.Equal(["cs/foo"], deleting.DeletedNames);
+        Assert.False(File.Exists(Path.Combine(cs, "foo")));
+        Assert.Equal("upper", File.ReadAllText(Path.Combine(cs, "Foo")));
     }
 
     // C01・C02・C03・C07 (代表): 実 NTFS の target で、サイズ一致 → FATAL、不存在・サイズ不一致 → FATAL にならない
@@ -343,12 +346,11 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
                 File.WriteAllBytes(Path.Combine(target, "x.bin"), Data);
             }
 
-            var result = Run(WriteZip(Path.Combine(dir, "archive.zip"), zipBytes), target);
+            var result = Analyze(WriteZip(Path.Combine(dir, "archive.zip"), zipBytes), target);
 
             if (state == "size-matches")
             {
                 Assert.Equal(expected, result.Analysis.Fatal?.Kind);
-                Assert.Empty(result.Analysis.DeletionCandidates);
             }
             else
             {
@@ -359,8 +361,9 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     }
 
     // C15 (実機): C01・C02・C03・C07 (代表) を --fast で、target の3状態 (不存在 / サイズ ≠ N / サイズ = N) で実行する。
-    // --dry-run と通常実行 (確認に y、RunDeleting) の両方。不存在は MISSING、サイズ ≠ N は MODIFIED、サイズ = N は FATAL ではなく
-    // SAME_SIZE で、通常実行では削除される (SPEC §15.3)。ZIP の Open() が呼ばれないことは Core の C15 で確かめる。
+    // analyze と delete (確認に y) の両方。不存在は MISSING、サイズ ≠ N は MODIFIED、サイズ = N は FATAL ではなく
+    // SAME_SIZE で、delete では削除される (SPEC §15.3)。ZIP の Open() が呼ばれないことは Core の C15 で確かめる。
+    // 同じ fixture の Strict の delete は、サイズ = N で STOP (S13) になり削除しない。
     [Theory]
     [InlineData("C01")]
     [InlineData("C02")]
@@ -390,27 +393,29 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
                 _ => Classification.SameSize,
             };
 
-            var dryRun = Run(zip, target, mode: RunMode.Fast);
-            Assert.Null(dryRun.Analysis.Fatal);
-            Assert.Equal(expected, dryRun.Of("x.bin"));
-            Assert.Equal(ExitStatus.Success, dryRun.Outcome.Status);
+            var analyze = Analyze(zip, target, mode: RunMode.Fast);
+            Assert.Null(analyze.Analysis.Fatal);
+            Assert.Equal(expected, analyze.Of("x.bin"));
+            Assert.Equal(ExitStatus.Success, analyze.Status);
             Assert.Equal(state != "missing", File.Exists(x));
 
-            var deleting = RunDeleting(zip, target, new DeletionGuard(dir), mode: RunMode.Fast);
-            Assert.Null(deleting.Analysis.Fatal);
-            Assert.Equal(expected, deleting.Of("x.bin"));
-            Assert.Equal(dryRun.Outcome.ReportLines, deleting.Outcome.ReportLines);
             if (state == "size-matches")
             {
-                Assert.Equal(["x.bin"], deleting.DeletedNames);
-                Assert.False(File.Exists(x));
-            }
-            else
-            {
-                Assert.Null(deleting.Outcome.Deletion);
-                Assert.Equal(state == "size-differs", File.Exists(x));
+                var strict = Delete(zip, target, new DeletionGuard(dir), mode: RunMode.Strict);
+                Assert.Equal(DeleteStatus.Stopped, strict.ResultOf("x.bin").Status);
+                Assert.True(File.Exists(x));
             }
 
+            var deleting = Delete(zip, target, new DeletionGuard(dir), mode: RunMode.Fast);
+            Assert.Equal(ExitStatus.Success, deleting.Status);
+            var status = state switch
+            {
+                "missing" => DeleteStatus.Missing,
+                "size-differs" => DeleteStatus.Modified,
+                _ => DeleteStatus.Deleted,
+            };
+            Assert.Equal(status, deleting.ResultOf("x.bin").Status);
+            Assert.Equal(state == "size-differs", File.Exists(x));
             Assert.True(File.Exists(zip));
         }
     }
@@ -429,13 +434,12 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
             Path.Combine(dir, "archive.zip"),
             Zip(("same.txt", Hello), ("changed.txt", Hello), ("size.txt", Hello), ("zero.txt", [])));
 
-        var result = Run(zip, target, mode: RunMode.Fast);
+        var result = Analyze(zip, target, mode: RunMode.Fast);
 
         Assert.Null(result.Analysis.Fatal);
         Assert.Equal(
             [Classification.SameSize, Classification.SameSize, Classification.Modified, Classification.SameSize],
             result.Analysis.Results.Select(r => r.Classification));
-        Assert.Equal(["same.txt", "changed.txt", "zero.txt"], result.Analysis.DeletionCandidates.Select(c => c.Entry.Name));
     }
 
     // R06 (実機): 宣言 Length 合計が 64 GiB 超 (ヘッダー値の書き換え、実データは小さい)。全エントリ MISSING でも FATAL。
@@ -451,7 +455,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
             patcher.SetDeclaredLength(i, 13L * 1024 * 1024 * 1024);
         }
 
-        var result = Run(WriteZip(Path.Combine(dir, "archive.zip"), patcher.ToArray()), target, mode: mode);
+        var result = Analyze(WriteZip(Path.Combine(dir, "archive.zip"), patcher.ToArray()), target, mode: mode);
 
         Assert.Equal(FatalKind.TotalDeclaredLengthTooLarge, result.Analysis.Fatal?.Kind);
         Assert.Empty(result.Analysis.Results);

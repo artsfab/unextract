@@ -21,7 +21,7 @@
 
 ## 3. 絶対に守る安全規則
 
-- 削除は、再検証 (Strict では再比較も) した同じハンドルへの `SetFileInformationByHandle(FileDispositionInfoEx)` の1か所だけ (SPEC §8.3)。
+- 削除は、照合・検査 (Strict では全バイト比較も) と最終確認をした同じ削除用ハンドルへの `SetFileInformationByHandle(FileDispositionInfoEx)` の1か所だけ (SPEC §8.3)。`analyze` は削除用ハンドルを開かない。
 - flags は 0x3 (`DELETE | POSIX_SEMANTICS`)。`IGNORE_READONLY_ATTRIBUTE` は使わない。
 - パスベースの削除・改名 API (`File.Delete`、`DeleteFile`、`Directory.Delete`、`RemoveDirectory`、`MoveFile*` など) を `src/` に書かない。
 - 不明・判定不能は削除しない側 (FATAL または停止) に倒す。未知のエラーを推測で続行しない (SPEC §8.4)。
@@ -42,7 +42,7 @@
 - `LICENSE` は MIT。内容は変更しない。
 - 実在のユーザーデータを target にしない。
 - 削除してよいのは、テスト・検証が自作した一意な fixture と、承認を得た後始末だけ。
-- fixture は原則テストから削除せず、掃除は `scripts/clean-test-fixtures.ps1` で行う (既定は一覧のみ、`-Execute` で実行)。例外として M08 / O07 の PTY テストは、PTY / process tree の終了・Dispose 完了後に自分が作った GUID 付き fixture だけを自動 cleanup する。cleanup failure は黙殺せず、元の失敗情報・terminal output を保持する。
+- fixture は原則テストから削除せず、掃除は `scripts/clean-test-fixtures.ps1` で行う (既定は一覧のみ、`-Execute` で実行)。例外として X28 の PTY テスト (旧 M08 / O07) は、PTY / process tree の終了・Dispose 完了後に自分が作った GUID 付き fixture だけを自動 cleanup する。cleanup failure は黙殺せず、元の失敗情報・terminal output を保持する。
 - `Remove-Item -Recurse` を使わない。
 
 ## 6. よく使うコマンド
@@ -68,7 +68,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\clean-test-fixtures.
 - 未確認の事項 (ファイル symlink、クラウド placeholder、EFS、USN のない FS) は成立と見なさない (SPEC §13・§14)。
 - publish 版 E2E / PTY は `scripts/run-e2e-tests.ps1` を使う。一時 Release / `win-x64` publish、`UNEXTRACT_E2E_EXE` の設定、E2E project 全体の実行、環境変数の復元、自作 temp publish の cleanup を一括で行う。検証用の temp publish を手作業で残さない。外部 exe や既存 `bin/` / `obj/` は削除しない。
 - E2E test 自身は publish しない。`UNEXTRACT_E2E_EXE` があればその exe を使い、未設定なら通常 build 出力を使う。通常の全体検証 (`dotnet test unextract.sln`) と publish 版の検証は役割が異なる。
-- 手動確認 (実端末の操作・進捗・コードページ・視認性) の手順と記録は `docs/MANUAL_TESTS.md`。M08 / O07 の機能部分は E2E PTY で自動化済み。
+- 手動確認 (実端末の操作・進捗・コードページ・視認性) の手順と記録は `docs/MANUAL_TESTS.md`。M08 の機能部分は E2E PTY (X28) で自動化済み。
 
 ## 8. 報告の作法
 
