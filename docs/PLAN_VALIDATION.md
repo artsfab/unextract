@@ -4,6 +4,8 @@
 
 ユーザー名・SID・セッション ID は伏せている (`<user>` などで表記)。
 
+**2026-10-03 の実行モデル改訂について**: 本書の「新方式 (`analyze` / `delete`) の検証」の節より前の記録は全て、改訂前の旧方式 (サブコマンドなし、`--dry-run`、初回分類 → 確認 → 再オープン・2回目の比較 → 削除) の実装・手順で行ったものであり、当時の事実として変更しない。節名や本文の「dry-run」「初回分類」「削除フェーズ」「再検証」などは当時の用語である。新方式での検証は末尾の節に追記する。
+
 ## 実施環境 (2026-10-02)
 
 - Windows 11 Home 10.0.26300、NTFS (システムドライブ上の一時ディレクトリ)
@@ -642,6 +644,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-e2e-tests.ps1
 
 ## 必須テスト対応表
 
+**旧方式の対応表 (記録)**: この表は旧方式のテスト ID (D 系、Y 系、旧 O・X 系を含む) によるもので、旧方式の実装で全項目が合格した時点の対応を記録として残す。新方式の対応表は末尾の「新方式 (`analyze` / `delete`) の検証」にある。
+
 最初の依頼の必須12項目と、第2回の依頼で追加した項目、Fast モード (SPEC §15) の追加で加えた項目それぞれに対応する [`PLAN_TESTS.md`](PLAN_TESTS.md) のテスト ID。
 
 「Fast」以外の行の期待結果は Strict のものである。そのうち Strict と共通の安全性を確かめるテストは、`PLAN_TESTS.md` 冒頭の「モード違いの再利用の原則」に従い、同じ fixture で `--fast` を付けても実行する (対象のテスト ID と期待結果の読み替えは同書が正)。SPEC §5.2 の内容検証、§8.3 の手順3、`MATCHED` の表示に依存するテスト (P01、C01〜C14、R07、R08、T01、D03、D10、D13、D23、O01、X01〜X12) は Strict だけで行い、Fast 側の観点は「Fast」の行のテストで確かめる。
@@ -692,3 +696,74 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-e2e-tests.ps1
 | Fast | 警告: 結果表示に至る Fast の実行では解析結果の一覧の先頭行 (標準出力) に出し、結果表示に至らない終了と Strict では出さない | O06、X13〜X15 |
 | Fast | 警告: Fast の確認プロンプトの直前の行に出し (確認プロンプトと同じ経路)、`--yes`・非対話と Strict では出さない | O07 (Core+E2E PTY。M08 の機能部分を自動確認済み。実端末の視覚確認は [`MANUAL_TESTS.md`](MANUAL_TESTS.md)) |
 | Fast | exe での Fast の実行 (`--dry-run`、`--yes`、Strict では FATAL になる CRC 不一致の fixture、`--fast` の重複、事前検証の FATAL、削除候補0件) | X13、X14、X15 |
+
+## 新方式 (`analyze` / `delete`) の検証 (2026-10-03 開始)
+
+### 再設計の開始点
+
+- 2026-10-03 に、実行モデルを `analyze` (非破壊の全件解析) と `delete` (1エントリずつ現在状態を検証してその場で削除) に分ける改訂を SPEC・PLAN・PLAN_TESTS・PLAN_DECISIONS (DEC-24〜DEC-34) に反映した。改訂の時点の製品コードは旧方式のまま (コミット `835f219`、タグ `v0.2.0` と同じ内容) だった。新方式は同日に実装した (下の「新方式の実装と検証」)。
+- 新方式は Win32 API・ハンドル構成・ZIP の読み方を変えないため、G1〜G4 の根拠 (V1〜V7、SPEC §13 の PoC 1〜8、E-2 実測) はそのまま使う (`PLAN.md` §2)。ただし PoC と E-2 実測は旧方式の削除フェーズ (スナップショットとの照合、2回目の比較) を前提に行ったもので、新方式の手順での結果ではない。対応する自動テストは新方式の実装後に再度合格させる。
+- 新方式で生じた未実測の事項 (SPEC §13 の「2026-10-03 の実行モデル改訂で生じた未実測の事項」) を G5 とした。この節に記録するまで成立と見なさない。
+
+### G5 の実測
+
+| 事項 | テスト | 状態 | 結果 |
+|---|---|---|---|
+| 比較用・削除用ハンドル (相当) の同時オープン | M09 | 未実施 (手動) | — (新方式は同時に開かないため設計は依存しない) |
+| 配下のファイルの削除用ハンドルを開いている間の祖先ディレクトリの改名 | S26、M12 (a) | S26 実施 (M12 は未実施) | 対象の親ディレクトリの改名は Win32 エラー 5 で失敗し、そのファイルは通常どおり削除された (Strict、同一プロセスの別ハンドルからの改名) |
+| read-only のファイルの `DELETE` アクセスでのオープン | S37、M12 (b) | S37 実施 (M12 は未実施) | 列挙の後に read-only を付けたファイルの削除用オープンは成功し、ハンドル上の属性判定で `SKIPPED_SPECIAL_FILE` (属性) になった。削除されない (Strict・Fast) |
+| 列挙の属性・reparse tag とハンドルの値の一致 | S38 | 実施 | archive、normal、hidden、not-content-indexed、read-only、system、temporary、offline、compressed、sparse、ディレクトリ、ディレクトリ junction の 12 項目で、列挙の属性・reparse tag と `FileBasicInfo`・`FileAttributeTagInfo` の値が全て一致した。EFS とファイル symlink は未確認 |
+| 対象の DELETE だけを ACL で拒否した場合の新方式での結果 | S34 | 実施 | (a) delete の実行前に拒否: 削除用オープン・照合・削除の指示が成功し、削除された (Strict・Fast)。(b) 比較中 (H3) に拒否: 最終確認で `ChangeTime` の不一致により STOP、対象は残った。どちらも `PLAN.md` §4 の推定どおり。誤削除なし |
+| `delete` の途中の Ctrl+C と、削除の指示の後・クローズ前の中断 | M10 | 未実施 (手動) | — |
+| 書き込み可能なメモリマップ経由の書き込み | M11 | 未実施 (手順未確立) | — |
+| Windows PowerShell 5.1 のリダイレクトの保存形式と `--entries` | L18、M13 | 未実施 (手動) | — (UTF-16 の BOM を入力エラーにする挙動は L02・X21 で確認済み) |
+
+### 新方式の必須テスト対応表
+
+テスト ID は [`PLAN_TESTS.md`](PLAN_TESTS.md) のもの。2026-10-03 に、手動の M 系を除き全て合格した (下の「新方式の実装と検証」)。
+
+| 項目 | テスト ID |
+|---|---|
+| `analyze` は削除用ハンドルを開かず何も削除しない。全件の結果行と合計、FATAL 時の判定済み・原因・未判定 | A01〜A06、O08〜O12、X16、X19 |
+| Prepare の失敗・確認の中止で削除0件、target のエントリに触れない | P01〜P11、Z 系、R01〜R06、X18、X20、X22、X25 |
+| 旧形式と `--dry-run` は入力エラー (削除処理を開始しない) | K02、K04、X20 |
+| 確認は Prepare の後・最初のエントリの処理の前に1回 (案 A)。確認待ちの間に target ファイルのハンドルを開かない | S02、S03、O14、X28 |
+| 各エントリで削除用ハンドルを1回だけ開き、同じハンドルで照合・検査・1回の比較・最終確認・削除・成立確認 | S04、S05、S06、S32、S33 |
+| 比較した同じハンドルから削除し、比較中・削除までの他者の書き込み・改名を共有モードで防ぐ | S05、S24 |
+| 1回の比較の不一致は `MODIFIED` で続行、ZIP 側の異常は STOP | S13、S14、C 系 (`analyze`) |
+| STOP ではその対象を削除せず以後を処理しない。それ以前の削除は残る。表示で明示 | S10〜S12、O15、X19 |
+| 削除用オープンの共有違反・アクセス拒否で識別確認が一致 → `DELETE_FAILED` で続行 (内容未確認と表示)。不一致・失敗 → STOP | S16〜S18 |
+| 事前判定 (D1) とハンドル上の判定 | S19、S20、T07、T09、T16 |
+| オープン直後の親 File ID・最終パスの照合 | S22、S23 |
+| 最終確認は M0 の全項目 | S25、S27 |
+| 削除指示・成立確認 (flags 0x3、`DeletePending`) | S28、S31〜S33 |
+| 列挙結果の再利用 (ディレクトリごとに1回) と逐次削除の相互作用 | S35、S36、T14 |
+| `--entries` の形式・照合・上限、入力エラーで削除0件、指定外を削除しない | L01〜L17、X21、X23 |
+| 表示: 1件1行、Entry は変換なし、Target と凡例、`SkipReason`、逐次出力、進捗 | O08〜O16、X23、X24 |
+| Fast: 内容を読まない、同サイズ・内容違いが削除される、安全性は Strict と同じ | C15、R09、T17、S06、S07、A02、A08、X26 |
+| G5 の実測 | 上の「G5 の実測」 |
+
+## 新方式の実装と検証 (2026-10-03)
+
+### 実施環境と結果
+
+- Windows 11 10.0.26300、NTFS、.NET SDK 10.0.401。`dotnet build unextract.sln`: 警告 0・エラー 0。
+- `dotnet test unextract.sln`: Core 816、Windows 160、CLI 47、E2E 34 (PTY の X28 を含む)、計 1,057 合格・失敗 0・スキップ 0。前提不成立の出力なし。
+- `scripts/run-e2e-tests.ps1` (一時 publish の単一ファイル exe): E2E 34 合格。一時 publish は削除された。
+- ACL を変えるテスト (S16、S34) の後、`icacls` で fixture に DENY が残っていないことを確認した。
+- `src/`・`tests/`・`docs/`・`scripts/`・`.github/` に不可視文字・双方向制御文字が実際の文字として無いことを grep で確認した。
+- テストの件数が旧方式 (944) と異なるのは、旧方式専用のテスト (D 系、Y 系、旧 O・X 系、`RunnerTests`・`DeletionPhaseTests`・`AnalysisReportTests`) を削除し、新方式のテスト (A・S・L・K・新 O・X16〜X28) に置き換えたためである。
+
+### Strict の比較回数と同じハンドル
+
+- `delete` の Strict は、各エントリの内容を削除用ハンドルから1回だけ読む (Core S05: `ContentComparer.Comparisons` が内容比較候補の件数と一致し、ZIP の `Open()` はエントリごとに1回)。比較用ハンドルは開かない (`DeleteHarness`・`CommandHarness` が毎回確認)。
+- 呼び出し順 (Core S05・S06): オープン → 同じハンドルで照合 (File ID・親 File ID・最終パス) → 検査と M0 → (Strict) 読み取り → 最終確認 (M0 の全項目) → 削除の指示 (0x3) → `DeletePending` → クローズ。パスを使う呼び出しは各エントリの `OpenForDeletion` 1回 (失敗時の `CheckIdentity` 1回) だけ。
+
+### S09 の食い違いと解消 (2026-10-03 確定)
+
+- 実測: ZIP 自身が target 内にあり ZIP に同名のエントリがある場合、`delete` 自身が ZIP を `FileShare.Read` (DELETE を共有しない) で保持しているため、ZIP への削除用オープンは共有違反 (32) になり、識別確認が列挙由来の基準と一致して `DELETE_FAILED` (終了 1) になった (Strict・Fast)。ハンドル上の「ZIP 自身」の判定 (SPEC §7) には届かない。ZIP は削除されない。`analyze` では `SKIPPED_SPECIAL_FILE` (ZIP 自身)。
+- 発見時の食い違い: 実機結果は `DELETE_FAILED` だったが、`PLAN_TESTS.md` の旧期待は `SKIPPED_SPECIAL_FILE` (ZIP 自身) だった。当時の Core S09 は偽 FS が ZIP の保持を模擬せず、ハンドル上の判定で旧期待になっていた。Win S09 は `DELETE_FAILED` とエラー終了、ZIP の内容不変を assert していたが、後続処理の確認がなかった。
+- 人間判断: 2026-10-03 に (b) (現行実装の挙動を正式仕様とする) を採用した (DEC-27)。(a) (ZIP 自身を事前判定で特別に SKIPPED とする案) は不採用。SPEC §8.1・§8.4 の一般則から一意に導けるため、SPEC と製品コードは変更しない。
+- 正式な回帰要件: `DELETE_FAILED`、終了コード 1、archive 自身は残り内容も変わらない。識別確認一致後に STOP せず後続へ進み、正常な後続対象を実際に削除する (Strict・Fast)。Core S09 は保持による共有違反 (32) を注入する形へ変更し、Win S09 とともに後続の削除と未処理 0 件を assert する。`PLAN_TESTS.md` の S09・T09 と `PLAN.md` を同期し、食い違いは解消済み。
+- 変更後の検証 (2026-10-03): S09・S16〜S18 の関連テストは Core 19、Win 18 合格 (S09 は両方で Strict・Fast 合格)。`dotnet build unextract.sln` は警告 0・エラー 0。`dotnet test unextract.sln --no-build --logger "console;verbosity=detailed"` は Core 816、Windows 160、CLI 47、E2E 34、計 1,057 合格。前提不成立の出力なし。今回実行した ACL 変更テストの fixture は実行後の `icacls` で DENY が残っていないことを確認した。publish 版 E2E と手動 M 系は今回再実施していない。
+

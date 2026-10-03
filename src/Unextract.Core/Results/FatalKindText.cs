@@ -53,6 +53,8 @@ public static class FatalKindText
         FatalKind.ComparisonOpenFailed => "存在を確認したファイルを開けません (他のプログラムが使用中の場合を含む)",
         FatalKind.ComparisonFileIdMismatch => "開いたファイルが、列挙で見つけた項目と一致しません (解析中の変化)",
         FatalKind.FinalPathMismatch => "開いたファイルの最終パスが期待したパスと一致しません",
+        FatalKind.ParentFileIdMismatch => "開いたファイルの親ディレクトリが、列挙でたどった親ディレクトリと一致しません",
+        FatalKind.TargetDeletePending => "開いたファイルが削除保留中です",
         FatalKind.TargetInfoFailed => "target のファイルの情報を取得できません",
         FatalKind.TargetReadFailed => "target のファイルを読み取れません",
         FatalKind.ContentEncrypted => "暗号化されたエントリです",

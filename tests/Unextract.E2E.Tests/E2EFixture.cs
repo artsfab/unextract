@@ -55,14 +55,25 @@ public sealed class E2EFixture
         return this;
     }
 
-    public ProcessResult Run(string? stdin, params string[] options) =>
-        UnextractProcess.Run(Directory, stdin, [ArchivePath, "--target", Target, .. options]);
+    // command (analyze または delete) と、この fixture の ZIP・target を指定して実行する。
+    public ProcessResult Run(string command, string? stdin, params string[] options) =>
+        UnextractProcess.Run(Directory, stdin, [command, ArchivePath, "--target", Target, .. options]);
 
-    // 実削除を伴う実行 (--yes) の前の領域外ガード (テスト側の安全装置。製品の安全装置の代わりにしない)。
+    // 引数をそのまま渡して実行する (引数の誤りの確認用)。
+    public ProcessResult RunRaw(string? stdin, params string[] args) => UnextractProcess.Run(Directory, stdin, args);
+
+    // 実削除を伴う実行 (delete) の前の領域外ガード (テスト側の安全装置。製品の安全装置の代わりにしない)。
     // fixture を fixtures/<一意名>/ の直下に限り (DeletionGuard のコンストラクタ)、target と target 内の全ディレクトリについて、
     // 確認用ハンドル (reparse をたどらない) から得た最終パスが fixture の内側であることと、fixture からその項目までの各成分が
     // reparse point でないことを確かめる。違反なら GuardViolationException で中止し、exe を起動しない。
     public ProcessResult RunDeleting(string? stdin, params string[] options)
+    {
+        CheckGuard();
+        return Run("delete", stdin, options);
+    }
+
+    // 実削除を伴い得る実行 (delete) の前に、領域外ガードだけを確かめる (引数を自分で組み立てる場合)。
+    public void CheckGuard()
     {
         var guard = new DeletionGuard(Directory);
         guard.Check(FinalPath(Target));
@@ -72,7 +83,6 @@ public sealed class E2EFixture
         }
 
         Assert.Empty(guard.Violations);
-        return Run(stdin, options);
     }
 
     public static byte[] Bytes(string text) => Encoding.UTF8.GetBytes(text);

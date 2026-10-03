@@ -65,6 +65,8 @@ public enum FatalKind
     ComparisonOpenFailed,
     ComparisonFileIdMismatch,
     FinalPathMismatch,
+    ParentFileIdMismatch,
+    TargetDeletePending,
     TargetInfoFailed,
     TargetReadFailed,
 

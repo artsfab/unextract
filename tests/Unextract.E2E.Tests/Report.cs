@@ -1,61 +1,54 @@
 namespace Unextract.E2E.Tests;
 
-// stdout の解析結果の一覧 (SPEC §10) を読む。各カテゴリーは「名前 (件数):」の行と、続く「  パス」の行。
+// stdout の結果行 (SPEC §10.1) を読む。各行は「状態名を 20 桁に左詰め」+ 空白2個 + Entry + " -> " + Target (+ 理由)。
+// Entry は ZIP の FullName を変換せずに表示したもの (> はエントリ名に現れないため、最初の " -> " で区切れる)。
 public sealed class Report
 {
-    public static readonly string[] Categories = ["MATCHED", "MODIFIED", "MISSING", "SKIPPED_SPECIAL_FILE", "DIRECTORY"];
+    public static readonly string[] Statuses =
+        ["MATCHED", "SAME_SIZE", "MODIFIED", "MISSING", "SKIPPED_SPECIAL_FILE", "DIRECTORY", "DELETED", "DELETE_FAILED", "STOPPED"];
 
-    // 読み取るカテゴリー。--fast では MATCHED の位置に SAME_SIZE が出る (SPEC §10)。
-    private static readonly string[] Recognized = [.. Categories, "SAME_SIZE"];
+    private const int StatusWidth = 20;
+    private const string Separator = " -> ";
 
-    private readonly Dictionary<string, (int Count, List<string> Paths)> _sections = [];
+    private readonly List<(string Status, string Entry, string Target)> _lines = [];
 
     private Report(string[] lines)
     {
-        string? current = null;
         foreach (var line in lines)
         {
-            if (line.StartsWith("  ", StringComparison.Ordinal) && current is not null)
+            if (line.Length <= StatusWidth + 2 || line[StatusWidth] != ' ' || line[StatusWidth + 1] != ' ')
             {
-                _sections[current].Paths.Add(line[2..]);
                 continue;
             }
 
-            current = null;
-            foreach (var category in Recognized)
+            var status = line[..StatusWidth].TrimEnd();
+            if (!Statuses.Contains(status))
             {
-                var prefix = category + " (";
-                if (line.StartsWith(prefix, StringComparison.Ordinal) && line.EndsWith("):", StringComparison.Ordinal))
-                {
-                    current = category;
-                    _sections[category] = (int.Parse(line[prefix.Length..^2], System.Globalization.CultureInfo.InvariantCulture), []);
-                }
+                continue;
             }
+
+            var rest = line[(StatusWidth + 2)..];
+            var separator = rest.IndexOf(Separator, StringComparison.Ordinal);
+            Assert.True(separator >= 0, $"結果行に \" -> \" が無い: {line}");
+            _lines.Add((status, rest[..separator], rest[(separator + Separator.Length)..]));
         }
     }
 
     public static Report Parse(ProcessResult result) => new(result.OutputLines);
 
-    public IReadOnlyList<string> Paths(string category) => _sections[category].Paths;
+    public static Report Parse(string output) => new(output.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'));
 
-    public int Count(string category) => _sections[category].Count;
+    // そのモード・操作で出た状態名の全て (結果行の順)。
+    public IReadOnlyList<string> StatusesInOrder => _lines.Select(l => l.Status).ToList();
 
-    // そのカテゴリーの見出し行 (「名前 (件数):」) があるか。モードで意味のないカテゴリーは件数0としても出ない (SPEC §10)。
-    public bool Has(string category) => _sections.ContainsKey(category);
+    public IReadOnlyList<string> Entries(string status) => _lines.Where(l => l.Status == status).Select(l => l.Entry).ToList();
 
-    // 解析結果の一覧の部分: 先頭から「合計:」または「未判定:」の行まで (それ以降は dry-run・確認・削除フェーズの行)。
-    public static IReadOnlyList<string> AnalysisPart(ProcessResult result)
-    {
-        var lines = result.OutputLines;
-        var end = Array.FindIndex(lines, l => l.StartsWith("合計:", StringComparison.Ordinal) || l.StartsWith("未判定:", StringComparison.Ordinal));
-        Assert.True(end >= 0, $"解析結果の一覧の終わりが見つからない\n{result}");
-        return lines[..(end + 1)];
-    }
+    public IReadOnlyList<string> AllEntries => _lines.Select(l => l.Entry).ToList();
 
-    // 件数とパスが一致し、件数とパスの数も一致すること。
-    public void AssertCategory(string category, params string[] paths)
-    {
-        Assert.Equal(paths, Paths(category));
-        Assert.Equal(paths.Length, Count(category));
-    }
+    public string TargetOf(string entry) => _lines.Single(l => l.Entry == entry).Target;
+
+    public bool Has(string status) => _lines.Any(l => l.Status == status);
+
+    // その状態名の結果行の Entry が、この順でちょうどこれだけあること。
+    public void AssertStatus(string status, params string[] entries) => Assert.Equal(entries, Entries(status));
 }

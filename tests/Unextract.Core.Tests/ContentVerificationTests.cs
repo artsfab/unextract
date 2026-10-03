@@ -62,7 +62,6 @@ public class ContentVerificationTests
             var fatal = Assert.IsType<FatalError>(result.Fatal);
             Assert.Equal(expected, fatal.Kind);
             Assert.Equal("x.bin", fatal.Entry!.Name);
-            Assert.Empty(result.DeletionCandidates);
             if (expected == FatalKind.ContentEncrypted)
             {
                 // C07: IsEncrypted を Open() の前に確認する。
@@ -92,48 +91,43 @@ public class ContentVerificationTests
     }
 
     // C15: C01〜C08 と、C11 の CRC を 0 以外に書き換えた0バイトエントリを --fast で、target の3状態で実行する。
-    // --dry-run と通常実行 (--yes) の両方を runner 経由で行い、初回分類と表示が一致することも確かめる。
-    // 不存在は MISSING、サイズ ≠ N は MODIFIED、サイズ = N は FATAL ではなく SAME_SIZE で、--yes では削除される (SPEC §15.3)。
-    // どの列でも ZIP の GetContent・Open()・Crc32 は呼ばれない (呼び出し記録。CRC は Open() した内容からしか計算しない)。
+    // analyze --fast と delete --fast --yes の両方を Prepare から行う。不存在は MISSING、サイズ ≠ N は MODIFIED、サイズ = N は FATAL ではなく
+    // SAME_SIZE で、delete では削除される (SPEC §15.3)。どの列でも ZIP の GetContent・Open()・Crc32 は呼ばれない
+    // (呼び出し記録。CRC は Open() した内容からしか計算しない)。
     [Theory]
     [MemberData(nameof(FastCases))]
     public void C15_Fast_BrokenEntry_ByTargetState(string id, TargetState state)
     {
-        var dryRun = RunFast(id, state, dryRun: true);
-        var yes = RunFast(id, state, dryRun: false);
+        var (analyzeHarness, _) = FastHarness(id, state);
+        var analyze = analyzeHarness.Analyze().Outcome;
+        var (deleteHarness, target) = FastHarness(id, state);
+        var delete = deleteHarness.Delete(yes: true, prompt: new ScriptedPrompt(true)).Outcome;
 
-        foreach (var run in new[] { dryRun, yes })
+        var expected = state switch
         {
-            var analysis = run.Outcome.Analysis!;
-            Assert.Null(analysis.Fatal);
-            var entry = Assert.Single(analysis.Results);
-            var expected = state switch
-            {
-                TargetState.Missing => Classification.Missing,
-                TargetState.SizeDiffers => Classification.Modified,
-                _ => Classification.SameSize,
-            };
-            Assert.Equal(expected, entry.Classification);
-            Assert.Empty(run.Contents.Calls);
-            Assert.Equal(ExitStatus.Success, run.Outcome.Status);
-        }
+            TargetState.Missing => Classification.Missing,
+            TargetState.SizeDiffers => Classification.Modified,
+            _ => Classification.SameSize,
+        };
+        Assert.Equal(ExitStatus.Success, analyze.Status);
+        Assert.Equal(expected, Assert.Single(analyze.Analysis!.Results).Classification);
+        Assert.Empty(analyzeHarness.Contents!.Calls);
+        Assert.Empty(analyzeHarness.Fs.Deleted);
 
-        Assert.Equal(dryRun.Outcome.ReportLines, yes.Outcome.ReportLines);
-        Assert.Empty(dryRun.Fs.Deleted);
-        Assert.Equal(state == TargetState.SizeMatches ? 1 : 0, yes.Fs.Deleted.Count);
-        Assert.Equal(state == TargetState.SizeDiffers, yes.Fs.Find(yes.TargetFile) is not null);
+        var status = state switch
+        {
+            TargetState.Missing => DeleteStatus.Missing,
+            TargetState.SizeDiffers => DeleteStatus.Modified,
+            _ => DeleteStatus.Deleted,
+        };
+        Assert.Equal(ExitStatus.Success, delete.Status);
+        Assert.Equal(status, Assert.Single(delete.Report!.Results).Status);
+        Assert.Empty(deleteHarness.Contents!.Calls);
+        Assert.Equal(state == TargetState.SizeMatches ? 1 : 0, deleteHarness.Fs.Deleted.Count);
+        Assert.Equal(state == TargetState.SizeDiffers, deleteHarness.Fs.Find(target) is not null);
     }
 
-    private sealed record FastRun(RunOutcome Outcome, FakeFileSystem Fs, RecordingContentProvider Contents, string TargetFile);
-
-    private sealed class NoPrompt : IConfirmationPrompt
-    {
-        public bool IsInteractive => true;
-
-        public string? Ask(string prompt) => throw new InvalidOperationException("--yes では確認しない");
-    }
-
-    private static FastRun RunFast(string id, TargetState state, bool dryRun)
+    private static (CommandHarness Harness, string TargetFile) FastHarness(string id, TargetState state)
     {
         byte[] zip;
         long declared;
@@ -150,7 +144,7 @@ public class ContentVerificationTests
             (zip, declared, sameSizeTarget, _) = Fixture(id);
         }
 
-        using var harness = new PipelineHarness(zip);
+        var harness = new CommandHarness(zip) { Mode = RunMode.Fast };
         switch (state)
         {
             case TargetState.SizeDiffers:
@@ -161,11 +155,7 @@ public class ContentVerificationTests
                 break;
         }
 
-        var outcome = UnextractRunner.Run(new RunRequest(
-            harness.Source, PipelineHarness.ArchivePath, PipelineHarness.TargetPath, dryRun, AssumeYes: !dryRun, harness.Fs,
-            TargetLocationPolicy.None, Limits.Default, new NoPrompt(), new DeletionPhase(harness.Fs),
-            TextWriter.Null, TextWriter.Null, Contents: harness.Contents, Mode: RunMode.Fast));
-        return new FastRun(outcome, harness.Fs, harness.Contents, target);
+        return (harness, target);
     }
 
     // C09: 先頭付近のバイトが target と異なり、後方で C02 の破損 → MODIFIED ではなく FATAL。不一致位置を変えても同じ。

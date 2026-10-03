@@ -33,13 +33,13 @@ public class InputIntegrationTests(ITestOutputHelper output)
         Assert.Null(zipResult.Source);
         Assert.Equal(FatalKind.ArchiveOpenFailed, zipResult.Fatal!.Kind);
 
-        var targetResult = Run(zip, lockedTarget, mode: mode);
-        Assert.Equal(ExitStatus.Error, targetResult.Outcome.Status);
-        Assert.Equal(FatalKind.TargetCheckFailed, targetResult.Outcome.InputError?.Kind);
+        var targetResult = Analyze(zip, lockedTarget, mode: mode);
+        Assert.Equal(ExitStatus.Error, targetResult.Status);
+        Assert.Equal(FatalKind.TargetCheckFailed, targetResult.PrepareError?.Kind);
         Assert.Contains("Win32 エラー 5", targetResult.Error, StringComparison.Ordinal);
 
         // 対照: 権限のある target では通る。
-        Assert.Null(Run(zip, target, mode: mode).Outcome.InputError);
+        Assert.Null(Analyze(zip, target, mode: mode).PrepareError);
     }
 
     // P04: ZIP を保持している間、別ハンドルでの書き込みオープンと改名が失敗する。既に書き込み用に開かれている ZIP は開けない。
@@ -65,12 +65,12 @@ public class InputIntegrationTests(ITestOutputHelper output)
         }
     }
 
-    // P04 (実行中、両モード): runner の実行中 (解析完了直後) に、別ハンドルでの ZIP の書き込みオープンと改名が共有違反 (32) で失敗し、
-    // ZIP は変わらない。--fast でも ZIP の保持は Strict と同じ (SPEC §15、ZIP の保持はモードに依存しない)。
+    // P04 (実行中、両モード): analyze の実行中 (結果表示の直後) と delete の逐次処理中 (最初のエントリの削除用オープンの直前) に、
+    // 別ハンドルでの ZIP の書き込みオープンと改名が共有違反 (32) で失敗し、ZIP は変わらない。--fast でも ZIP の保持は Strict と同じ。
     [Theory]
     [InlineData(RunMode.Strict)]
     [InlineData(RunMode.Fast)]
-    public void P04_ArchiveIsHeldDuringRunnerExecution(RunMode mode)
+    public void P04_ArchiveIsHeldDuringExecution(RunMode mode)
     {
         var dir = CreateDirectory();
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(("a.txt", Hello)));
@@ -78,18 +78,18 @@ public class InputIntegrationTests(ITestOutputHelper output)
         File.WriteAllBytes(Path.Combine(target, "a.txt"), Hello);
         var before = (Hash(zip), File.GetLastWriteTimeUtc(zip));
         var codes = new List<int>();
-
-        var result = Run(zip, target, mode: mode, hooks: new RunHooks
+        void TryChangeArchive()
         {
-            AfterAnalysis = () =>
-            {
-                codes.Add(Win32Code(Assert.Throws<IOException>(() => new FileStream(zip, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))));
-                codes.Add(Win32Code(Assert.Throws<IOException>(() => File.Move(zip, Path.Combine(dir, "renamed.zip")))));
-            },
-        });
+            codes.Add(Win32Code(Assert.Throws<IOException>(() => new FileStream(zip, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))));
+            codes.Add(Win32Code(Assert.Throws<IOException>(() => File.Move(zip, Path.Combine(dir, "renamed.zip")))));
+        }
 
-        Assert.Equal([32, 32], codes);
-        Assert.Equal(ExitStatus.Success, result.Outcome.Status);
+        var analyzed = Analyze(zip, target, mode: mode, afterResults: TryChangeArchive);
+        var deleted = Delete(zip, target, new DeletionGuard(dir), mode: mode, hooks: new Unextract.Core.Deletion.DeleteHooks { BeforeOpen = (_, _) => TryChangeArchive() });
+
+        Assert.Equal([32, 32, 32, 32], codes);
+        Assert.Equal(ExitStatus.Success, analyzed.Status);
+        Assert.Equal(ExitStatus.Success, deleted.Status);
         Assert.Equal(before, (Hash(zip), File.GetLastWriteTimeUtc(zip)));
         Assert.False(File.Exists(Path.Combine(dir, "renamed.zip")));
     }
@@ -121,11 +121,11 @@ public class InputIntegrationTests(ITestOutputHelper output)
 
         var before = Snapshot(dir);
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
-        Assert.Equal(ExitStatus.Error, result.Outcome.Status);
-        Assert.Equal(expected, result.Outcome.InputError?.Kind);
-        Assert.Null(result.Outcome.Analysis);
+        Assert.Equal(ExitStatus.Error, result.Status);
+        Assert.Equal(expected, result.PrepareError?.Kind);
+        Assert.Null(result.AnalysisOrNull);
         Assert.Equal(before, Snapshot(dir));
     }
 
@@ -152,10 +152,10 @@ public class InputIntegrationTests(ITestOutputHelper output)
             target = Path.Combine(target, child);
         }
 
-        var result = Run(zip, target, mode: mode);
+        var result = Analyze(zip, target, mode: mode);
 
-        Assert.Equal(expected, result.Outcome.InputError?.Kind);
-        Assert.Null(result.Outcome.Analysis);
+        Assert.Equal(expected, result.PrepareError?.Kind);
+        Assert.Null(result.AnalysisOrNull);
     }
 
     [Theory]
@@ -166,9 +166,9 @@ public class InputIntegrationTests(ITestOutputHelper output)
         var dir = CreateDirectory();
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(("a.txt", Hello)));
 
-        var result = Run(zip, Path.GetPathRoot(dir)!, mode: mode);
+        var result = Analyze(zip, Path.GetPathRoot(dir)!, mode: mode);
 
-        Assert.Equal(FatalKind.TargetIsDriveRoot, result.Outcome.InputError?.Kind);
+        Assert.Equal(FatalKind.TargetIsDriveRoot, result.PrepareError?.Kind);
     }
 
     // プロファイル配下の通常ディレクトリ (この fixture 自体がそう) は許可される
@@ -180,16 +180,15 @@ public class InputIntegrationTests(ITestOutputHelper output)
         var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
         output.WriteLine(target);
 
-        Assert.Null(Run(zip, target).Outcome.InputError);
+        Assert.Null(Analyze(zip, target).PrepareError);
     }
 
-    // Y01 (実機): 同じ ZIP・同じ target で --dry-run と通常実行を行い、初回分類と表示が一致する。
-    // dry-run と通常実行の前後で target 全体 (パス・サイズ・SHA-256・更新日時) と ZIP (SHA-256・更新日時) が変わらない。
-    // 一致は同じモード同士の規定 (SPEC §2、§15.1)。Fast 同士でも確かめる。Fast では changed.txt (同じサイズで内容違い) も削除候補 (SAME_SIZE)。
+    // A01・P10 (実機): analyze と、確認で n と答えた delete は、target 全体 (パス・サイズ・SHA-256・更新日時) と ZIP (SHA-256・更新日時) を
+    // 変えない。delete は確認の前に target のエントリを開かない (削除用オープン0回)。Strict と Fast の両方で確かめる。
     [Theory]
     [InlineData(RunMode.Strict)]
     [InlineData(RunMode.Fast)]
-    public void Y01_DryRunAndNormalRun_AgreeAndChangeNothing(RunMode mode)
+    public void A01_P10_AnalyzeAndCancelledDelete_ChangeNothing(RunMode mode)
     {
         var dir = CreateDirectory();
         var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
@@ -205,19 +204,17 @@ public class InputIntegrationTests(ITestOutputHelper output)
         var targetBefore = Snapshot(target);
         var zipBefore = (Hash(zip), File.GetLastWriteTimeUtc(zip));
 
-        var dry = Run(zip, target, dryRun: true, mode: mode);
+        var analyzed = Analyze(zip, target, mode: mode);
         Assert.Equal(targetBefore, Snapshot(target));
-        var normal = Run(zip, target, dryRun: false, mode: mode);
+        var cancelled = Delete(zip, target, new DeletionGuard(dir), mode: mode, answer: "n");
 
         Assert.Equal(targetBefore, Snapshot(target));
         Assert.Equal(zipBefore, (Hash(zip), File.GetLastWriteTimeUtc(zip)));
-        Assert.Equal(dry.Outcome.ReportLines, normal.Outcome.ReportLines);
-        Assert.Equal(
-            dry.Analysis.Results.Select(r => (r.Entry, r.Classification, r.SkipReason)),
-            normal.Analysis.Results.Select(r => (r.Entry, r.Classification, r.SkipReason)));
-        Assert.Equal(ExitStatus.Success, dry.Outcome.Status);
-        Assert.Equal(ExitStatus.UserCancelled, normal.Outcome.Status);
-        Assert.Contains("中止しました。削除0件。", normal.Output, StringComparison.Ordinal);
-        Assert.Equal(mode == RunMode.Fast ? 2 : 1, normal.Analysis.DeletionCandidates.Count);
+        Assert.Equal(ExitStatus.Success, analyzed.Status);
+        Assert.Equal(mode == RunMode.Fast ? 2 : 1, analyzed.Analysis.Results.Count(r => r.Classification == Candidate(mode)));
+        Assert.Equal(ExitStatus.UserCancelled, cancelled.Status);
+        Assert.Null(cancelled.ReportOrNull);
+        Assert.Empty(cancelled.Probe!.Opened);
+        Assert.Contains("中止しました。削除0件。", cancelled.Output, StringComparison.Ordinal);
     }
 }

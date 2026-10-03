@@ -33,7 +33,7 @@ internal sealed class FakeNode
 
     public required string Name { get; set; }
 
-    public bool IsDirectory { get; init; }
+    public bool IsDirectory { get; set; }
 
     public uint Attributes { get; set; }
 
@@ -66,6 +66,9 @@ internal sealed class FakeNode
     // 最終パスの差し替え (途中の junction 化・大小文字だけの改名・UNC の模擬)。
     public string? FinalPathOverride { get; set; }
 
+    // USN が、開いた hardlink 名とは別の親 ID を返す場合の模擬。
+    public FileId? ParentFileIdOverride { get; set; }
+
     // 最終成分を開くとき (OPEN_REPARSE_POINT なし) にたどるリンク先。
     public FakeNode? LinkTarget { get; set; }
 
@@ -82,6 +85,9 @@ internal sealed class FakeNode
 
     // 削除の指示が成功を返すが何もしない (DELETE ビットを含まない flags 相当、テスト D18)。
     public bool DispositionHasNoEffect { get; set; }
+
+    // 削除の指示を受け付けた後に例外を投げる (削除の指示の後の想定外の例外の経路)。
+    public bool ThrowAfterDisposition { get; set; }
 
     public bool IsReparse => (Attributes & 0x400) != 0 || ReparseTag != 0;
 }
@@ -120,6 +126,8 @@ internal sealed class FakeFileSystem : IFileSystemProbe, IDeletionProbe
     public int OpenDeletionHandleCount => _open.Count(h => h is FakeDeletionHandle);
 
     public int DeletionOpenCount { get; private set; }
+
+    public int MaxConcurrentDeletions { get; private set; }
 
     public int DeletionCloseCount { get; private set; }
 
@@ -264,7 +272,9 @@ internal sealed class FakeFileSystem : IFileSystemProbe, IDeletionProbe
         }
 
         DeletionOpenCount++;
-        return ProbeResult<IDeletionHandle>.Ok(Track(new FakeDeletionHandle(this, node)));
+        var handle = Track(new FakeDeletionHandle(this, node));
+        MaxConcurrentDeletions = Math.Max(MaxConcurrentDeletions, OpenDeletionHandleCount);
+        return ProbeResult<IDeletionHandle>.Ok(handle);
     }
 
     // 識別確認 (SPEC §8.4)。削除保留中は実機と同じく識別確認のオープンも 5。
@@ -495,6 +505,11 @@ internal sealed class FakeDeletionHandle(FakeFileSystem fs, FakeNode node) : Fak
             DispositionSet = true;
         }
 
+        if (Node.ThrowAfterDisposition)
+        {
+            throw new InvalidOperationException("injected after disposition");
+        }
+
         return ProbeResult<bool>.Ok(true);
     }
 
@@ -545,7 +560,7 @@ internal abstract class FakeFileHandle(FakeFileSystem fs, FakeNode node, string 
         });
     }
 
-    public ProbeResult<FileId> GetParentFileId() => Get(FakeOp.ParentFileId, () => Node.Parent!.Id);
+    public ProbeResult<FileId> GetParentFileId() => Get(FakeOp.ParentFileId, () => Node.ParentFileIdOverride ?? Node.Parent!.Id);
 
     public ProbeResult<string> GetFinalPath() => Get(FakeOp.FinalPath, () => FileSystem.FinalPathOf(Node));
 

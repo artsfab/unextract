@@ -2,7 +2,14 @@ using Unextract.Core.Analysis;
 
 namespace Unextract.Core.CommandLine;
 
-public sealed record CommandLineOptions(string ArchivePath, string TargetPath, bool DryRun, bool AssumeYes, RunMode Mode);
+public enum CommandKind
+{
+    Analyze,
+    Delete,
+}
+
+// EntriesPath と AssumeYes は delete だけ (analyze では常に null / false)。
+public sealed record CommandLineOptions(CommandKind Command, string ArchivePath, string TargetPath, RunMode Mode, string? EntriesPath, bool AssumeYes);
 
 public sealed record CommandLineParseResult(CommandLineOptions? Options, string? Error)
 {
@@ -11,23 +18,53 @@ public sealed record CommandLineParseResult(CommandLineOptions? Options, string?
     public static CommandLineParseResult Fail(string error) => new(null, error);
 }
 
-// unextract <archive.zip> --target <dir> [--dry-run] [--fast] [--yes|-y] (SPEC §2)。--fast がなければ Strict (SPEC §15.1)。
-// 副作用のない純粋関数。パスの存在や種類は検査しない。
+// unextract analyze <archive.zip> --target <dir> [--fast]
+// unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]   (SPEC §2)
+// 副作用のない純粋関数。パスの存在や種類は検査しない。旧形式 (サブコマンドなし) と --dry-run は入力エラーとし、互換動作を設けない (DEC-32)。
 public static class CommandLineParser
 {
-    public const string Usage = "使い方: unextract <archive.zip> --target <dir> [--dry-run] [--fast] [--yes|-y]";
+    public static readonly IReadOnlyList<string> UsageLines =
+    [
+        "使い方: unextract analyze <archive.zip> --target <dir> [--fast]",
+        "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]",
+    ];
+
+    public const string DryRunRemoved = "--dry-run は廃止しました。削除せずに結果を確認するには unextract analyze を使ってください。";
+
+    public const string SubcommandRequired =
+        "サブコマンド (analyze または delete) を指定してください。旧形式 (unextract <archive.zip> --target <dir>) は廃止しました。";
 
     public static CommandLineParseResult Parse(IReadOnlyList<string> args)
     {
         ArgumentNullException.ThrowIfNull(args);
 
+        // --dry-run はどの位置にあっても入力エラー (サブコマンドの有無より先に案内する)。
+        if (args.Contains("--dry-run"))
+        {
+            return CommandLineParseResult.Fail(DryRunRemoved);
+        }
+
+        // サブコマンドは小文字の完全一致だけ。無い (旧形式を含む)、不明、大小文字違いは入力エラー。
+        CommandKind command;
+        switch (args.Count > 0 ? args[0] : null)
+        {
+            case "analyze":
+                command = CommandKind.Analyze;
+                break;
+            case "delete":
+                command = CommandKind.Delete;
+                break;
+            default:
+                return CommandLineParseResult.Fail(SubcommandRequired);
+        }
+
         string? archive = null;
         string? target = null;
-        var dryRun = false;
+        string? entries = null;
         var fast = false;
         var yes = false;
 
-        for (var i = 0; i < args.Count; i++)
+        for (var i = 1; i < args.Count; i++)
         {
             var arg = args[i];
             switch (arg)
@@ -38,21 +75,12 @@ public static class CommandLineParser
                         return CommandLineParseResult.Fail("--target が複数回指定されています");
                     }
 
-                    if (i + 1 >= args.Count || args[i + 1].StartsWith('-') || args[i + 1].Length == 0)
+                    if (!HasValue(args, i))
                     {
                         return CommandLineParseResult.Fail("--target の値がありません");
                     }
 
                     target = args[++i];
-                    break;
-
-                case "--dry-run":
-                    if (dryRun)
-                    {
-                        return CommandLineParseResult.Fail("--dry-run が複数回指定されています");
-                    }
-
-                    dryRun = true;
                     break;
 
                 case "--fast":
@@ -64,8 +92,32 @@ public static class CommandLineParser
                     fast = true;
                     break;
 
+                case "--entries":
+                    if (command == CommandKind.Analyze)
+                    {
+                        return CommandLineParseResult.Fail("analyze では --entries を指定できません");
+                    }
+
+                    if (entries is not null)
+                    {
+                        return CommandLineParseResult.Fail("--entries が複数回指定されています");
+                    }
+
+                    if (!HasValue(args, i))
+                    {
+                        return CommandLineParseResult.Fail("--entries の値がありません");
+                    }
+
+                    entries = args[++i];
+                    break;
+
                 case "--yes":
                 case "-y":
+                    if (command == CommandKind.Analyze)
+                    {
+                        return CommandLineParseResult.Fail($"analyze では {arg} を指定できません");
+                    }
+
                     if (yes)
                     {
                         return CommandLineParseResult.Fail("--yes が複数回指定されています");
@@ -105,6 +157,10 @@ public static class CommandLineParser
             return CommandLineParseResult.Fail("--target は必須です");
         }
 
-        return CommandLineParseResult.Ok(new CommandLineOptions(archive, target, dryRun, yes, fast ? RunMode.Fast : RunMode.Strict));
+        return CommandLineParseResult.Ok(new CommandLineOptions(command, archive, target, fast ? RunMode.Fast : RunMode.Strict, entries, yes));
     }
+
+    // オプションの値は次の引数。無い、空、- で始まる場合は値なしとする。
+    private static bool HasValue(IReadOnlyList<string> args, int i) =>
+        i + 1 < args.Count && args[i + 1].Length > 0 && !args[i + 1].StartsWith('-');
 }

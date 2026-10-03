@@ -61,7 +61,7 @@ internal sealed class PtyProcess : IAsyncDisposable
         {
             App = UnextractProcess.ExePath,
             Cwd = fixture.Directory,
-            CommandLine = [fixture.ArchivePath, "--target", fixture.Target, .. fast ? new[] { "--fast" } : []],
+            CommandLine = ["delete", fixture.ArchivePath, "--target", fixture.Target, .. fast ? new[] { "--fast" } : []],
             Cols = 240,
             Rows = 80,
         }, token);

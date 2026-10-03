@@ -44,7 +44,7 @@ internal sealed class RecordingContentProvider(IZipContentProvider inner) : IZip
     }
 }
 
-// 実 ZIP (ZipArchive で読む) と偽の target で初回分類を実行する。target は C:\target。
+// 実 ZIP (ZipArchive で読む) と偽の target で analyze のエントリ処理を実行する。target は C:\target。
 internal sealed class PipelineHarness : IDisposable
 {
     public const string TargetPath = @"C:\target";
@@ -79,13 +79,13 @@ internal sealed class PipelineHarness : IDisposable
 
     public string ArchiveLocation { get; set; } = ArchivePath;
 
-    // 初回分類のモード (SPEC §15)。共通の安全性テストを Fast でも実行するために切り替える。
+    // analyze のモード (SPEC §15)。共通の安全性テストを Fast でも実行するために切り替える。
     public RunMode Mode { get; set; } = RunMode.Strict;
 
     public ZipArchiveSource Source => _source;
 
-    // 実行に使った ClassificationRun (RealNameResolver の保持内容の確認用)。
-    public ClassificationRun? LastRun { get; private set; }
+    // 実行に使った AnalyzeRun (RealNameResolver の保持内容の確認用)。
+    public AnalyzeRun? LastRun { get; private set; }
 
     public List<(int Current, int Total)> Progress { get; } = [];
 
@@ -99,8 +99,9 @@ internal sealed class PipelineHarness : IDisposable
         var identity = Fs.GetFileIdentity(ArchiveLocation);
         Assert.True(identity.Succeeded);
 
-        var run = new ClassificationRun(new ClassificationRequest(
-            prevalidation.Entries, Contents, Fs, root, identity.Value, Limits, (c, t) => Progress.Add((c, t)), Mode: Mode));
+        var start = Fs.Calls.Count;
+        var run = new AnalyzeRun(new AnalyzeRequest(
+            prevalidation.Entries, Contents, Fs, root, identity.Value, Limits, (c, t) => Progress.Add((c, t)), Mode));
         LastRun = run;
         var result = run.Execute();
 
@@ -108,10 +109,19 @@ internal sealed class PipelineHarness : IDisposable
         Assert.Equal(1, Fs.OpenHandleCount);
         Assert.Equal(Fs.ComparisonOpenCount, Fs.ComparisonCloseCount);
         Assert.True(Fs.MaxConcurrentComparisons <= 1);
+
+        // analyze は非破壊: 削除用オープン・識別確認・削除の指示を一度も呼ばない (PLAN_TESTS §0)。
+        Assert.DoesNotContain(Fs.Calls.Skip(start), IsDeletionCall);
         return result;
     }
 
     public void Dispose() => _source.Dispose();
+
+    // 削除の能力を使う呼び出し (OpenForDeletion、CheckIdentity、SetDispositionEx) の記録か。
+    public static bool IsDeletionCall(string call) =>
+        call.StartsWith("OpenDeletion ", StringComparison.Ordinal)
+        || call.StartsWith("CheckIdentity ", StringComparison.Ordinal)
+        || call.StartsWith("Disposition ", StringComparison.Ordinal);
 
     public static byte[] MakeZip(params (string Name, byte[]? Content)[] entries) =>
         ZipFixture.Create(entries.Select(e => new FixtureEntry(e.Name, e.Content)));

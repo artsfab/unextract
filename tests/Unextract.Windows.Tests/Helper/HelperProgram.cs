@@ -22,6 +22,7 @@ internal static class HelperProgram
                 ["hold-delete-pending", var fixture, var path] => HoldDeletePending(fixture, path),
                 ["try-write", var path] => Try(() => new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete).Dispose()),
                 ["try-rename", var path] => Try(() => File.Move(path, path + ".renamed")),
+                ["try-open-delete", var path] => TryOpenForDelete(path),
                 _ => Usage(),
             };
         }
@@ -72,6 +73,24 @@ internal static class HelperProgram
         }
 
         return Hold(new NoopDisposable());
+    }
+
+    // 削除のために (DELETE アクセス、共有 R|W|D で) 開けるかを試し、開けたらそのまま閉じる。削除の指示はしない。
+    // 成功なら 0、失敗なら Win32 エラーコードを書く。
+    private static int TryOpenForDelete(string path)
+    {
+        var spec = new HandleSpec(
+            HandleSpecs.Delete | HandleSpecs.FileReadAttributes | HandleSpecs.Synchronize,
+            HandleSpecs.FileShareRead | HandleSpecs.FileShareWrite | 0x4, // 0x4 = FILE_SHARE_DELETE
+            HandleSpecs.FileFlagOpenReparsePoint);
+        var opened = HandleOpener.Open(path, spec);
+        if (opened.Succeeded)
+        {
+            opened.Value.Dispose();
+        }
+
+        Console.Out.WriteLine((opened.Succeeded ? 0 : opened.Error).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return 0;
     }
 
     // 操作を試し、成功なら 0、失敗なら Win32 エラーコードを書く。

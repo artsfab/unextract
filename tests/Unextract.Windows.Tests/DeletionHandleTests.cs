@@ -16,7 +16,7 @@ public class DeletionHandleTests
         Assert.Equal(0u, HandleSpecs.Deletion.Flags & HandleSpecs.FileFlagBackupSemantics);
         Assert.Equal(0x0080u, HandleSpecs.IdentityCheck.Access);
         Assert.Equal(0x02000000u | 0x00200000u | 0x00100000u, HandleSpecs.IdentityCheck.Flags);
-        Assert.Equal(0x3u, DeletionPhase.DispositionFlags);
+        Assert.Equal(0x3u, SequentialDeleter.DispositionFlags);
     }
 
     // 削除用ハンドルはディレクトリを開けない (5)。識別確認はディレクトリも開け、Directory = true を返す
@@ -92,7 +92,7 @@ public class DeletionHandleTests
             Assert.Equal(32, Win32Code(write));
 
             guard.Check(handle);
-            Assert.True(handle.SetDispositionEx(DeletionPhase.DispositionFlags).Succeeded);
+            Assert.True(handle.SetDispositionEx(SequentialDeleter.DispositionFlags).Succeeded);
             Assert.True(handle.GetStandardInformation().Value.DeletePending);
         }
 
@@ -112,7 +112,7 @@ public class DeletionHandleTests
         using (var handle = new WindowsFileSystemProbe().OpenForDeletion(file).Value!)
         {
             guard.Check(handle);
-            var result = handle.SetDispositionEx(DeletionPhase.DispositionFlags);
+            var result = handle.SetDispositionEx(SequentialDeleter.DispositionFlags);
             Assert.False(result.Succeeded);
             Assert.Equal(5, result.Error);
             Assert.False(handle.GetStandardInformation().Value.DeletePending);

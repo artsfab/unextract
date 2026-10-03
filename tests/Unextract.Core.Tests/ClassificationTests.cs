@@ -42,8 +42,7 @@ public class ClassificationTests
             [Classification.Matched, Classification.Modified, Classification.Modified, Classification.Matched],
             result.Results.Select(r => r.Classification));
         Assert.False(harness.Contents.Touched(2));
-        Assert.Equal(2, result.DeletionCandidates.Count);
-        Assert.Equal(@"\\?\C:\target\same.txt", result.DeletionCandidates[0].ExpectedPath);
+        Assert.Equal(@"\\?\C:\target\same.txt", result.Results[0].Target);
     }
 
     // T17: T01 と同じ4つを --fast で → SAME_SIZE、SAME_SIZE、MODIFIED (ZIP 内容を読まない)、SAME_SIZE。
@@ -73,7 +72,6 @@ public class ClassificationTests
             [Classification.SameSize, Classification.SameSize, Classification.Modified, Classification.SameSize],
             result.Results.Select(r => r.Classification));
         Assert.Empty(harness.Contents.Calls);
-        Assert.Equal(["same.txt", "changed.txt", "zero.txt"], result.DeletionCandidates.Select(c => c.Entry.Name));
     }
 
     // T02: 親成分の分類表の MISSING の行 (存在しない、大小文字だけ違うディレクトリ、通常ファイル)。ZIP 内容は開かない。
@@ -196,7 +194,6 @@ public class ClassificationTests
         var result = harness.Run();
 
         Assert.Equal(expected, result.Fatal?.Kind);
-        Assert.Empty(result.DeletionCandidates);
         var fatalEntry = injection == "enumerate-root" ? "first.txt" : "a/b/c.txt";
         Assert.Equal(fatalEntry, result.Fatal!.Entry!.Name);
     }
@@ -222,7 +219,7 @@ public class ClassificationTests
             [Candidate(mode), Classification.Missing, Classification.Missing],
             result.Results.Select(r => r.Classification));
         Assert.Equal(["dir", "keep.txt"], harness.LastRun!.Resolver.RetainedNames.Order(StringComparer.Ordinal));
-        var report = string.Join('\n', AnalysisReport.Format(result, mode));
+        var report = string.Join('\n', AnalyzeOutput.Format(result, mode));
         Assert.DoesNotContain("unrelated", report, StringComparison.Ordinal);
         Assert.DoesNotContain("other-", report, StringComparison.Ordinal);
     }
@@ -419,7 +416,6 @@ public class ClassificationTests
     [InlineData(FakeOp.AttributeTag, FatalKind.TargetInfoFailed, RunMode.Strict)]
     [InlineData(FakeOp.Standard, FatalKind.TargetInfoFailed, RunMode.Strict)]
     [InlineData(FakeOp.VolumeFileId, FatalKind.TargetInfoFailed, RunMode.Strict)]
-    [InlineData(FakeOp.ParentFileId, FatalKind.TargetInfoFailed, RunMode.Strict)]
     [InlineData(FakeOp.FinalPath, FatalKind.TargetInfoFailed, RunMode.Strict)]
     [InlineData(FakeOp.OpenComparison, FatalKind.ComparisonOpenFailed, RunMode.Strict)]
     [InlineData(FakeOp.Read, FatalKind.TargetReadFailed, RunMode.Strict)]
@@ -428,7 +424,6 @@ public class ClassificationTests
     [InlineData(FakeOp.AttributeTag, FatalKind.TargetInfoFailed, RunMode.Fast)]
     [InlineData(FakeOp.Standard, FatalKind.TargetInfoFailed, RunMode.Fast)]
     [InlineData(FakeOp.VolumeFileId, FatalKind.TargetInfoFailed, RunMode.Fast)]
-    [InlineData(FakeOp.ParentFileId, FatalKind.TargetInfoFailed, RunMode.Fast)]
     [InlineData(FakeOp.FinalPath, FatalKind.TargetInfoFailed, RunMode.Fast)]
     [InlineData(FakeOp.OpenComparison, FatalKind.ComparisonOpenFailed, RunMode.Fast)]
     public void T10_TargetApiFailure_IsFatal(FakeOp op, FatalKind expected, RunMode mode)
@@ -447,7 +442,6 @@ public class ClassificationTests
         Assert.Equal(expected, result.Fatal?.Kind);
         Assert.Equal("x.txt", result.Fatal!.Entry!.Name);
         Assert.Equal(Candidate(mode), Assert.Single(result.Results).Classification);
-        Assert.Empty(result.DeletionCandidates);
     }
 
     // T10: 存在を確認した後に開けない (見つからない 2、アクセス拒否 5、共有違反 32) → FATAL
@@ -503,7 +497,7 @@ public class ClassificationTests
         using var root = opened.Root!;
         var entries = ZipPrevalidator.Validate(harness.Source.Entries, Limits.Default).Entries;
 
-        Assert.Throws<InvalidOperationException>(() => ClassificationPipeline.Run(new ClassificationRequest(
+        Assert.Throws<InvalidOperationException>(() => Analyzer.Run(new AnalyzeRequest(
             entries, harness.Contents, harness.Fs, root, default, Limits.Default)));
 
         Assert.Equal(1, harness.Fs.ComparisonOpenCount);
@@ -559,7 +553,6 @@ public class ClassificationTests
         var result = harness.Run();
 
         Assert.Equal(expected, result.Fatal?.Kind);
-        Assert.Empty(result.DeletionCandidates);
         _ = file;
     }
 
@@ -637,7 +630,7 @@ public class ClassificationTests
         if (matches)
         {
             Assert.Equal(Candidate(mode), Single(result));
-            Assert.Equal(@"\\?\C:\target\d\x.txt", result.DeletionCandidates[0].Snapshot.FinalPath);
+            Assert.Equal(@"\\?\C:\target\d\x.txt", result.Results[0].Target);
         }
         else
         {
@@ -645,24 +638,22 @@ public class ClassificationTests
         }
     }
 
-    // MATCHED のスナップショット (SPEC §8.2) は同じハンドルから記録する。Fast の SAME_SIZE も同じに記録する (SPEC §15.4)
+    // A06・SPEC §8.2: analyze はスナップショット・削除候補・M0 を持たず、親 File ID も取得しない (親 File ID の照合は delete だけ)。
+    // 各エントリの結果は、表示用の Target (期待パス、\\?\ 形式) だけを持つ。MISSING・DIRECTORY では実在しない位置でもよい。
     [Theory]
     [MemberData(nameof(BothModes))]
-    public void Matched_RecordsSnapshot(RunMode mode)
+    public void A06_AnalyzeKeepsOnlyResultsWithTarget(RunMode mode)
     {
-        using var harness = new PipelineHarness(MakeZip(("d/x.txt", Hello))) { Mode = mode };
-        var dir = harness.Fs.AddDirectory(@"C:\target\d");
-        var file = harness.Fs.AddFile(@"C:\target\d\x.txt", Bytes("hello"), 0x20 | 0x2);
+        using var harness = new PipelineHarness(MakeZip(("d/x.txt", Hello), ("d/missing.txt", Hello), ("e/", null))) { Mode = mode };
+        harness.Fs.AddDirectory(@"C:\target\d");
+        harness.Fs.AddFile(@"C:\target\d\x.txt", Bytes("hello"), 0x20 | 0x2);
 
-        var matched = Assert.Single(harness.Run().DeletionCandidates);
+        var result = harness.Run();
 
         Assert.Equal(
-            new TargetSnapshot(
-                FakeFileSystem.DefaultVolumeSerial, file.Id, dir.Id, 5, file.LastWriteTime, file.ChangeTime, 0x22, 1,
-                matched.Snapshot.Streams, 0, @"\\?\C:\target\d\x.txt"),
-            matched.Snapshot);
-        Assert.Equal([new StreamEntry("::$DATA", 5)], matched.Snapshot.Streams);
-        Assert.Equal("d/x.txt", matched.Entry.Name);
+            [(Candidate(mode), @"\\?\C:\target\d\x.txt"), (Classification.Missing, @"\\?\C:\target\d\missing.txt"), (Classification.Directory, @"\\?\C:\target\e")],
+            result.Results.Select(r => (r.Classification, r.Target)));
+        Assert.DoesNotContain(harness.Fs.Calls, c => c.StartsWith("ParentFileId ", StringComparison.Ordinal));
     }
 
     // DIRECTORY: ZIP のディレクトリエントリは target を調べずに DIRECTORY
@@ -694,7 +685,6 @@ public class ClassificationTests
         Assert.Equal(FatalKind.ContentCrcMismatch, result.Fatal?.Kind);
         Assert.Equal(2, result.Fatal!.Entry!.Index);
         Assert.Equal([Classification.Matched, Classification.Matched], result.Results.Select(r => r.Classification));
-        Assert.Empty(result.DeletionCandidates);
         Assert.Equal(1, result.UnclassifiedCount);
         Assert.False(harness.Contents.Touched(3));
     }
@@ -715,7 +705,6 @@ public class ClassificationTests
 
         Assert.Equal(expected, result.Fatal?.Kind);
         Assert.Equal(Candidate(mode), Assert.Single(result.Results).Classification);
-        Assert.Empty(result.DeletionCandidates);
     }
 
     // R07: 内容比較候補で実データが宣言 Length を超える → Length を超えた時点で読み取りを中断し FATAL。それ以上読まない。
@@ -729,7 +718,7 @@ public class ClassificationTests
         var entries = ZipPrevalidator.Validate(harness.Source.Entries, Limits.Default).Entries;
         var endless = new EndlessContent(10);
 
-        var result = ClassificationPipeline.Run(new ClassificationRequest(
+        var result = Analyzer.Run(new AnalyzeRequest(
             entries, new SingleContentProvider(endless), harness.Fs, root, default, Limits.Default));
 
         Assert.Equal(FatalKind.ContentTooLong, result.Fatal?.Kind);
@@ -753,7 +742,7 @@ public class ClassificationTests
         if (passes)
         {
             Assert.Null(result.Fatal);
-            Assert.Equal(2, result.DeletionCandidates.Count);
+            Assert.Equal([Classification.Matched, Classification.Matched], result.Results.Select(r => r.Classification));
         }
         else
         {
@@ -780,7 +769,6 @@ public class ClassificationTests
         {
             Assert.Null(result.Fatal);
             Assert.Equal([Classification.SameSize, Classification.SameSize], result.Results.Select(r => r.Classification));
-            Assert.Equal(2, result.DeletionCandidates.Count);
             Assert.Empty(harness.Contents.Calls);
         }
         else
@@ -807,7 +795,7 @@ public class ClassificationTests
             harness.Fs.AddFile(@"C:\target\info.txt", Bytes("hello")).Errors[FakeOp.Streams] = 5;
             var result = harness.Run();
             Assert.Equal(reversed ? "info.txt" : "open.txt", result.Fatal!.Entry!.Name);
-            return string.Join('\n', AnalysisReport.Format(result));
+            return string.Join('\n', AnalyzeOutput.Format(result, RunMode.Strict));
         }
 
         var first = Run();
@@ -824,7 +812,7 @@ public class ClassificationTests
         harness.Run();
 
         Assert.Equal([(1, 3), (2, 3), (3, 3)], harness.Progress);
-        Assert.Equal("Checking 2 / 3", AnalysisReport.CheckingProgress(2, 3));
+        Assert.Equal("Checking 2 / 3", ReportText.CheckingProgress(2, 3));
     }
 
     private sealed class SingleContentProvider(IZipEntryContent content) : IZipContentProvider

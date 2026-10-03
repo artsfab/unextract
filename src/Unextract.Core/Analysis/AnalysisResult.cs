@@ -1,5 +1,4 @@
 using Unextract.Core.Results;
-using Unextract.Core.Target;
 
 namespace Unextract.Core.Analysis;
 
@@ -15,41 +14,23 @@ public enum SkipReason
     Attributes,
 }
 
-// 判定済みの1エントリ。
-public sealed record EntryResult(ZipEntryRef Entry, Classification Classification, SkipReason? SkipReason = null);
+// 判定済みの1エントリ。Target は target 内の対応する場所 (期待パス、\\?\ 形式)。MISSING では実在しない期待位置。
+// 表示 (SPEC §10.1) だけに使い、delete の入力にしない。
+public sealed record EntryResult(ZipEntryRef Entry, string Target, Classification Classification, SkipReason? SkipReason = null);
 
-// 再検証用スナップショット (SPEC §8.2)。MATCHED の比較用ハンドルを閉じる前に同じハンドルから記録する。
-// Directory と DeletePending が false であることは MATCHED の前提 (記録しない)。
-public sealed record TargetSnapshot(
-    ulong VolumeSerialNumber,
-    FileId FileId,
-    FileId ParentFileId,
-    long EndOfFile,
-    long LastWriteTime,
-    long ChangeTime,
-    uint Attributes,
-    uint NumberOfLinks,
-    IReadOnlyList<StreamEntry> Streams,
-    uint ReparseTag,
-    string FinalPath);
-
-// 削除フェーズに渡す削除候補 (Strict は MATCHED、Fast は SAME_SIZE。名前は MATCHED のときのまま)。ExpectedPath は削除用ハンドルを開く期待パス (\\?\ 形式)。
-public sealed record MatchedFile(ZipEntryRef Entry, string ExpectedPath, TargetSnapshot Snapshot);
-
-// 初回分類の結果 (SPEC §3 の 3〜5、§10)。結果は ZIP 内の順序で決定的。
+// analyze の結果 (SPEC §3.4、§10.2)。結果は ZIP 内の順序で決定的。削除候補・スナップショットを持たない (削除の許可証にしない)。
 // FATAL 時は、最初の FATAL の直前までが判定済み、FATAL の原因エントリ、それ以降が未判定。
 public sealed class AnalysisResult
 {
-    private readonly IReadOnlyList<MatchedFile> _matched;
-
-    internal AnalysisResult(int totalEntries, IReadOnlyList<EntryResult> results, IReadOnlyList<MatchedFile> matched, FatalError? fatal)
+    internal AnalysisResult(int totalEntries, IReadOnlyList<EntryResult> results, FatalError? fatal, bool fatalBeforeClassification = false)
     {
         TotalEntries = totalEntries;
         Results = results;
-        _matched = matched;
         Fatal = fatal;
+        FatalBeforeClassification = fatalBeforeClassification;
 
-        var judged = results.Count + (fatal?.Entry is null ? 0 : 1);
+        // target に触れる前の FATAL (ZIP 事前検証など) では、原因のエントリも判定していないため全エントリが未判定。
+        var judged = fatalBeforeClassification ? 0 : results.Count + (fatal?.Entry is null ? 0 : 1);
         UnclassifiedCount = totalEntries - judged;
     }
 
@@ -62,11 +43,11 @@ public sealed class AnalysisResult
 
     public bool Completed => Fatal is null;
 
+    // FATAL が target に触れる前 (Prepare の ZIP 事前検証、ZIP 自身の File ID の取得失敗) のものか。
+    public bool FatalBeforeClassification { get; }
+
     // 判定済みでも FATAL の原因でもないエントリの件数 (表示はパスを列挙せず件数だけ)。
     public int UnclassifiedCount { get; }
-
-    // 削除候補。削除開始前の FATAL があれば、判定済みの MATCHED があっても空 (削除0件、SPEC §3)。
-    public IReadOnlyList<MatchedFile> DeletionCandidates => Completed ? _matched : [];
 
     public int Count(Classification classification) => Results.Count(r => r.Classification == classification);
 
@@ -74,18 +55,6 @@ public sealed class AnalysisResult
     public static AnalysisResult BeforeClassification(int totalEntries, FatalError fatal)
     {
         ArgumentNullException.ThrowIfNull(fatal);
-        return new AnalysisResult(totalEntries, [], [], fatal);
+        return new AnalysisResult(totalEntries, [], fatal, fatalBeforeClassification: true);
     }
 }
-
-// 削除フェーズの結果 (SPEC §8.4、§10)。NotProcessedCount は停止の原因の対象より後の、処理しなかった件数。
-public sealed record DeleteFailure(ZipEntryRef Entry, string Reason);
-
-// 以後の削除を止めた原因。PossiblyDeleted は成立確認ができなかった場合 (「削除された可能性あり」)。
-public sealed record DeletionStop(ZipEntryRef Entry, string Reason, bool PossiblyDeleted);
-
-public sealed record DeletionReport(
-    IReadOnlyList<ZipEntryRef> Deleted,
-    IReadOnlyList<DeleteFailure> Failed,
-    DeletionStop? Stop,
-    int NotProcessedCount);
