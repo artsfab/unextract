@@ -21,6 +21,7 @@
 | M11 | 未実施・手順未確立 | マップを保持しファイルハンドルを閉じる別プロセスhelperを設計 | [M11](MANUAL_TESTS.md#m11) |
 | M12 (a) / M12 (b) | 両方未実施。製品と同じ構成ではない補助観測 | 祖先改名とread-only openを分けて実施 | [M12](MANUAL_TESTS.md#m12) |
 | L18 / M13 | 未実測・手順レビュー待ち。BOM拒否テストと端末保存形式は別 | 下表のfixture分離・続行条件を先に決める | [M13](MANUAL_TESTS.md#m13) |
+| M14 (GUI受入) | 2026-10-08 実施・合格 (自作fixtureで実施。シナリオの指定はM14の現記載より前)。基本の流れ、モニター間移動、エクスプローラーの起動、OSのフォルダー選択、フォーカス・Tab・スクロールの操作感、表示倍率100/150/200%で指摘なし。実データ・実GPUの性能と既存の安全性未確認事項は含まない | GUIの画面・配布を変えたときに影響する手順を再確認 | [M14](MANUAL_TESTS.md#m14) |
 
 <a id="procedure-review"></a>
 ## 実施前の手順保留
@@ -47,6 +48,10 @@ S26/S34/S37/S38の実測は2026-10-03、Windows 11 10.0.26300、NTFS、SDK 10.0.
 | EFS削除 | 読み取り可能属性として許可するが実削除未確認、S38にも未確認 | EFSを作成できるfixtureでT08と削除を確認 | [属性](spec/filesystem.md#special-files) |
 | クラウドplaceholder | 旧PoCに再現環境なし、未確認。同期意味論は製品対象外 | 必要な環境で非削除側の判定を確認 | [対象](SPEC.md#scope) |
 | 列挙直後の改名 | 列挙中の改名による見落とし/旧名と新名の両方は旧PoCで観測。見つけた直後の改名→open失敗/ID不一致という組合せは推定 | 必要時に列挙→open間へ変更を注入 | [実名確認](spec/filesystem.md#real-names) |
+| stdoutパイプの読み手の消失 | 2026-10-04、Windows 11 10.0.26300 / NTFS / SDK 10.0.401 / runtime 10.0.12のJ19では、通常Release exeとwin-x64 publish exeのStrict/Fastとも非検出。runのLF受信と別読取ハンドルからのログentry観測後、リダイレクトしたStandardOutput.BaseStreamの読み手をcloseした。終了0・stderr空で、ログは最後までentryとcompleted/0のresultを記録し、承認範囲の実削除と一致した。2026-10-08の同環境での再実施も同じ。.NETのWindowsコンソールstreamが`ERROR_BROKEN_PIPE`/`ERROR_NO_DATA`を書き込み成功として扱う実装と整合する (ランタイムのソースからの推定で未確認)。仕様は検出を保証せず、この観測を他のruntime・パイプ構成へ外挿しない | OS/runtime/出力経路変更時にJ19を再実施。検出時の非継続は実パイプの挙動に依存しないJ09/J12/J13の失敗注入で確認 | [J19](../tests/Unextract.E2E.Tests/MachineOutputE2ETests.cs)、[出力先](spec/machine-output.md#destinations)、[理由](RATIONALE.md#machine-output) |
+| GUI: 同一実体の重複Target | 別パス (junction等) で同じディレクトリを指すTargetを同一ArchiveでGUIから順に削除する場合を、実CLIでは未実施。仕様上は2つ目が再検証でMISSING等になるだけ ([GUI重複](spec/gui.md#targets))。親子Targetが同じファイルを重複して指す場合はGUI IntegrationTestsで確認済み | junctionの自作fixtureで2 Targetの連続deleteを実CLIで確認 | [GUI検証](TESTING.md#gui) |
+| GUI: 実データ・実GPUの性能 | 2026-10-08、Windows 11 10.0.26300、Release・STA・Opacity 0の模擬データ (100,000 entry×10 Target、10,000 Archive×3 Target、自作の空のZIP 10,000件 (100フォルダー) の再帰検索) で、通常の選択・詳細切替・絞り込みは1秒の目標内。M14は自作の小さいfixtureで合格。実データの大量ZIP検索、実GPUでの描画・操作の体感、実CLIの出力を長時間受信している間の体感、GUIプロセス単独のメモリは未測定 (テストのメモリ値は並行テストを含む参考値)。模擬の結果を実データの性能保証や対応件数の上限にしない | 実利用で応答・メモリに問題が出たら測定し、全結果保持の制限が要るなら製品判断に回す | [PerformanceTests等](TESTING.md#gui)、[大量データの理由](RATIONALE.md#gui-state) |
+| GUI: entries上限の実ZIP | 正常解析の候補がentries上限を超え得ることは契約値からの計算で、実ZIPでは再現していない。GUIの境界 (上限ちょうど許可・1バイト超過で未開始) は模擬で確認済み | 必要時に長い非ASCII名を多数持つ自作ZIPで再現 | [理由](RATIONALE.md#gui-entries-limit)、[仕様](spec/gui.md#delete-run) |
 | CI権限 | 旧CI実績はランナー管理者権限の有無を確認していない | 権限依存ケースはログの前提不成立と環境を別に報告 | [テスト原則](TESTING.md#principles) |
 
 <a id="out-of-scope"></a>
@@ -60,4 +65,5 @@ S26/S34/S37/S38の実測は2026-10-03、Windows 11 10.0.26300、NTFS、SDK 10.0.
 | 問題・影響 | 分かっている範囲 | 次の確認・判断 | 根拠 |
 |---|---|---|---|
 | リリース番号 | 旧READMEに「新しいバージョン番号はリリース時に決める」と明示。現行の番号設定を文書再編で変更しない | リリース担当が番号・移行案内を決定 | `e618713:README.md`「実装状況」、[project](../src/Unextract.Cli/Unextract.Cli.csproj) |
+| GUIのCI検証 | CIはGUI関連プロジェクトを `dotnet build -c Release` でビルドし、`dotnet test --no-build` でGui.Testsまでを実行する。UI E2E (対話デスクトップが必要) とGUI配布スモークはCIに無い。`.github/**` は作業規則で編集しない | 追加する場合は担当者がランナーの対話デスクトップ・作業領域を確かめてworkflowを変更する | [README配布ビルド](../README.md#配布ビルド)、[workflow](../.github/workflows/ci.yml) |
 | CIのNode.js注釈 | 2026-10-02の旧CI記録にNode.js 20廃止予定の注釈と対応見送りがある。現在のCIでの再現・対応要否は未確認 | 次のCI実行で注釈と依存actionsを確認し、必要なら別のCI変更として扱う | `606d89c:docs/PLAN_VALIDATION.md`「CI の初回実行」、[workflow](../.github/workflows/ci.yml) |

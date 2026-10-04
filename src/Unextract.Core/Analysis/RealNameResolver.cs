@@ -71,7 +71,7 @@ internal sealed class RealNameResolver
             var enumerated = Enumerate(key, directoryComponents, directoryItem);
             if (enumerated.Fatal is { } fatal)
             {
-                return LookupResult.Failed(fatal.Kind, fatal.Detail);
+                return LookupResult.Failed(fatal.Kind, fatal.Detail, fatal.Win32Error);
             }
 
             matches = enumerated.Matches!;
@@ -97,14 +97,14 @@ internal sealed class RealNameResolver
         var opened = _probe.OpenDirectoryForEnumeration(path);
         if (!opened.Succeeded)
         {
-            return (null, new FatalError(FatalKind.EnumerationOpenFailed, Detail: opened.Describe()));
+            return (null, new FatalError(FatalKind.EnumerationOpenFailed, Detail: opened.Describe(), Win32Error: opened.Error));
         }
 
         using var handle = opened.Value;
         var info = handle.GetInfo();
         if (!info.Succeeded)
         {
-            return (null, new FatalError(FatalKind.EnumerationHandleMismatch, Detail: info.Describe()));
+            return (null, new FatalError(FatalKind.EnumerationHandleMismatch, Detail: info.Describe(), Win32Error: info.Error));
         }
 
         var expectedId = new VolumeFileId(_root.Id.VolumeSerialNumber, directoryItem.Value.FileId);
@@ -145,7 +145,7 @@ internal sealed class RealNameResolver
                 default:
                     return (null, new FatalError(
                         FatalKind.EnumerationFailed,
-                        Detail: $"{step.Operation} が失敗 (Win32 エラー {step.Error})"));
+                        Detail: $"{step.Operation} が失敗 (Win32 エラー {step.Error})", Win32Error: step.Error));
             }
         }
     }
@@ -154,13 +154,13 @@ internal sealed class RealNameResolver
         $"期待パス {expectedPath}、最終パス {info.FinalPath}、ディレクトリ {info.IsDirectory}、属性 0x{info.Attributes:X}、reparse tag 0x{info.ReparseTag:X}";
 }
 
-internal readonly record struct LookupResult(LookupKind Kind, DirectoryItem Item, FatalKind? FatalKind, string? Detail)
+internal readonly record struct LookupResult(LookupKind Kind, DirectoryItem Item, FatalKind? FatalKind, string? Detail, int? Win32Error = null)
 {
     public static LookupResult NotFound { get; } = new(LookupKind.NotFound, default, null, null);
 
     public static LookupResult Found(DirectoryItem item) => new(LookupKind.Found, item, null, null);
 
-    public static LookupResult Failed(FatalKind kind, string? detail) => new(LookupKind.Failed, default, kind, detail);
+    public static LookupResult Failed(FatalKind kind, string? detail, int? win32Error = null) => new(LookupKind.Failed, default, kind, detail, win32Error);
 }
 
 internal enum LookupKind

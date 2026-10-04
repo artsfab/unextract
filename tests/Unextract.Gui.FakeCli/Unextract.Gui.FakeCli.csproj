@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- GUI の UI E2E 専用の偽 CLI (配布物には入れない)。シナリオファイルのとおりに JSONL v1 を出力し、受け取った引数と
+       entries の内容を記録するだけで、ZIP・target の読み書きや削除・改名は一切しない。Core / Windows / Cli /
+       GUI の型は参照しない。配置時の名前は unextract.exe (scripts/run-gui-ui-tests.ps1 が AssemblyName を上書きして publish する)。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>unextract-fake-cli</AssemblyName>
+  </PropertyGroup>
+
+</Project>

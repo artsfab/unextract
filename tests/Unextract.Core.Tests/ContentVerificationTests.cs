@@ -62,6 +62,8 @@ public class ContentVerificationTests
             var fatal = Assert.IsType<FatalError>(result.Fatal);
             Assert.Equal(expected, fatal.Kind);
             Assert.Equal("x.bin", fatal.Entry!.Name);
+            Assert.Equal(EntryStep.Compare, fatal.Step);
+            Assert.Null(fatal.Win32Error);
             if (expected == FatalKind.ContentEncrypted)
             {
                 // C07: IsEncrypted を Open() の前に確認する。

@@ -16,7 +16,8 @@ public enum SkipReason
 
 // 判定済みの1エントリ。Target は target 内の対応する場所 (期待パス、\\?\ 形式)。MISSING では実在しない期待位置。
 // 表示 (docs/spec/cli.md#result-lines) だけに使い、delete の入力にしない。
-public sealed record EntryResult(ZipEntryRef Entry, string Target, Classification Classification, SkipReason? SkipReason = null);
+// Length は ZIP の宣言展開サイズ。表示のために target や ZIP 内容を読み直さない。
+public sealed record EntryResult(ZipEntryRef Entry, string Target, Classification Classification, SkipReason? SkipReason = null, long Length = 0);
 
 // analyze の結果 (docs/SPEC.md#execution、docs/spec/cli.md#analyze-output)。結果は ZIP 内の順序で決定的。削除候補・スナップショットを持たない (削除の許可証にしない)。
 // FATAL 時は、最初の FATAL の直前までが判定済み、FATAL の原因エントリ、それ以降が未判定。

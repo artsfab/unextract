@@ -62,6 +62,7 @@ public class EntriesListTests
         var error = Error(Parse([.. Utf8("bin/a.dll\n"), 0x62, 0xC3, 0x28, 0x0A]));
 
         Assert.Equal(2, error.LineNumber);
+        Assert.Equal(EntriesErrorKind.InvalidUtf8, error.Kind);
         Assert.Equal("--entries の 2 行目: UTF-8 として読めません", error.Describe());
     }
 
@@ -76,6 +77,7 @@ public class EntriesListTests
 
         Assert.Null(error.LineNumber);
         Assert.Equal(reason, error.Reason);
+        Assert.Equal(data.Length == 4 ? EntriesErrorKind.Utf16 : EntriesErrorKind.Utf32, error.Kind);
     }
 
     // L02: UTF-16LE で保存した実際のファイル (BOM 付き) も同じ案内になる。
@@ -113,6 +115,7 @@ public class EntriesListTests
 
         Assert.Equal(line, error.LineNumber);
         Assert.Equal("空行です", error.Reason);
+        Assert.Equal(EntriesErrorKind.EmptyLine, error.Kind);
     }
 
     [Theory]
@@ -124,6 +127,7 @@ public class EntriesListTests
 
         Assert.Null(error.LineNumber);
         Assert.Equal("--entries: 行がありません (空のファイルです)", error.Describe());
+        Assert.Equal(EntriesErrorKind.NoLines, error.Kind);
     }
 
     // L04: 行末以外の CR は入力エラー。前後の空白は trim せず名前の一部として照合する。
@@ -137,6 +141,7 @@ public class EntriesListTests
 
         Assert.Equal(line, error.LineNumber);
         Assert.Equal("行末以外に CR があります", error.Reason);
+        Assert.Equal(EntriesErrorKind.CrInLine, error.Kind);
     }
 
     [Fact]
@@ -159,6 +164,7 @@ public class EntriesListTests
         var error = Error(Parse(Utf8("bin/a.dll\nbin/b.dll\r\nbin/a.dll\n")));
 
         Assert.Equal("--entries の 3 行目: 1 行目と同じです (\"bin/a.dll\")", error.Describe());
+        Assert.Equal(EntriesErrorKind.DuplicateLine, error.Kind);
     }
 
     // L06: ZIP に無い名前、大小文字だけ違う名前、区切りだけ違う名前 → 入力エラー。後の2つは正しい FullName をヒントに出す。
@@ -175,6 +181,7 @@ public class EntriesListTests
         Assert.Null(matched.Selected);
         Assert.Equal(2, matched.Error!.LineNumber);
         Assert.Equal(reason, matched.Error.Reason);
+        Assert.Equal(EntriesErrorKind.NoMatch, matched.Error.Kind);
     }
 
     // L07: ディレクトリエントリ → 入力エラー。明示エントリの無い暗黙ディレクトリの名前 → 未知のエントリ。
@@ -183,6 +190,7 @@ public class EntriesListTests
     {
         var explicitDirectory = EntriesList.Match(Parse(Utf8("docs/\n")).Lines!, Zip);
         Assert.Equal("ディレクトリエントリは指定できません (\"docs/\")", explicitDirectory.Error!.Reason);
+        Assert.Equal(EntriesErrorKind.Directory, explicitDirectory.Error.Kind);
 
         var implicitDirectory = EntriesList.Match(Parse(Utf8("bin\n")).Lines!, Zip);
         Assert.Equal("ZIP に一致するエントリがありません (\"bin\")", implicitDirectory.Error!.Reason);
@@ -226,6 +234,7 @@ public class EntriesListTests
             var error = Error(result);
             Assert.Equal(1, error.LineNumber);
             Assert.Equal("1行の長さが上限 (4,096 バイト) を超えています", error.Reason);
+            Assert.Equal(EntriesErrorKind.LineTooLong, error.Kind);
         }
     }
 
@@ -251,6 +260,7 @@ public class EntriesListTests
             var error = Error(result);
             Assert.Equal(100_001, error.LineNumber);
             Assert.Equal("行数が上限 (100,000 行) を超えています", error.Reason);
+            Assert.Equal(EntriesErrorKind.TooManyLines, error.Kind);
         }
     }
 
@@ -272,6 +282,7 @@ public class EntriesListTests
         else
         {
             Assert.Equal($"ファイルが大きさの上限 ({limit:N0} バイト) を超えています", Error(result).Reason);
+            Assert.Equal(EntriesErrorKind.TooLarge, Error(result).Kind);
         }
     }
 
@@ -297,6 +308,7 @@ public class EntriesListTests
         var result = EntriesList.Read(stream, limits);
 
         Assert.StartsWith("ファイルが大きさの上限", Error(result).Reason, StringComparison.Ordinal);
+        Assert.Equal(EntriesErrorKind.TooLarge, Error(result).Kind);
         Assert.True(stream.TotalRead <= 101, $"read {stream.TotalRead}");
         if (seekable)
         {
@@ -310,9 +322,11 @@ public class EntriesListTests
     {
         var missing = EntriesList.Read(Path.Combine(Fixtures.TestFiles.Directory, $"missing-{Guid.NewGuid():N}.txt"), Limits.Default);
         Assert.StartsWith("--entries: ファイルを読めません", Error(missing).Describe(), StringComparison.Ordinal);
+        Assert.Equal(EntriesErrorKind.Unreadable, Error(missing).Kind);
 
         var directory = EntriesList.Read(Fixtures.TestFiles.Directory, Limits.Default);
         Assert.StartsWith("--entries: ファイルを読めません", Error(directory).Describe(), StringComparison.Ordinal);
+        Assert.Equal(EntriesErrorKind.Unreadable, Error(directory).Kind);
     }
 
     // L14 (Core): analyze の表示の Entry (日本語名、\ 区切り、先頭空白) をそのまま書けば一致する。

@@ -26,8 +26,8 @@ public class E2ETests
 
     private static readonly string[] Usage =
     [
-        "使い方: unextract analyze <archive.zip> --target <dir> [--fast]",
-        "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]",
+        "使い方: unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]",
+        "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]",
     ];
 
     // 全カテゴリーを含む fixture。ZIP にない target ファイル (unrelated.txt、docs\unrelated-in-docs.txt) も置く。

@@ -8,8 +8,8 @@ public enum CommandKind
     Delete,
 }
 
-// EntriesPath と AssumeYes は delete だけ (analyze では常に null / false)。
-public sealed record CommandLineOptions(CommandKind Command, string ArchivePath, string TargetPath, RunMode Mode, string? EntriesPath, bool AssumeYes);
+// EntriesPath と AssumeYes と LogPath は delete だけ。LogPath は Jsonl の場合だけ。
+public sealed record CommandLineOptions(CommandKind Command, string ArchivePath, string TargetPath, RunMode Mode, string? EntriesPath, bool AssumeYes, bool Jsonl = false, string? LogPath = null);
 
 public sealed record CommandLineParseResult(CommandLineOptions? Options, string? Error)
 {
@@ -18,21 +18,27 @@ public sealed record CommandLineParseResult(CommandLineOptions? Options, string?
     public static CommandLineParseResult Fail(string error) => new(null, error);
 }
 
-// unextract analyze <archive.zip> --target <dir> [--fast]
-// unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]   (docs/spec/cli.md#arguments)
+// 引数と機械モードの組合せは docs/spec/cli.md#arguments、docs/spec/machine-output.md#invocation。
 // 副作用のない純粋関数。パスの存在や種類は検査しない。旧形式 (サブコマンドなし) と --dry-run は入力エラーとし、互換動作を設けない (docs/RATIONALE.md#confirmation)。
 public static class CommandLineParser
 {
     public static readonly IReadOnlyList<string> UsageLines =
     [
-        "使い方: unextract analyze <archive.zip> --target <dir> [--fast]",
-        "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]",
+        "使い方: unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]",
+        "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]",
     ];
 
     public const string DryRunRemoved = "--dry-run は廃止しました。削除せずに結果を確認するには unextract analyze を使ってください。";
 
     public const string SubcommandRequired =
         "サブコマンド (analyze または delete) を指定してください。旧形式 (unextract <archive.zip> --target <dir>) は廃止しました。";
+
+    // 解析に失敗する引数も機械出力で報告する。パス・環境・ログには触れない。
+    public static bool IsJsonlRequested(IReadOnlyList<string> args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        return args.Any(arg => string.Equals(arg, "--jsonl", StringComparison.Ordinal));
+    }
 
     public static CommandLineParseResult Parse(IReadOnlyList<string> args)
     {
@@ -61,8 +67,10 @@ public static class CommandLineParser
         string? archive = null;
         string? target = null;
         string? entries = null;
+        string? log = null;
         var fast = false;
         var yes = false;
+        var jsonl = false;
 
         for (var i = 1; i < args.Count; i++)
         {
@@ -90,6 +98,34 @@ public static class CommandLineParser
                     }
 
                     fast = true;
+                    break;
+
+                case "--jsonl":
+                    if (jsonl)
+                    {
+                        return CommandLineParseResult.Fail("--jsonl が複数回指定されています");
+                    }
+
+                    jsonl = true;
+                    break;
+
+                case "--log":
+                    if (command == CommandKind.Analyze)
+                    {
+                        return CommandLineParseResult.Fail("analyze では --log を指定できません");
+                    }
+
+                    if (log is not null)
+                    {
+                        return CommandLineParseResult.Fail("--log が複数回指定されています");
+                    }
+
+                    if (!HasValue(args, i))
+                    {
+                        return CommandLineParseResult.Fail("--log の値がありません");
+                    }
+
+                    log = args[++i];
                     break;
 
                 case "--entries":
@@ -157,7 +193,17 @@ public static class CommandLineParser
             return CommandLineParseResult.Fail("--target は必須です");
         }
 
-        return CommandLineParseResult.Ok(new CommandLineOptions(command, archive, target, fast ? RunMode.Fast : RunMode.Strict, entries, yes));
+        if (log is not null && !jsonl)
+        {
+            return CommandLineParseResult.Fail("--log は --jsonl を指定した delete でのみ使用できます");
+        }
+
+        if (command == CommandKind.Delete && jsonl && !yes)
+        {
+            return CommandLineParseResult.Fail("--jsonl を指定した delete では --yes または -y が必須です");
+        }
+
+        return CommandLineParseResult.Ok(new CommandLineOptions(command, archive, target, fast ? RunMode.Fast : RunMode.Strict, entries, yes, jsonl, log));
     }
 
     // オプションの値は次の引数。無い、空、- で始まる場合は値なしとする。

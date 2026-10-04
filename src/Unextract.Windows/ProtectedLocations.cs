@@ -54,13 +54,13 @@ public static class ProtectedLocations
         var opened = HandleOpener.OpenForAttributes(path);
         if (!opened.Succeeded)
         {
-            return (null, new FatalError(FatalKind.ProtectedLocationUnresolved, Detail: $"{folder}: {opened}"));
+            return (null, new FatalError(FatalKind.ProtectedLocationUnresolved, Detail: $"{folder}: {opened}", Win32Error: opened.Error));
         }
 
         using var handle = opened.Value;
         var finalPath = FileInformation.GetFinalPath(handle);
         return finalPath.Succeeded
             ? (finalPath.Value, null)
-            : (null, new FatalError(FatalKind.ProtectedLocationUnresolved, Detail: $"{folder}: {finalPath}"));
+            : (null, new FatalError(FatalKind.ProtectedLocationUnresolved, Detail: $"{folder}: {finalPath}", Win32Error: finalPath.Error));
     }
 }

@@ -22,8 +22,8 @@ public sealed record DeleteCommandRequest(
     Action? DeletionStarting = null);
 
 // Report は逐次処理の結果 (Prepare の失敗・確認での中止では null)。PrepareError は Prepare の失敗の原因
-// (entries の入力エラーでは null。原因は標準エラー出力に書く)。
-public sealed record DeleteCommandOutcome(ExitStatus Status, DeleteReport? Report, FatalError? PrepareError = null);
+// (entries の入力エラーでは null)。PreparationFailure は表示前の構造化された失敗情報。
+public sealed record DeleteCommandOutcome(ExitStatus Status, DeleteReport? Report, FatalError? PrepareError = null, PrepareFailure? PreparationFailure = null);
 
 // unextract delete (docs/spec/cli.md#arguments、docs/SPEC.md#execution、docs/spec/filesystem.md#delete-flow、docs/spec/cli.md#delete-output)。Prepare の後に1回だけ確認し (案 A、docs/RATIONALE.md#confirmation)、処理対象を ZIP の順に1件ずつ、
 // その時点の target の状態で検証してその場で削除する。analyze の結果は参照しない。全件の事前解析をしない。
@@ -35,14 +35,23 @@ public static class DeleteCommand
         var context = request.Context;
         var output = context.Output;
         var error = context.ErrorOutput;
+        var notifications = context.Notifications;
+        // CLI は引数解析で拒否する。通知経路の直接呼び出しでも確認の同意を推論しない。
+        if (notifications is not null && !request.AssumeYes)
+        {
+            throw new ArgumentException("結果通知を使う delete には明示的な確認の省略が必要です。", nameof(request));
+        }
 
         // Prepare: どの段階の失敗でも削除0件。確認も出さない。
         var (prepared, failure) = Preparation.Run(request.ArchivePath, request.TargetPath, request.EntriesPath, context);
         if (prepared is null)
         {
-            error.WriteLine(failure!.Message);
-            error.WriteLine(DeleteOutput.PrepareAborted);
-            return new DeleteCommandOutcome(ExitStatus.Error, null, failure.Fatal);
+            if (notifications is null)
+            {
+                error.WriteLine(failure!.Message);
+                error.WriteLine(DeleteOutput.PrepareAborted);
+            }
+            return new DeleteCommandOutcome(ExitStatus.Error, null, failure!.Fatal, failure);
         }
 
         var deletionStarted = false;
@@ -64,8 +73,15 @@ public static class DeleteCommand
         {
             using (prepared)
             {
-                AnalyzeCommand.WriteLines(output, ReportText.Header(request.ArchivePath, prepared.Root.FinalPath, request.Mode));
-                output.WriteLine(DeleteOutput.Targets(prepared.Entries.Count, prepared.Targets.Count, prepared.EntriesSelected));
+                if (notifications is null)
+                {
+                    AnalyzeCommand.WriteLines(output, ReportText.Header(request.ArchivePath, prepared.Root.FinalPath, request.Mode));
+                    output.WriteLine(DeleteOutput.Targets(prepared.Entries.Count, prepared.Targets.Count, prepared.EntriesSelected));
+                }
+                else
+                {
+                    notifications.OnPrepared?.Invoke(prepared.Info(request.ArchivePath, request.Mode));
+                }
 
                 // 確認 (案 A): Prepare が全て成功した後、最初の target エントリの処理の前に1回だけ。確認待ちの間、個々の target ファイルの
                 // ハンドルは開いていない (開いているのは ZIP と target ルートだけ)。--yes は確認だけを省略する。
@@ -74,7 +90,10 @@ public static class DeleteCommand
                     return new DeleteCommandOutcome(ExitStatus.UserCancelled, null);
                 }
 
-                output.WriteLine(ReportText.Heading);
+                if (notifications is null)
+                {
+                    output.WriteLine(ReportText.Heading);
+                }
                 // 最上位の例外処理にも開始済みであることを通知する。出力・Dispose の失敗でも削除0件とは断定しない。
                 deletionStarted = true;
                 request.DeletionStarting?.Invoke();
@@ -87,19 +106,23 @@ public static class DeleteCommand
                     prepared.ArchiveIdentity,
                     context.Limits,
                     request.Mode,
-                    context.Progress,
-                    result => output.WriteLine(DeleteOutput.Line(result)),
-                    request.Hooks));
+                    notifications is null ? context.Progress : null,
+                    notifications is null ? result => output.WriteLine(DeleteOutput.Line(result)) : notifications.OnDeleteResult,
+                    request.Hooks,
+                    notifications?.OnDirectoryCount));
 
-                AnalyzeCommand.WriteLines(output, DeleteOutput.Summary(report, prepared.Entries.Count - prepared.Targets.Count));
-                WriteRemainingErrors(report);
+                if (notifications is null)
+                {
+                    AnalyzeCommand.WriteLines(output, DeleteOutput.Summary(report, prepared.Entries.Count - prepared.Targets.Count));
+                    WriteRemainingErrors(report);
+                }
 
                 // STOP、または STOP がなくても DELETE_FAILED が1件以上あればエラー (docs/spec/cli.md#arguments、docs/RATIONALE.md#open-failures)。
                 var status = report.Stop is null && report.Count(DeleteStatus.DeleteFailed) == 0 ? ExitStatus.Success : ExitStatus.Error;
                 return new DeleteCommandOutcome(status, report);
             }
         }
-        catch (Exception ex) when (deletionStarted)
+        catch (Exception ex) when (deletionStarted && notifications is null)
         {
             // 結果・要約の表示、終了時の Dispose も含む。report が無ければ削除件数は不明。
             error.WriteLine($"内部エラー: 想定外の例外が発生しました ({ex.GetType().Name}: {SafeDisplay.Escape(ex.Message)})");

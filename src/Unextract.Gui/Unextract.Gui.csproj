@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>unextract-gui</AssemblyName>
+  </PropertyGroup>
+
+  <!-- Build order only. CLI and its dependencies never become GUI assembly references.
+       Do not propagate GUI publish/output settings to the independent CLI build. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Unextract.Cli\Unextract.Cli.csproj"
+                      Condition="'$(_IsPublishing)' != 'true'"
+                      ReferenceOutputAssembly="false" Private="false"
+                      GlobalPropertiesToRemove="PublishProfile;PublishDir;PublishSingleFile;SelfContained;OutputPath;OutDir" />
+    <InternalsVisibleTo Include="Unextract.Gui.Tests" />
+  </ItemGroup>
+
+  <!-- Query MSBuild for the CLI output for this configuration/RID, rather than
+       assuming bin/Debug or copying another configuration's artifacts. -->
+  <Target Name="CopyBundledCli" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true' and '$(_IsPublishing)' != 'true'">
+    <MSBuild Projects="..\Unextract.Cli\Unextract.Cli.csproj" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework);RuntimeIdentifier=$(RuntimeIdentifier)"
+             RemoveProperties="PublishProfile;PublishDir;PublishSingleFile;SelfContained;OutputPath;OutDir">
+      <Output TaskParameter="TargetOutputs" ItemName="_CliTargetPath" />
+    </MSBuild>
+    <PropertyGroup>
+      <_CliOutputDirectory>@(_CliTargetPath->'%(RootDir)%(Directory)')</_CliOutputDirectory>
+    </PropertyGroup>
+    <Error Condition="'$(_CliOutputDirectory)' == ''" Text="MSBuild did not return the bundled CLI output path." />
+    <ItemGroup>
+      <_CliOutputFiles Include="$(_CliOutputDirectory)\**\*" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(_CliOutputDirectory)\unextract.exe')" Text="Bundled CLI build output is missing: $(_CliOutputDirectory)\unextract.exe" />
+    <Copy SourceFiles="@(_CliOutputFiles)"
+          DestinationFiles="@(_CliOutputFiles->'$(TargetDir)cli\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

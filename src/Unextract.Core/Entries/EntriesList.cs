@@ -8,8 +8,25 @@ namespace Unextract.Core.Entries;
 // --entries の1行。LineNumber は 1 始まり。Name は ZIP の FullName として照合する文字列 (trim しない)。
 public sealed record EntriesLine(int LineNumber, string Name);
 
+public enum EntriesErrorKind
+{
+    Unreadable,
+    TooLarge,
+    Utf16,
+    Utf32,
+    TooManyLines,
+    CrInLine,
+    EmptyLine,
+    LineTooLong,
+    InvalidUtf8,
+    DuplicateLine,
+    NoLines,
+    NoMatch,
+    Directory,
+}
+
 // --entries の入力エラー。LineNumber はファイル全体の問題 (読めない、空、大きすぎる) では null。
-public sealed record EntriesError(int? LineNumber, string Reason)
+public sealed record EntriesError(EntriesErrorKind Kind, int? LineNumber, string Reason)
 {
     public string Describe() => LineNumber is { } line ? $"--entries の {line} 行目: {Reason}" : $"--entries: {Reason}";
 }
@@ -39,7 +56,7 @@ public static class EntriesList
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or SecurityException)
         {
-            return Fail(null, $"ファイルを読めません ({ex.Message})");
+            return Fail(EntriesErrorKind.Unreadable, null, $"ファイルを読めません ({ex.Message})");
         }
     }
 
@@ -49,7 +66,7 @@ public static class EntriesList
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(limits);
 
-        var tooLarge = Fail(null, $"ファイルが大きさの上限 ({limits.MaxEntriesFileBytes:N0} バイト) を超えています");
+        var tooLarge = Fail(EntriesErrorKind.TooLarge, null, $"ファイルが大きさの上限 ({limits.MaxEntriesFileBytes:N0} バイト) を超えています");
         if (stream.CanSeek && stream.Length > limits.MaxEntriesFileBytes)
         {
             return tooLarge;
@@ -86,18 +103,18 @@ public static class EntriesList
 
         if (data.Length > limits.MaxEntriesFileBytes)
         {
-            return Fail(null, $"ファイルが大きさの上限 ({limits.MaxEntriesFileBytes:N0} バイト) を超えています");
+            return Fail(EntriesErrorKind.TooLarge, null, $"ファイルが大きさの上限 ({limits.MaxEntriesFileBytes:N0} バイト) を超えています");
         }
 
         // UTF-32 LE (FF FE 00 00) は UTF-16 LE (FF FE) より先に判定する。
         if (data.StartsWith((ReadOnlySpan<byte>)[0xFF, 0xFE, 0x00, 0x00]) || data.StartsWith((ReadOnlySpan<byte>)[0x00, 0x00, 0xFE, 0xFF]))
         {
-            return Fail(null, "UTF-32 で保存されています。UTF-8 で保存してください");
+            return Fail(EntriesErrorKind.Utf32, null, "UTF-32 で保存されています。UTF-8 で保存してください");
         }
 
         if (data.StartsWith((ReadOnlySpan<byte>)[0xFF, 0xFE]) || data.StartsWith((ReadOnlySpan<byte>)[0xFE, 0xFF]))
         {
-            return Fail(null, "UTF-16 で保存されています。UTF-8 で保存してください");
+            return Fail(EntriesErrorKind.Utf16, null, "UTF-16 で保存されています。UTF-8 で保存してください");
         }
 
         if (data.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]))
@@ -117,7 +134,7 @@ public static class EntriesList
 
             if (lineNumber > limits.MaxEntriesLines)
             {
-                return Fail(lineNumber, $"行数が上限 ({limits.MaxEntriesLines:N0} 行) を超えています");
+                return Fail(EntriesErrorKind.TooManyLines, lineNumber, $"行数が上限 ({limits.MaxEntriesLines:N0} 行) を超えています");
             }
 
             if (!line.IsEmpty && line[^1] == (byte)'\r')
@@ -127,17 +144,17 @@ public static class EntriesList
 
             if (line.Contains((byte)'\r'))
             {
-                return Fail(lineNumber, "行末以外に CR があります");
+                return Fail(EntriesErrorKind.CrInLine, lineNumber, "行末以外に CR があります");
             }
 
             if (line.IsEmpty)
             {
-                return Fail(lineNumber, "空行です");
+                return Fail(EntriesErrorKind.EmptyLine, lineNumber, "空行です");
             }
 
             if (line.Length > limits.MaxEntriesLineBytes)
             {
-                return Fail(lineNumber, $"1行の長さが上限 ({limits.MaxEntriesLineBytes:N0} バイト) を超えています");
+                return Fail(EntriesErrorKind.LineTooLong, lineNumber, $"1行の長さが上限 ({limits.MaxEntriesLineBytes:N0} バイト) を超えています");
             }
 
             string name;
@@ -147,12 +164,12 @@ public static class EntriesList
             }
             catch (DecoderFallbackException)
             {
-                return Fail(lineNumber, "UTF-8 として読めません");
+                return Fail(EntriesErrorKind.InvalidUtf8, lineNumber, "UTF-8 として読めません");
             }
 
             if (seen.TryGetValue(name, out var first))
             {
-                return Fail(lineNumber, $"{first} 行目と同じです ({Quote(name)})");
+                return Fail(EntriesErrorKind.DuplicateLine, lineNumber, $"{first} 行目と同じです ({Quote(name)})");
             }
 
             seen.Add(name, lineNumber);
@@ -161,7 +178,7 @@ public static class EntriesList
 
         if (lines.Count == 0)
         {
-            return Fail(null, "行がありません (空のファイルです)");
+            return Fail(EntriesErrorKind.NoLines, null, "行がありません (空のファイルです)");
         }
 
         return new EntriesParseResult(lines, null);
@@ -185,12 +202,12 @@ public static class EntriesList
         {
             if (!byName.TryGetValue(line.Name, out var entry))
             {
-                return new EntriesMatchResult(null, new EntriesError(line.LineNumber, Unknown(line.Name, entries)));
+                return new EntriesMatchResult(null, new EntriesError(EntriesErrorKind.NoMatch, line.LineNumber, Unknown(line.Name, entries)));
             }
 
             if (entry.IsDirectory)
             {
-                return new EntriesMatchResult(null, new EntriesError(line.LineNumber, $"ディレクトリエントリは指定できません ({Quote(line.Name)})"));
+                return new EntriesMatchResult(null, new EntriesError(EntriesErrorKind.Directory, line.LineNumber, $"ディレクトリエントリは指定できません ({Quote(line.Name)})"));
             }
 
             selected.Add(entry.Entry.Index);
@@ -223,5 +240,5 @@ public static class EntriesList
     // 行内容とヒントの FullName は、そのまま --entries に書ける形で示すため \ を変換しない表示用エスケープを使う。
     private static string Quote(string name) => $"\"{SafeDisplay.EscapeForList(name, out _)}\"";
 
-    private static EntriesParseResult Fail(int? line, string reason) => new(null, new EntriesError(line, reason));
+    private static EntriesParseResult Fail(EntriesErrorKind kind, int? line, string reason) => new(null, new EntriesError(kind, line, reason));
 }

@@ -30,15 +30,58 @@ public static class DeleteStatusExtensions
     };
 }
 
+// delete 固有の原因。共通の FS・内容検証の原因は FatalKind をそのまま保持する。
+public enum DeleteFailureKind
+{
+    DeleteOpenRefused,
+    OpenFailed,
+    IdentityCheckFailed,
+    IdentityCheckMismatch,
+    FinalCheckMismatch,
+    DispositionFailed,
+    DeletionUnconfirmed,
+    UnexpectedException,
+}
+
+// 表示用 Reason と独立した診断。Kind と FatalKind のどちらか一方だけを保持する。
+// 想定外の例外では段階を推測せず Step を null にする。
+public sealed record DeleteFailure
+{
+    public DeleteFailure(FatalKind kind, EntryStep? step, int? win32Error = null)
+    {
+        FatalKind = kind;
+        Step = step;
+        Win32Error = win32Error;
+    }
+
+    public DeleteFailure(DeleteFailureKind kind, EntryStep? step, int? win32Error = null)
+    {
+        Kind = kind;
+        Step = step;
+        Win32Error = win32Error;
+    }
+
+    public DeleteFailureKind? Kind { get; }
+
+    public FatalKind? FatalKind { get; }
+
+    public EntryStep? Step { get; }
+
+    public int? Win32Error { get; }
+}
+
 // 処理したファイルエントリ1件の結果。Target は期待パス (\\?\ 形式、表示用)。Reason は DELETE_FAILED と STOPPED の理由。
 // PossiblyDeleted は STOPPED の対象が「削除された可能性あり」か (削除の指示の後に成立を確認できなかった場合など)。
+// Length は ZIP の宣言展開サイズ。処理結果を通知する際に検証済みエントリから渡す。
 public sealed record DeleteEntryResult(
     ZipEntryRef Entry,
     string Target,
     DeleteStatus Status,
     SkipReason? SkipReason = null,
     string? Reason = null,
-    bool PossiblyDeleted = false);
+    bool PossiblyDeleted = false,
+    DeleteFailure? Failure = null,
+    long Length = 0);
 
 // delete の結果。Results は処理したファイルエントリの結果 (処理した順。STOP なら最後が STOPPED)。
 // DirectoryCount は処理したディレクトリエントリの件数 (結果行を出さない)。NotProcessedCount は STOP の後に処理しなかった件数。
@@ -70,6 +113,7 @@ public sealed class DeleteHooks
 
 // 逐次削除の入力。Entries は処理対象 (全エントリ、または --entries で選んだエントリ。ZIP の順)。
 // Progress は (n, total) で各エントリの処理の前に呼ばれる (Processing n / total)。OnResult はファイルエントリの結果ごとに呼ばれる。
+// OnResult は ProcessFile の外で close 後に呼ぶ。OnDirectoryCount は完結した DIRECTORY の累計を渡す。
 public sealed record DeleteRequest(
     IReadOnlyList<ValidatedZipEntry> Entries,
     IZipContentProvider Contents,
@@ -81,7 +125,8 @@ public sealed record DeleteRequest(
     RunMode Mode = RunMode.Strict,
     Action<int, int>? Progress = null,
     Action<DeleteEntryResult>? OnResult = null,
-    DeleteHooks? Hooks = null);
+    DeleteHooks? Hooks = null,
+    Action<int>? OnDirectoryCount = null);
 
 // 削除用オープンの失敗の分類 (docs/spec/filesystem.md#open-errors の対応表)。表に無いコードは全て STOP とする。
 internal static class DeletionOpenErrors
@@ -150,10 +195,12 @@ internal sealed class DeleteRun
             {
                 // ディレクトリは削除しない (docs/SPEC.md#scope)。結果行を出さず、件数だけを要約に出す。
                 directories++;
+                _request.OnDirectoryCount?.Invoke(directories);
                 continue;
             }
 
-            var result = ProcessFile(entry);
+            // ProcessFile がハンドルを閉じて戻った後に、宣言サイズだけを付けて通知する。
+            var result = ProcessFile(entry) with { Length = entry.Entry.Length };
             results.Add(result);
             _request.OnResult?.Invoke(result);
             if (result.Status == DeleteStatus.Stopped)
@@ -174,8 +221,8 @@ internal sealed class DeleteRun
 
         DeleteEntryResult Result(DeleteStatus status, SkipReason? skip = null) => new(reference, expectedPath, status, skip);
 
-        DeleteEntryResult Stop(string reason, bool possiblyDeleted = false) =>
-            new(reference, expectedPath, DeleteStatus.Stopped, null, reason, possiblyDeleted);
+        DeleteEntryResult Stop(string reason, DeleteFailure failure, bool possiblyDeleted = false) =>
+            new(reference, expectedPath, DeleteStatus.Stopped, null, reason, possiblyDeleted, failure);
 
         try
         {
@@ -184,7 +231,8 @@ internal sealed class DeleteRun
             switch (resolution.Kind)
             {
                 case ResolutionKind.Failed:
-                    return Stop(Describe(resolution.FatalKind!.Value, resolution.Detail));
+                    return Stop(Describe(resolution.FatalKind!.Value, resolution.Detail),
+                        new DeleteFailure(resolution.FatalKind.Value, EntryStep.Resolve, resolution.Win32Error));
                 case ResolutionKind.Missing:
                     return Result(DeleteStatus.Missing);
                 case ResolutionKind.ParentReparse:
@@ -218,13 +266,14 @@ internal sealed class DeleteRun
             var identity = HandleInspector.VerifyIdentity(handle, baseline);
             if (identity.Failure is { } failure)
             {
-                return Stop(Describe(failure.Kind, failure.Detail));
+                return Stop(Describe(failure.Kind, failure.Detail), new DeleteFailure(failure.Kind, failure.Step, failure.Win32Error));
             }
 
             var standard = handle.GetStandardInformation();
             if (!standard.Succeeded)
             {
-                return Stop(Describe(FatalKind.TargetInfoFailed, standard.Describe()));
+                return Stop(Describe(FatalKind.TargetInfoFailed, standard.Describe()),
+                    new DeleteFailure(FatalKind.TargetInfoFailed, EntryStep.Inspect, standard.Error));
             }
 
             // USN の親 ID は hardlink では開いた名前の親とは限らない。リンク数2以上を確認した
@@ -236,7 +285,8 @@ internal sealed class DeleteRun
                     stopOnDeletePending: true, standardInformation: standard.Value);
                 if (special.Failure is { } specialFailure)
                 {
-                    return Stop(Describe(specialFailure.Kind, specialFailure.Detail));
+                    return Stop(Describe(specialFailure.Kind, specialFailure.Detail),
+                        new DeleteFailure(specialFailure.Kind, specialFailure.Step, specialFailure.Win32Error));
                 }
 
                 // reparse の優先順位を維持する。リンク数2以上を既に確認したので、削除候補にはしない。
@@ -246,12 +296,13 @@ internal sealed class DeleteRun
             var parent = handle.GetParentFileId();
             if (!parent.Succeeded)
             {
-                return Stop(Describe(FatalKind.TargetInfoFailed, parent.Describe()));
+                return Stop(Describe(FatalKind.TargetInfoFailed, parent.Describe()),
+                    new DeleteFailure(FatalKind.TargetInfoFailed, EntryStep.Verify, parent.Error));
             }
 
             if (parent.Value != resolution.ParentFileId)
             {
-                return Stop(Describe(FatalKind.ParentFileIdMismatch, null));
+                return Stop(Describe(FatalKind.ParentFileIdMismatch, null), new DeleteFailure(FatalKind.ParentFileIdMismatch, EntryStep.Verify));
             }
 
             // 5. 検査と M0: docs/spec/filesystem.md#special-files の特殊判定 (DeletePending を含む) とサイズ。M0 は内容比較の前に同じハンドルから取得する。
@@ -260,7 +311,8 @@ internal sealed class DeleteRun
             switch (inspection.Kind)
             {
                 case InspectionKind.Failed:
-                    return Stop(Describe(inspection.Failure!.Value.Kind, inspection.Failure.Value.Detail));
+                    return Stop(Describe(inspection.Failure!.Value.Kind, inspection.Failure.Value.Detail),
+                        new DeleteFailure(inspection.Failure.Value.Kind, inspection.Failure.Value.Step, inspection.Failure.Value.Win32Error));
                 case InspectionKind.SkippedSpecialFile:
                     return Result(DeleteStatus.SkippedSpecialFile, inspection.SkipReason);
                 case InspectionKind.Modified:
@@ -276,7 +328,8 @@ internal sealed class DeleteRun
             {
                 case ContentVerdict.Fatal:
                     // docs/spec/zip.md#verification の 1〜5 の違反 (ZIP 側の異常)、target の読み取り失敗、実測展開量の合計の超過。
-                    return Stop($"全バイト比較で異常: {Describe(compared.FatalKind!.Value, compared.Detail)}");
+                    return Stop($"全バイト比較で異常: {Describe(compared.FatalKind!.Value, compared.Detail)}",
+                        new DeleteFailure(compared.FatalKind.Value, EntryStep.Compare, compared.Win32Error));
                 case ContentVerdict.Mismatch:
                     // docs/spec/zip.md#verification の 6 だけが不成立 (内容が異なる): 削除せず続行する。
                     return Result(DeleteStatus.Modified);
@@ -286,7 +339,10 @@ internal sealed class DeleteRun
             _hooks.BeforeFinalCheck?.Invoke(reference, handle);
             if (HandleInspector.FinalCheck(handle, m0) is { } changed)
             {
-                return Stop($"最終確認で不一致: {changed}");
+                var diagnostic = changed.Kind == FinalCheckFailureKind.InformationFailed
+                    ? new DeleteFailure(FatalKind.TargetInfoFailed, EntryStep.FinalCheck, changed.Win32Error)
+                    : new DeleteFailure(DeleteFailureKind.FinalCheckMismatch, EntryStep.FinalCheck);
+                return Stop($"最終確認で不一致: {changed.Detail}", diagnostic);
             }
 
             // 8. 削除: 同じハンドルへの削除の指示。失敗は種類を問わず STOP (docs/RATIONALE.md#acl)。
@@ -298,19 +354,22 @@ internal sealed class DeleteRun
                 // 指示の失敗では DeletePending は false のままのはずだが (PoC 1〜3)、確かめられなければ「削除された可能性あり」とする。
                 var after = handle.GetStandardInformation();
                 var possibly = !after.Succeeded || after.Value.DeletePending;
-                return Stop($"削除の指示が失敗: {disposition.Describe()}", possibly);
+                return Stop($"削除の指示が失敗: {disposition.Describe()}",
+                    new DeleteFailure(DeleteFailureKind.DispositionFailed, EntryStep.Dispose, disposition.Error), possibly);
             }
 
             // 9. 成立確認: 同じハンドルの DeletePending が true。API の成功だけでは成立としない (docs/RATIONALE.md#disposition)。
             var confirmed = handle.GetStandardInformation();
             if (!confirmed.Succeeded)
             {
-                return Stop($"削除の成立を確認できません: {confirmed.Describe()}", possiblyDeleted: true);
+                return Stop($"削除の成立を確認できません: {confirmed.Describe()}",
+                    new DeleteFailure(DeleteFailureKind.DeletionUnconfirmed, EntryStep.Confirm, confirmed.Error), possiblyDeleted: true);
             }
 
             if (!confirmed.Value.DeletePending)
             {
-                return Stop("削除の成立を確認できません: 削除の指示は成功を返したが DeletePending が false", possiblyDeleted: true);
+                return Stop("削除の成立を確認できません: 削除の指示は成功を返したが DeletePending が false",
+                    new DeleteFailure(DeleteFailureKind.DeletionUnconfirmed, EntryStep.Confirm), possiblyDeleted: true);
             }
 
             return Result(DeleteStatus.Deleted);
@@ -318,7 +377,8 @@ internal sealed class DeleteRun
         catch (Exception ex)
         {
             // 想定外の例外 (フックからの例外を含む) は STOP。削除用ハンドルは using で閉じられている。
-            return Stop($"想定外の例外 ({ex.GetType().Name}: {ex.Message})", possiblyDeleted: dispositionRequested);
+            return Stop($"想定外の例外 ({ex.GetType().Name}: {ex.Message})",
+                new DeleteFailure(DeleteFailureKind.UnexpectedException, null), possiblyDeleted: dispositionRequested);
         }
     }
 
@@ -330,18 +390,21 @@ internal sealed class DeleteRun
         var description = DeletionOpenErrors.Describe(error);
         if (!DeletionOpenErrors.RequiresIdentityCheck(error))
         {
-            return new(entry, expectedPath, DeleteStatus.Stopped, null, $"削除用に開けません ({description})");
+            return new(entry, expectedPath, DeleteStatus.Stopped, null, $"削除用に開けません ({description})",
+                Failure: new DeleteFailure(DeleteFailureKind.OpenFailed, EntryStep.Open, error));
         }
 
         var identity = _request.DeletionProbe.CheckIdentity(expectedPath);
         if (!identity.Succeeded)
         {
-            return new(entry, expectedPath, DeleteStatus.Stopped, null, $"削除用に開けません ({description})。識別確認も失敗 ({identity.Describe()})");
+            return new(entry, expectedPath, DeleteStatus.Stopped, null, $"削除用に開けません ({description})。識別確認も失敗 ({identity.Describe()})",
+                Failure: new DeleteFailure(DeleteFailureKind.IdentityCheckFailed, EntryStep.Open, identity.Error));
         }
 
         if (IdentityMismatch(identity.Value, baseline) is { } mismatch)
         {
-            return new(entry, expectedPath, DeleteStatus.Stopped, null, $"削除用に開けません ({description})。識別確認で列挙時の項目と不一致: {mismatch}");
+            return new(entry, expectedPath, DeleteStatus.Stopped, null, $"削除用に開けません ({description})。識別確認で列挙時の項目と不一致: {mismatch}",
+                Failure: new DeleteFailure(DeleteFailureKind.IdentityCheckMismatch, EntryStep.Open));
         }
 
         return new(
@@ -349,7 +412,8 @@ internal sealed class DeleteRun
             expectedPath,
             DeleteStatus.DeleteFailed,
             null,
-            $"削除用に開けません ({description})。識別確認の時点では同じファイルに見えるため、削除せずに残しました。内容は確認していません");
+            $"削除用に開けません ({description})。識別確認の時点では同じファイルに見えるため、削除せずに残しました。内容は確認していません",
+            Failure: new DeleteFailure(DeleteFailureKind.DeleteOpenRefused, EntryStep.Open, error));
     }
 
     // 識別確認の比較項目 (docs/spec/filesystem.md#failure-boundary): File ID とボリュームシリアル、親 File ID、最終パスを列挙由来の基準と比較し、

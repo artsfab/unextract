@@ -11,6 +11,7 @@ public sealed record TargetLocationPolicyResult(TargetLocationPolicy? Policy, Fa
 
 // analyze と delete に共通の実行環境。OpenArchive と Contents はテストでの差し替え用 (既定は ZipArchiveSource.Open とその内容)。
 // Progress は (n, total) で各エントリの処理の前に呼ばれる。Output は標準出力、ErrorOutput は標準エラー出力 (docs/spec/cli.md#streams)。
+// Notifications を設定した経路は人間向け出力と Progress を使わず、同期通知と構造化 outcome を返す。
 public sealed record CommandContext(
     IFileSystemProbe Probe,
     Func<TargetLocationPolicyResult> ResolveProtectedLocations,
@@ -19,9 +20,10 @@ public sealed record CommandContext(
     TextWriter ErrorOutput,
     Action<int, int>? Progress = null,
     Func<string, ZipOpenResult>? OpenArchive = null,
-    Func<IZipContentProvider, IZipContentProvider>? Contents = null);
+    Func<IZipContentProvider, IZipContentProvider>? Contents = null,
+    CommandNotifications? Notifications = null);
 
-internal enum PrepareStage
+public enum PrepareStage
 {
     Archive,
     Entries,
@@ -34,7 +36,11 @@ internal enum PrepareStage
 
 // Prepare の失敗。Message は「入力エラー: 」「FATAL: 」を付けた標準エラー出力の1行。
 // target ルートを開いた後の FATAL (ZIP 全体の事前検査、ZIP 自身の個体) では、analyze の表示のために TargetFinalPath と全エントリ数を持つ。
-internal sealed record PrepareFailure(PrepareStage Stage, string Message, FatalError? Fatal = null, string? TargetFinalPath = null, int TotalEntries = 0);
+public sealed record PrepareFailure(PrepareStage Stage, string Message, FatalError? Fatal = null, string? TargetFinalPath = null, int? TotalEntries = null, EntriesError? EntriesError = null)
+{
+    // FatalError は target の入力エラーにも使うため、原因型や表示文字列から区分を推測しない。
+    public bool IsFatal => Stage is PrepareStage.Archive or PrepareStage.ZipValidation or PrepareStage.ArchiveIdentity;
+}
 
 // Prepare を終えた状態 (docs/SPEC.md#prepare)。実行全体で保持するハンドルは ZIP と target ルートの2つだけ。Dispose で両方を閉じる。
 // Targets は処理対象 (analyze は全エントリ、delete は全エントリまたは --entries で選んだエントリ。ZIP の順)。
@@ -53,14 +59,23 @@ internal sealed class Prepared(ZipArchiveSource source, TargetRoot root, IReadOn
 
     public bool EntriesSelected { get; init; }
 
+    public PreparedCommandInfo Info(string archivePath, RunMode mode) =>
+        new(archivePath, Root.FinalPath, mode, Entries.Count, Targets.Count, EntriesSelected);
+
     public void Dispose()
     {
-        Root.Dispose();
-        Source.Dispose();
+        try
+        {
+            Root.Dispose();
+        }
+        finally
+        {
+            Source.Dispose();
+        }
     }
 }
 
-// Prepare (docs/SPEC.md#prepare の手順2〜9。手順1 の引数の検査は CLI)。どの段階の失敗でも target のエントリ (target ルート以外の列挙、
+// Prepare (docs/SPEC.md#prepare の手順2〜9。手順1 の引数検査と必要なログ作成は CLI)。どの段階の失敗でも target のエントリ (target ルート以外の列挙、
 // 比較用・削除用ハンドルのオープン) には触れず、削除は0件である (docs/SPEC.md#zero-deletions、docs/RATIONALE.md#current-state)。
 internal static class Preparation
 {
@@ -83,7 +98,7 @@ internal static class Preparation
                 entries = EntriesList.Read(entriesPath, context.Limits);
                 if (entries.Error is { } entriesError)
                 {
-                    return Fail(PrepareStage.Entries, $"入力エラー: {entriesError.Describe()}");
+                    return Fail(PrepareStage.Entries, $"入力エラー: {entriesError.Describe()}", entriesError: entriesError);
                 }
             }
 
@@ -116,7 +131,7 @@ internal static class Preparation
                 var identity = context.Probe.GetFileIdentity(archivePath);
                 if (!identity.Succeeded)
                 {
-                    var identityError = new FatalError(FatalKind.ArchiveIdentityFailed, Detail: identity.Describe());
+                    var identityError = new FatalError(FatalKind.ArchiveIdentityFailed, Detail: identity.Describe(), Win32Error: identity.Error);
                     return Fail(PrepareStage.ArchiveIdentity, $"FATAL: {identityError.Describe()}", identityError, root.FinalPath, total);
                 }
 
@@ -127,7 +142,7 @@ internal static class Preparation
                     var matched = EntriesList.Match(entries.Lines!, prevalidation.Entries);
                     if (matched.Error is { } matchError)
                     {
-                        return Fail(PrepareStage.EntriesMatch, $"入力エラー: {matchError.Describe()}");
+                        return Fail(PrepareStage.EntriesMatch, $"入力エラー: {matchError.Describe()}", total: total, entriesError: matchError);
                     }
 
                     targets = matched.Selected!;
@@ -154,6 +169,6 @@ internal static class Preparation
         }
     }
 
-    private static (Prepared?, PrepareFailure?) Fail(PrepareStage stage, string message, FatalError? fatal = null, string? targetFinalPath = null, int total = 0) =>
-        (null, new PrepareFailure(stage, message, fatal, targetFinalPath, total));
+    private static (Prepared?, PrepareFailure?) Fail(PrepareStage stage, string message, FatalError? fatal = null, string? targetFinalPath = null, int? total = null, EntriesError? entriesError = null) =>
+        (null, new PrepareFailure(stage, message, fatal, targetFinalPath, total, entriesError));
 }

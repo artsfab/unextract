@@ -6,6 +6,7 @@ namespace Unextract.Core.Analysis;
 
 // analyze のエントリ処理の入力。Entries は ZIP 事前検証 (ZipPrevalidator) を通過した全エントリ (ZIP 内の順序)。
 // Progress は (n, total) で各エントリの判定の前に呼ばれる (Checking n / total)。Mode は実行全体のモード (docs/SPEC.md#modes)。
+// OnResult は Classify のハンドルを閉じた後、DIRECTORY を含めて ZIP 順に呼ぶ。FATAL 原因は通知しない。
 public sealed record AnalyzeRequest(
     IReadOnlyList<ValidatedZipEntry> Entries,
     IZipContentProvider Contents,
@@ -14,7 +15,8 @@ public sealed record AnalyzeRequest(
     VolumeFileId ArchiveIdentity,
     Limits Limits,
     Action<int, int>? Progress = null,
-    RunMode Mode = RunMode.Strict);
+    RunMode Mode = RunMode.Strict,
+    Action<EntryResult>? OnResult = null);
 
 // analyze のエントリ処理 (docs/SPEC.md#execution、docs/spec/filesystem.md#classification、docs/spec/filesystem.md#special-files)。完全な非破壊操作で、比較用ハンドルだけを使う。
 // 削除の能力を型として持たない (IDeletionProbe を受け取らない。docs/ARCHITECTURE.md#dependencies)。削除候補・スナップショットを作らない。
@@ -56,19 +58,25 @@ internal sealed class AnalyzeRun
             var entry = entries[i];
             var reference = new ZipEntryRef(entry.Entry.Index, entry.Entry.FullName);
             var expectedPath = _request.Root.ExpectedPath(entry.Components);
+            EntryResult result;
             if (entry.IsDirectory)
             {
-                results.Add(new EntryResult(reference, expectedPath, Classification.Directory));
-                continue;
+                result = new EntryResult(reference, expectedPath, Classification.Directory, Length: 0);
             }
-
-            var outcome = Classify(entry, expectedPath);
-            if (outcome.Failure is { } failure)
+            else
             {
-                return new AnalysisResult(entries.Count, results, new FatalError(failure.Kind, reference, failure.Detail));
+                var outcome = Classify(entry, expectedPath);
+                if (outcome.Failure is { } failure)
+                {
+                    return new AnalysisResult(entries.Count, results, new FatalError(failure.Kind, reference, failure.Detail, failure.Step, failure.Win32Error));
+                }
+
+                result = new EntryResult(reference, expectedPath, outcome.Classification, outcome.SkipReason, entry.Entry.Length);
             }
 
-            results.Add(new EntryResult(reference, expectedPath, outcome.Classification, outcome.SkipReason));
+            results.Add(result);
+            // Classify 内の using が終了してから通知する。FATAL 原因は結果として通知しない。
+            _request.OnResult?.Invoke(result);
         }
 
         return new AnalysisResult(entries.Count, results, null);
@@ -82,7 +90,7 @@ internal sealed class AnalyzeRun
         switch (resolution.Kind)
         {
             case ResolutionKind.Failed:
-                return Outcome.Fail(resolution.FatalKind!.Value, resolution.Detail);
+                return Outcome.Fail(resolution.FatalKind!.Value, resolution.Detail, EntryStep.Resolve, resolution.Win32Error);
             case ResolutionKind.Missing:
                 return Outcome.Of(Classification.Missing);
             case ResolutionKind.ParentReparse:
@@ -94,7 +102,7 @@ internal sealed class AnalyzeRun
         if (!opened.Succeeded)
         {
             // 存在を確認した後に開けない (共有違反、見つからない、アクセス拒否を含む) は FATAL (docs/RATIONALE.md#open-failures、docs/RATIONALE.md#open-failures)。
-            return Outcome.Fail(FatalKind.ComparisonOpenFailed, opened.Describe());
+            return Outcome.Fail(FatalKind.ComparisonOpenFailed, opened.Describe(), EntryStep.Open, opened.Error);
         }
 
         using var handle = opened.Value;
@@ -104,7 +112,7 @@ internal sealed class AnalyzeRun
         var identity = HandleInspector.VerifyIdentity(handle, baseline);
         if (identity.Failure is { } failure)
         {
-            return Outcome.Fail(failure.Kind, failure.Detail);
+            return new Outcome(default, null, failure);
         }
 
         // 手順6・7: docs/spec/filesystem.md#special-files の特殊判定とサイズ。
@@ -112,7 +120,7 @@ internal sealed class AnalyzeRun
         switch (inspection.Kind)
         {
             case InspectionKind.Failed:
-                return Outcome.Fail(inspection.Failure!.Value.Kind, inspection.Failure.Value.Detail);
+                return new Outcome(default, null, inspection.Failure);
             case InspectionKind.SkippedSpecialFile:
                 return Outcome.Of(Classification.SkippedSpecialFile, inspection.SkipReason);
             case InspectionKind.Modified:
@@ -123,7 +131,7 @@ internal sealed class AnalyzeRun
         var compared = _comparer.Verify(_request.Mode, _request.Contents, entry.Entry.Index, handle);
         return compared.Verdict switch
         {
-            ContentVerdict.Fatal => Outcome.Fail(compared.FatalKind!.Value, compared.Detail),
+            ContentVerdict.Fatal => Outcome.Fail(compared.FatalKind!.Value, compared.Detail, EntryStep.Compare, compared.Win32Error),
             ContentVerdict.Mismatch => Outcome.Of(Classification.Modified),
             ContentVerdict.NotRead => Outcome.Of(Classification.SameSize),
             _ => Outcome.Of(Classification.Matched),
@@ -134,6 +142,6 @@ internal sealed class AnalyzeRun
     {
         public static Outcome Of(Classification classification, SkipReason? reason = null) => new(classification, reason, null);
 
-        public static Outcome Fail(FatalKind kind, string? detail = null) => new(default, null, new HandleFailure(kind, detail));
+        public static Outcome Fail(FatalKind kind, string? detail, EntryStep step, int? win32Error = null) => new(default, null, new HandleFailure(kind, detail, step, win32Error));
     }
 }

@@ -375,6 +375,17 @@ public class SequentialDeleteTests
         var stop = StopOf(report);
         Assert.Equal("b.txt", stop.Entry.Name);
         Assert.StartsWith($"全バイト比較で異常: {expected}", stop.Reason, StringComparison.Ordinal);
+        Assert.Equal(EntryStep.Compare, stop.Failure!.Step);
+        Assert.Equal(anomaly switch
+        {
+            "crc" => FatalKind.ContentCrcMismatch,
+            "too-long" => FatalKind.ContentTooLong,
+            "too-short" => FatalKind.ContentTooShort,
+            "throw" or "open-throw" => FatalKind.ContentReadFailed,
+            _ => FatalKind.ContentEncrypted,
+        }, stop.Failure.FatalKind);
+        Assert.Null(stop.Failure.Kind);
+        Assert.Null(stop.Failure.Win32Error);
         Assert.True(h.Exists("b.txt"));
         Assert.True(h.Exists("c.txt"));
         Assert.Equal(1, report.NotProcessedCount);
@@ -410,6 +421,7 @@ public class SequentialDeleteTests
         var report = h.Run();
 
         Assert.StartsWith("全バイト比較で異常: target のファイルを読み取れません", StopOf(report).Reason, StringComparison.Ordinal);
+        Assert.Equal(new DeleteFailure(FatalKind.TargetReadFailed, EntryStep.Compare, 23), StopOf(report).Failure);
         Assert.True(h.Exists("a.txt"));
         Assert.True(h.Exists("b.txt"));
     }
@@ -436,6 +448,7 @@ public class SequentialDeleteTests
         Assert.Equal("d/b.txt", failed.Entry.Name);
         Assert.Contains($"Win32 エラー {error}", failed.Reason, StringComparison.Ordinal);
         Assert.EndsWith("内容は確認していません", failed.Reason, StringComparison.Ordinal);
+        Assert.Equal(new DeleteFailure(DeleteFailureKind.DeleteOpenRefused, EntryStep.Open, error), failed.Failure);
         Assert.Null(report.Stop);
         Assert.True(h.Exists(@"d\b.txt"));
         Assert.Contains(@"CheckIdentity \\?\C:\target\d\b.txt", h.Fs.Calls);
@@ -497,6 +510,24 @@ public class SequentialDeleteTests
             var stop = StopOf(report);
             Assert.Equal("d/a.txt", stop.Entry.Name);
             Assert.StartsWith("削除用に開けません (Win32 エラー", stop.Reason, StringComparison.Ordinal);
+            var expectedKind = situation switch
+            {
+                "delete-pending" or "identity-fails" => DeleteFailureKind.IdentityCheckFailed,
+                "directory" or "junction" or "denied-other-object" => DeleteFailureKind.IdentityCheckMismatch,
+                _ => DeleteFailureKind.OpenFailed,
+            };
+            int? expectedError = situation switch
+            {
+                "vanished" => 2,
+                "parent-vanished" or "parent-is-file" => 3,
+                "delete-pending" => 5,
+                "identity-fails" => 1117,
+                "unknown-1920" => 1920,
+                "unknown-4390" => 4390,
+                "unknown-1" => 1,
+                _ => null,
+            };
+            Assert.Equal(new DeleteFailure(expectedKind, EntryStep.Open, expectedError), stop.Failure);
             Assert.Equal(1, report.NotProcessedCount);
             Assert.True(h.Exists("z.txt"));
             Assert.Empty(h.Fs.Deleted);
@@ -549,6 +580,7 @@ public class SequentialDeleteTests
         var report = h.Run();
 
         Assert.EndsWith("識別確認で列挙時の項目と不一致: 親 File ID", StopOf(report).Reason, StringComparison.Ordinal);
+        Assert.Equal(new DeleteFailure(DeleteFailureKind.IdentityCheckMismatch, EntryStep.Open), StopOf(report).Failure);
         Assert.Empty(h.Fs.Deleted);
     }
 
@@ -737,6 +769,7 @@ public class SequentialDeleteTests
         var report = h.Run();
 
         Assert.Equal("開いたファイルの親ディレクトリが、列挙でたどった親ディレクトリと一致しません", StopOf(report).Reason);
+        Assert.Equal(new DeleteFailure(FatalKind.ParentFileIdMismatch, EntryStep.Verify), StopOf(report).Failure);
         Assert.True(h.Exists(@"d\a.txt"));
         Assert.Empty(h.Contents.Calls);
     }
@@ -757,6 +790,7 @@ public class SequentialDeleteTests
             var report = h.Run();
 
             Assert.StartsWith("開いたファイルの最終パスが期待したパスと一致しません", StopOf(report).Reason, StringComparison.Ordinal);
+            Assert.Equal(new DeleteFailure(FatalKind.FinalPathMismatch, EntryStep.Verify), StopOf(report).Failure);
             Assert.True(h.Exists(@"d\a.txt"));
         }
     }
@@ -825,6 +859,7 @@ public class SequentialDeleteTests
             var stop = StopOf(report);
             Assert.Equal("a.txt", stop.Entry.Name);
             Assert.Equal($"最終確認で不一致: {item}", stop.Reason);
+            Assert.Equal(new DeleteFailure(DeleteFailureKind.FinalCheckMismatch, EntryStep.FinalCheck), stop.Failure);
             Assert.Equal(1, report.NotProcessedCount);
             Assert.Empty(h.Fs.Deleted);
             Assert.DoesNotContain(h.Fs.Calls, c => c.StartsWith("Disposition", StringComparison.Ordinal));
@@ -871,6 +906,10 @@ public class SequentialDeleteTests
         Assert.True(h.Exists("c.txt"));
         var stop = StopOf(report);
         Assert.Equal("b.txt", stop.Entry.Name);
+        Assert.Equal(failure == "confirm-error"
+            ? new DeleteFailure(DeleteFailureKind.DeletionUnconfirmed, EntryStep.Confirm, 1117)
+            : new DeleteFailure(DeleteFailureKind.DispositionFailed, EntryStep.Dispose, failure == "readonly-before-disposition" ? 5 : 1117),
+            stop.Failure);
         if (failure == "confirm-error")
         {
             // 指示は成立していたが確認できなかった。クローズで名前は消えている。報告は「削除された可能性あり」。
@@ -923,6 +962,10 @@ public class SequentialDeleteTests
             var stop = StopOf(report);
             Assert.Equal("a.txt", stop.Entry.Name);
             Assert.Contains("Win32 エラー 1117", stop.Reason, StringComparison.Ordinal);
+            var step = hook == "H4" ? EntryStep.FinalCheck
+                : op is FakeOp.VolumeFileId or FakeOp.ParentFileId or FakeOp.FinalPath ? EntryStep.Verify
+                : EntryStep.Inspect;
+            Assert.Equal(new DeleteFailure(FatalKind.TargetInfoFailed, step, 1117), stop.Failure);
             Assert.False(stop.PossiblyDeleted);
             Assert.True(h.Exists("a.txt"));
             Assert.True(h.Exists("b.txt"));
@@ -969,6 +1012,7 @@ public class SequentialDeleteTests
         var stop = StopOf(report);
         Assert.True(stop.PossiblyDeleted);
         Assert.Contains("DeletePending が false", stop.Reason, StringComparison.Ordinal);
+        Assert.Equal(new DeleteFailure(DeleteFailureKind.DeletionUnconfirmed, EntryStep.Confirm), stop.Failure);
         Assert.True(h.Exists("a.txt"));
         Assert.True(h.Exists("b.txt"));
     }
@@ -1132,11 +1176,12 @@ public class SequentialDeleteTests
 
     // 例外の経路: フックや target の読み取りが例外を投げても STOP として報告し、削除用ハンドルは閉じられる (DeleteHarness が確かめる)。
     [Theory]
-    [InlineData("hook")]
-    [InlineData("read")]
-    public void Exception_StopsAndClosesHandle(string where)
+    [InlineData("hook", RunMode.Strict)]
+    [InlineData("read", RunMode.Strict)]
+    [InlineData("hook", RunMode.Fast)]
+    public void Exception_StopsAndClosesHandle(string where, RunMode mode)
     {
-        using var h = new DeleteHarness(MakeZip(("a.txt", Hello), ("b.txt", Hello)));
+        using var h = new DeleteHarness(MakeZip(("a.txt", Hello), ("b.txt", Hello))) { Mode = mode };
         var a = h.File("a.txt");
         h.File("b.txt");
         h.Hooks = where == "hook"
@@ -1147,16 +1192,18 @@ public class SequentialDeleteTests
 
         var stop = StopOf(report);
         Assert.StartsWith("想定外の例外 (InvalidOperationException", stop.Reason, StringComparison.Ordinal);
+        Assert.Equal(new DeleteFailure(DeleteFailureKind.UnexpectedException, null), stop.Failure);
         Assert.False(stop.PossiblyDeleted);
         Assert.True(h.Exists("a.txt"));
         Assert.True(h.Exists("b.txt"));
     }
 
     // 削除の指示の後の想定外の例外は STOP で「削除された可能性あり」(docs/spec/filesystem.md#failure-boundary の「任意」の行)。後続は処理しない。
-    [Fact]
-    public void Exception_AfterDisposition_IsPossiblyDeleted()
+    [Theory]
+    [MemberData(nameof(BothModes))]
+    public void Exception_AfterDisposition_IsPossiblyDeleted(RunMode mode)
     {
-        using var h = new DeleteHarness(MakeZip(("a.txt", Hello), ("b.txt", Hello)));
+        using var h = new DeleteHarness(MakeZip(("a.txt", Hello), ("b.txt", Hello))) { Mode = mode };
         h.File("a.txt").ThrowAfterDisposition = true;
         h.File("b.txt");
 
@@ -1165,6 +1212,7 @@ public class SequentialDeleteTests
         var stop = StopOf(report);
         Assert.Equal("a.txt", stop.Entry.Name);
         Assert.StartsWith("想定外の例外 (InvalidOperationException", stop.Reason, StringComparison.Ordinal);
+        Assert.Equal(new DeleteFailure(DeleteFailureKind.UnexpectedException, null), stop.Failure);
         Assert.True(stop.PossiblyDeleted);
         Assert.True(h.Exists("b.txt"));
         Assert.Equal(1, report.NotProcessedCount);

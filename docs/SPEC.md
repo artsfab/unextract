@@ -4,7 +4,7 @@
 
 [対象](#scope) / [Prepare](#prepare) / [実行](#execution) / [削除0件](#zero-deletions) / [異常](#failure-stages) / [モード](#modes)
 
-規範本文は本書と[CLI](spec/cli.md)、[ZIP](spec/zip.md)、[ファイル安全性](spec/filesystem.md)の4本文である。担当領域の条件・例外・文言は各領域が定める。READMEは利用者向け要約、ARCHITECTUREは実装案内、RATIONALEは理由、TESTINGは検証方法であり仕様を追加しない。矛盾時は明示された決定・詳細規定を調べ、未決の意味変更は[未解決一覧](OPEN_ISSUES.md)へ出す。
+規範本文は本書と[CLI](spec/cli.md)、[ZIP](spec/zip.md)、[ファイル安全性](spec/filesystem.md)、[機械可読出力](spec/machine-output.md)の5本文と、GUIを変更するときだけ読む[GUI](spec/gui.md)である。担当領域の条件・例外・文言は各領域が定める。READMEは利用者向け要約、ARCHITECTUREは実装案内、RATIONALEは理由、TESTINGは検証方法であり仕様を追加しない。矛盾時は明示された決定・詳細規定を調べ、未決の意味変更は[未解決一覧](OPEN_ISSUES.md)へ出す。
 
 <a id="scope"></a>
 ## 目的と対象
@@ -22,12 +22,14 @@ Windows 11 の CLI。単一の ZIP と、利用者が明示した既存の NTFS 
 
 ZIP にない target 内のファイルは表示・集計・分類・削除しない (完全に無視する)。実名を確認するために target 内のディレクトリの項目を走査することはあるが ([実名確認](spec/filesystem.md#real-names))、走査した名前は ZIP エントリの成分名との照合にだけ使い、照合しなかった名前は保持も出力もしない。ディレクトリは、ZIP に明示されていても、ファイル削除後に空になっても削除しない。target と ZIP 自身も削除しない。クラウド placeholder やクラウド同期の意味論は対象外とし、安全に通常ファイルと認定できない対象は削除しない。
 
+同梱のGUI (`unextract-gui.exe`) は、ZIPの検索と複数Targetの管理・順次実行を担うラッパーで、このCLIを子プロセスとして起動し[機械可読出力](spec/machine-output.md)を使う。一致判定・削除の安全性はCLIだけが判断し、GUIの契約は[GUI](spec/gui.md)が定める。
+
 実装は .NET 10 (LTS) と `System.IO.Compression.ZipArchive`、Windows の文書化された Win32 API (kernel32 と `winioctl.h` の FSCTL) を使う。独自の ZIP 構造パーサは作らない。
 
 <a id="prepare"></a>
 ## Prepare
 
-1. 引数を検査する ([引数と終了状態](spec/cli.md#arguments))。
+1. 引数を検査する ([引数と終了状態](spec/cli.md#arguments))。(`--log` を指定した場合) 続けてログファイルを新規作成し、実行終了まで保持する ([実行ログ](spec/machine-output.md#log))。失敗は入力エラー。
 2. ZIP を `FileShare.Read` (他者の書き込み・削除・改名を拒否) で開いて**実行終了まで保持**する。`ZipArchive` で読み取り専用で開く (CP437 を指定。[名前の復号](spec/zip.md#decoding))。ZIP64、Data Descriptor (DD)、SFX は独自の形式判定を設けず、`ZipArchive` の読み取り結果に委ねる ([内容検証](spec/zip.md#content))。
 3. (`delete` で `--entries` を指定した場合) entries ファイルを読み、[entries](spec/cli.md#entries) の形式の検査を行う。読み終えたら閉じ、以後は参照しない。
 4. 拒否対象の既知フォルダーを取得し、[最終パスへ解決](spec/filesystem.md#target-root)する。失敗は入力エラー。
@@ -37,7 +39,7 @@ ZIP にない target 内のファイルは表示・集計・分類・削除し�
 8. (`--entries` を指定した場合) entries の各行を手順6を通過したエントリと照合する ([entries](spec/cli.md#entries))。
 9. 処理対象を決める: `analyze` は全エントリ。`delete` は全エントリ、または `--entries` で選んだエントリ (ZIP の順)。
 
-実行全体で保持するハンドルは ZIP と target ルートの2つだけである。
+実行全体で保持するハンドルは ZIP と target ルートの2つだけである (`--log` を指定した場合はログファイルを加えた3つ)。
 
 <a id="execution"></a>
 ## エントリの処理
@@ -48,7 +50,7 @@ ZIP にない target 内のファイルは表示・集計・分類・削除し�
 <a id="zero-deletions"></a>
 ## 削除0件の範囲
 
-Prepareのどの段階の入力エラー・FATALでも、確認での中止でも削除0件である。entriesの全形式検査・照合もこの範囲に含む。analyzeは常に削除0件である。
+Prepareのどの段階の入力エラー・FATALでも、確認での中止でも削除0件である。entriesの全形式検査・照合もこの範囲に含む。analyzeは常に削除0件である。機械可読出力では `run` レコードの有無がこの境界を示す ([完了境界](spec/machine-output.md#boundary))。
 
 逐次delete開始後のSTOPでは、それ以前の削除は戻らず、以後は未処理となる。指示前のSTOPは対象を削除しない。指示後に成立を確認できない場合や指示後の例外では、対象は削除された可能性がある。[失敗の境界](spec/filesystem.md#failure-boundary)を参照する。
 

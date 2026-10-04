@@ -8,14 +8,15 @@
 ## 引数と終了状態
 
 ```text
-unextract analyze <archive.zip> --target <dir> [--fast]
-unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]
+unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]
+unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
 ```
 
 - 第1引数はサブコマンドで、`analyze` または `delete` (小文字の完全一致) だけを受け付ける。サブコマンドが無い (旧形式 `unextract <archive.zip> --target <dir>` を含む)、または不明なサブコマンドは入力エラーとし、削除処理を開始せず、両サブコマンドの使い方を表示する。
 - `--dry-run` は廃止した。どの位置にあっても入力エラーとし、削除処理を開始せず、結果の確認には `analyze` を使うよう案内する。互換動作 (別名) は設けない。
-- `analyze` が受け付けるオプションは `--target` と `--fast` だけ、`delete` は `--target`、`--fast`、`--entries`、`--yes`/`-y` だけである。それ以外 (`analyze` に `--entries`・`--yes`・`-y` を指定した場合を含む) は入力エラーとする。
-- `--target` と `--entries` はオプション名と値を別々の引数で渡す形だけとし、`--target=dir` の形、値が無い・空、値が `-` で始まる、同じオプションの重複 (`--yes` と `-y` の併用を含む)、ZIP の指定が無い・複数は、いずれも入力エラーとする。
+- `analyze` が受け付けるオプションは `--target`、`--fast`、`--jsonl` だけ、`delete` は `--target`、`--fast`、`--entries`、`--yes`/`-y`、`--jsonl`、`--log` だけである。それ以外 (`analyze` に `--entries`・`--yes`・`-y`・`--log` を指定した場合を含む) は入力エラーとする。
+- `--jsonl` は機械可読出力を選ぶ ([機械可読出力](machine-output.md))。機械モードの `delete` では `--yes`/`-y` が必須で、`--log <file>` (実行ログ) は機械モードの `delete` だけで受け付ける ([起動](machine-output.md#invocation))。`--jsonl` なしの実行には本書の規定がそのまま適用される。
+- `--target`、`--entries`、`--log` はオプション名と値を別々の引数で渡す形だけとし、`--target=dir` の形、値が無い・空、値が `-` で始まる、同じオプションの重複 (`--yes` と `-y` の併用を含む)、ZIP の指定が無い・複数は、いずれも入力エラーとする。
 - `--target` は必須。既存ディレクトリ・NTFS・拒否位置・reparse・最終パスの検証は[FSのtargetルート](filesystem.md#target-root)による。
 - `--fast` を指定すると、その実行全体が Fast モードになる ([モード契約](../SPEC.md#modes))。指定しなければ Strict である。
 - `--entries <file>` は `delete` の処理対象を、ファイルに列挙した ZIP エントリに限定する ([entries](#entries))。安全性の判断を変えず、処理範囲を狭めるだけである。指定しなければ、全エントリが処理対象になる。
@@ -132,7 +133,9 @@ Prepare が全て成功した後、最初の target エントリの処理を始�
 
 進捗は標準エラー出力に `Checking n / total` (`analyze`)、`Processing n / total` (`delete`) を CR で1行上書きする。最初・100 件ごと・最後だけ書く。標準エラー出力がリダイレクトされているときは表示しない。`delete` では結果行を標準出力に書く前に、進捗の行を消してから書く (同じ端末で行が混ざらないようにする)。
 
-JSON 出力、ログファイル、詳細な終了コード、Ctrl+C 専用の後処理は設けない。Ctrl+C などの中断で未検証のファイルを削除しないことは守る。
+本節の出力先と進捗の規定は `--jsonl` なしの実行に適用する。機械可読出力と実行ログ (`--log`) は[機械可読出力](machine-output.md#destinations)による。
+
+詳細な終了コード、Ctrl+C 専用の後処理は設けない。Ctrl+C などの中断で未検証のファイルを削除しないことは守る。
 
 <a id="warning"></a>
 ## ヘッダー・凡例・Fast警告
@@ -144,7 +147,7 @@ Mode:    Strict | Fast
 凡例: Target は target 内の対応する場所です。MISSING の場合は実在しない期待位置を示します。Target は確認用で、--entries には Entry を書きます。
 ```
 
-Fast の実行では、次の警告を (1) `analyze` の結果表示のヘッダーの最初の行、(2) `delete` のヘッダーの最初の行、(3) `delete` の `[y/N]` の直前に表示する。結果表示に至る Fast の `analyze` では、FATAL の場合も含めてヘッダーの警告を必ず表示する。`--yes` では確認プロンプトがないため、`delete` のヘッダーの警告だけが表示される。ヘッダーの警告は標準出力に書く。
+Fast の実行では、次の警告を (1) `analyze` の結果表示のヘッダーの最初の行、(2) `delete` のヘッダーの最初の行、(3) `delete` の `[y/N]` の直前に表示する。結果表示に至る Fast の `analyze` では、FATAL の場合も含めてヘッダーの警告を必ず表示する。`--yes` では確認プロンプトがないため、`delete` のヘッダーの警告だけが表示される。ヘッダーの警告は標準出力に書く。`--jsonl` では警告文を出さず、代わりに `run` レコードの `mode` を必ず出す ([機械可読出力](machine-output.md#destinations))。
 
 ```text
 警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、ZIP から正常に展開できることは確認していません。
@@ -156,8 +159,8 @@ Fast の実行では、次の警告を (1) `analyze` の結果表示のヘッダ
 - 使い方:
 
   ```text
-  使い方: unextract analyze <archive.zip> --target <dir> [--fast]
-          unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]
+  使い方: unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]
+          unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
   ```
 
 - サブコマンドなし・旧形式: `入力エラー: サブコマンド (analyze または delete) を指定してください。旧形式 (unextract <archive.zip> --target <dir>) は廃止しました。` + 使い方。

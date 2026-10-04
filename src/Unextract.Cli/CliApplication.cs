@@ -25,11 +25,134 @@ internal sealed record CliEnvironment(
     }
 }
 
-// unextract analyze <archive.zip> --target <dir> [--fast]
-// unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]   (docs/spec/cli.md#arguments、docs/SPEC.md#execution)
+// 引数と操作の組立て (docs/spec/cli.md#arguments、docs/SPEC.md#execution)。
 // 出力先 (docs/spec/cli.md#streams): 結果行・ヘッダー・合計・要約は stdout、入力エラー・FATAL・STOP の原因・内部エラーと進捗は stderr。
 internal static class CliApplication
 {
+    internal static bool IsMachineMode(IReadOnlyList<string> args) => CommandLineParser.IsJsonlRequested(args);
+
+    // Program が raw args の完全一致で選ぶ機械入口。stdout は借用 Stream。
+    // createLog は失敗注入用で、製品では ExecutionLog.Create を使う。
+    internal static ExitStatus RunMachine(IReadOnlyList<string> args, Stream stdout, TextWriter stderr,
+        CliEnvironment? environment = null, Func<string, LogCreationResult>? createLog = null)
+    {
+        ExecutionLog? log = null;
+        var writer = new MachineOutputWriter(stdout);
+        CommandKind? command = null;
+        PreparedCommandInfo? prepared = null;
+        var progress = new MachineDeleteProgress();
+        var deletionStarted = false;
+        MachineResultRecord result;
+        try
+        {
+            var parsed = CommandLineParser.Parse(args);
+            if (parsed.Options is not { } options)
+            {
+                result = MachineOutput.UsageError(parsed.Error!);
+            }
+            else
+            {
+                command = options.Command;
+                LogCreationFailure? logFailure = null;
+                if (options.LogPath is { } path)
+                {
+                    var created = (createLog ?? ExecutionLog.Create)(path);
+                    log = created.Log;
+                    logFailure = created.Failure;
+                    writer = new MachineOutputWriter(stdout, log);
+                }
+
+                if (logFailure is not null)
+                {
+                    result = MachineOutput.LogError(logFailure);
+                }
+                else
+                {
+                    // 引数とログ作成の成功後に環境を組み立てる。進捗・確認入力は使わない。
+                    var runtime = environment ?? CliEnvironment.Windows();
+                    var notifications = new CommandNotifications(
+                        OnPrepared: info =>
+                        {
+                            prepared = info;
+                            progress.Prepared(info);
+                            writer.WriteRun(MachineOutput.Run(options.Command, info));
+                        },
+                        OnAnalysisResult: entry => writer.WriteEntry(MachineOutput.Entry(entry)),
+                        OnDeleteResult: entry =>
+                        {
+                            // 配送の成否と処理済みの事実を区別する。
+                            progress.Observe(entry);
+                            writer.WriteEntry(MachineOutput.Entry(entry));
+                        },
+                        OnDirectoryCount: progress.ObserveDirectoryCount);
+                    var context = new CommandContext(runtime.Probe, () =>
+                    {
+                        var locations = runtime.ResolveProtectedLocations();
+                        return new TargetLocationPolicyResult(locations.Policy, locations.Error);
+                    }, Limits.Default, TextWriter.Null, TextWriter.Null, Notifications: notifications);
+
+                    // 既存commandを実行し、Preparedの終了処理が済んでから終端を確定する。
+                    result = options.Command == CommandKind.Analyze
+                        ? MachineOutput.Result(AnalyzeCommand.Run(new AnalyzeCommandRequest(
+                            options.ArchivePath, options.TargetPath, options.Mode, context)), options.Mode)
+                        : MachineOutput.Result(DeleteCommand.Run(new DeleteCommandRequest(
+                            options.ArchivePath, options.TargetPath, options.Mode, options.EntriesPath,
+                            options.AssumeYes, runtime.DeletionProbe, runtime.Prompt, context,
+                            DeletionStarting: () => deletionStarted = true)), prepared);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Preparedのcloseが通知例外を覆っても、検出済みの出力失敗を失わない。
+            result = MachineOutput.InternalError(command, writer.LastFailure ?? ex, deletionStarted, progress);
+        }
+
+        var status = result.ExitCode == 0 ? ExitStatus.Success : ExitStatus.Error;
+        try
+        {
+            if (!writer.WriteResult(result)) status = ExitStatus.Error;
+        }
+        catch (Exception ex)
+        {
+            // 終端の生成・配送を再試行せず、実終了コードで失敗を示す。
+            status = ExitStatus.Error;
+            ReportUnwritable(stderr, ex);
+        }
+        finally
+        {
+            try
+            {
+                log?.Dispose();
+            }
+            catch (MachineOutputException)
+            {
+                // result配送後のclose失敗では追加レコードを出さない。
+                status = ExitStatus.Error;
+            }
+        }
+
+        if (!writer.HasWritableDestination)
+        {
+            ReportUnwritable(stderr, writer.LastFailure!);
+        }
+        return status;
+    }
+
+    // レコードを配送できない場合だけの契約外の最終手段。stderrの失敗も終了1を妨げない。
+    internal static void ReportUnwritable(TextWriter stderr, Exception exception)
+    {
+        try
+        {
+            stderr.WriteLine($"内部エラー: 機械出力を記録できません ({exception.GetType().Name}: {SafeDisplay.Escape(exception.Message)})");
+        }
+        catch (Exception)
+        {
+            // 出力先が全て使えなくてもプロセスの終了コードは返す。
+        }
+    }
+
+    // 人間向けTextWriter入口。Programは--jsonlの場合にRunMachineを使う。
     public static ExitStatus Run(IReadOnlyList<string> args, TextWriter stdout, TextWriter stderr, CliEnvironment? environment = null)
     {
         var deletionStarted = false;

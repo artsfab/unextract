@@ -68,6 +68,8 @@ internal sealed class CommandHarness
     // ZIP を開く処理の差し替え (null なら _zip をメモリ上で開く)。
     public Func<string, ZipOpenResult>? OpenArchive { get; set; }
 
+    public CommandNotifications? Notifications { get; set; }
+
     // 直前の実行の ZIP の内容の呼び出し記録。
     public RecordingContentProvider? Contents { get; private set; }
 
@@ -100,7 +102,8 @@ internal sealed class CommandHarness
         bool yes = true,
         IConfirmationPrompt? prompt = null,
         DeleteHooks? hooks = null,
-        Action? awaitingConfirmation = null)
+        Action? awaitingConfirmation = null,
+        Action? deletionStarting = null)
     {
         var (output, error, context) = Context();
         var start = Fs.Calls.Count;
@@ -115,7 +118,8 @@ internal sealed class CommandHarness
             prompt ?? new ScriptedPrompt(true, "y"),
             context,
             awaitingConfirmation,
-            hooks));
+            hooks,
+            deletionStarting));
 
         // delete は比較用ハンドルを開かない。削除用ハンドルは各エントリの処理の中で閉じ、同時に1つまで。終了時に target のハンドルは無い。
         Assert.Equal(comparisons, Fs.ComparisonOpenCount);
@@ -151,7 +155,8 @@ internal sealed class CommandHarness
             {
                 Contents = new RecordingContentProvider(source);
                 return Contents;
-            });
+            },
+            Notifications);
         return (output, error, context);
     }
 }

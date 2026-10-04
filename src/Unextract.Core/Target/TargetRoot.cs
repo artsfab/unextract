@@ -54,7 +54,7 @@ public static class TargetRootValidator
         var confirmation = probe.ConfirmTargetFinalComponent(path);
         if (!confirmation.Succeeded)
         {
-            return Fail(IsNotFound(confirmation.Error) ? FatalKind.TargetNotFound : FatalKind.TargetCheckFailed, confirmation.Describe());
+            return Fail(IsNotFound(confirmation.Error) ? FatalKind.TargetNotFound : FatalKind.TargetCheckFailed, confirmation.Describe(), confirmation.Error);
         }
 
         if (IsReparse(confirmation.Value.Attributes, confirmation.Value.ReparseTag))
@@ -66,7 +66,7 @@ public static class TargetRootValidator
         var opened = probe.OpenTargetRoot(path);
         if (!opened.Succeeded)
         {
-            return Fail(IsNotFound(opened.Error) ? FatalKind.TargetNotFound : FatalKind.TargetCheckFailed, opened.Describe());
+            return Fail(IsNotFound(opened.Error) ? FatalKind.TargetNotFound : FatalKind.TargetCheckFailed, opened.Describe(), opened.Error);
         }
 
         var handle = opened.Value;
@@ -136,7 +136,7 @@ public static class TargetRootValidator
         if (!result.Succeeded)
         {
             info = default;
-            return Error(FatalKind.TargetCheckFailed, result.Describe());
+            return Error(FatalKind.TargetCheckFailed, result.Describe(), result.Error);
         }
 
         info = result.Value;
@@ -158,7 +158,7 @@ public static class TargetRootValidator
         var fileSystem = handle.GetFileSystemName();
         if (!fileSystem.Succeeded)
         {
-            return Error(FatalKind.TargetCheckFailed, fileSystem.Describe());
+            return Error(FatalKind.TargetCheckFailed, fileSystem.Describe(), fileSystem.Error);
         }
 
         if (fileSystem.Value != "NTFS")
@@ -177,7 +177,7 @@ public static class TargetRootValidator
     private static bool IsReparse(uint attributes, uint reparseTag) =>
         (attributes & FileAttributeReparsePoint) != 0 || reparseTag != 0;
 
-    private static FatalError Error(FatalKind kind, string? detail = null) => new(kind, null, detail);
+    private static FatalError Error(FatalKind kind, string? detail = null, int? win32Error = null) => new(kind, null, detail, Win32Error: win32Error);
 
-    private static TargetRootResult Fail(FatalKind kind, string? detail = null) => new(null, Error(kind, detail));
+    private static TargetRootResult Fail(FatalKind kind, string? detail = null, int? win32Error = null) => new(null, Error(kind, detail, win32Error));
 }

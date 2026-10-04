@@ -135,14 +135,50 @@ public class CommandLineParserTests
         Assert.Equal(error, Error(args));
     }
 
+    // J01: 両操作・両モード。log/entries/yes/jsonl はサブコマンド以降で順序自由。
+    [Theory]
+    [InlineData(new[] { "analyze", "a.zip", "--target", "dir", "--jsonl" }, CommandKind.Analyze, RunMode.Strict, null, null)]
+    [InlineData(new[] { "analyze", "--jsonl", "--fast", "--target", "dir", "a.zip" }, CommandKind.Analyze, RunMode.Fast, null, null)]
+    [InlineData(new[] { "delete", "--jsonl", "a.zip", "--target", "dir", "--yes" }, CommandKind.Delete, RunMode.Strict, null, null)]
+    [InlineData(new[] { "delete", "-y", "--log", "run.jsonl", "--entries", "e.txt", "--target", "dir", "--jsonl", "a.zip", "--fast" }, CommandKind.Delete, RunMode.Fast, "e.txt", "run.jsonl")]
+    [InlineData(new[] { "delete", "--log", "run.jsonl", "a.zip", "--jsonl", "--target", "dir", "--yes" }, CommandKind.Delete, RunMode.Strict, null, "run.jsonl")]
+    [InlineData(new[] { "delete", "--fast", "a.zip", "--jsonl", "-y", "--target", "dir" }, CommandKind.Delete, RunMode.Fast, null, null)]
+    public void J01_MachineArguments(string[] args, CommandKind command, RunMode mode, string? entries, string? log)
+    {
+        Assert.Equal(new CommandLineOptions(command, "a.zip", "dir", mode, entries, command == CommandKind.Delete, true, log), Ok(args));
+    }
+
+    // J02: 新オプションの不正と組合せ。旧 K 系の期待値も維持する。
+    [Theory]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl" }, "--jsonl を指定した delete では --yes または -y が必須です")]
+    [InlineData(new[] { "analyze", "a.zip", "--target", "dir", "--jsonl", "--jsonl" }, "--jsonl が複数回指定されています")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--yes", "--jsonl", "--jsonl" }, "--jsonl が複数回指定されています")]
+    [InlineData(new[] { "analyze", "a.zip", "--target", "dir", "--jsonl=x" }, "不明なオプションです: --jsonl=x")]
+    [InlineData(new[] { "analyze", "a.zip", "--target", "dir", "--JSONL" }, "不明なオプションです: --JSONL")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--yes", "--log", "run.jsonl" }, "--log は --jsonl を指定した delete でのみ使用できます")]
+    [InlineData(new[] { "analyze", "a.zip", "--target", "dir", "--jsonl", "--log", "run.jsonl" }, "analyze では --log を指定できません")]
+    [InlineData(new[] { "analyze", "a.zip", "--target", "dir", "--log", "run.jsonl" }, "analyze では --log を指定できません")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl", "--yes", "--log" }, "--log の値がありません")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl", "--yes", "--log", "" }, "--log の値がありません")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl", "--yes", "--log", "-run.jsonl" }, "--log の値がありません")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl", "--log", "--yes" }, "--log の値がありません")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl", "--yes", "--log=run.jsonl" }, "不明なオプションです: --log=run.jsonl")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl", "--yes", "--Log", "run.jsonl" }, "不明なオプションです: --Log")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl", "--yes", "--log", "a", "--log", "b" }, "--log が複数回指定されています")]
+    [InlineData(new[] { "delete", "a.zip", "--target", "dir", "--jsonl", "--yes", "-y" }, "--yes が複数回指定されています")]
+    public void J02_InvalidMachineArguments(string[] args, string error)
+    {
+        Assert.Equal(error, Error(args));
+    }
+
     // K06: 使い方の表示は両サブコマンドの形 (docs/spec/cli.md#input-errors)。
     [Fact]
     public void K06_Usage()
     {
         Assert.Equal(
             [
-                "使い方: unextract analyze <archive.zip> --target <dir> [--fast]",
-                "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]",
+                "使い方: unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]",
+                "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]",
             ],
             CommandLineParser.UsageLines);
     }

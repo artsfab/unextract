@@ -3,7 +3,7 @@ namespace Unextract.Core.Results;
 // 削除開始前の全体 FATAL の原因の種別 (docs/SPEC.md#failure-stages)。target の入力エラー (docs/spec/cli.md#arguments、docs/spec/filesystem.md#target-root のtarget確認) を含む。
 public enum FatalKind
 {
-    // ZIP を開けない・ZipArchive が読めない (docs/spec/zip.md#runtime、docs/SPEC.md#failure-stages)。入力エラーとして扱う。
+    // ZIP を開けない・ZipArchive が読めない (docs/spec/zip.md#runtime、docs/SPEC.md#failure-stages)。Prepare の FATAL として扱う。
     ArchiveOpenFailed,
     ArchiveUnreadable,
 

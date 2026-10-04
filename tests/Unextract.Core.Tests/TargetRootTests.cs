@@ -119,7 +119,12 @@ public class TargetRootTests
         var fs = NewFs();
         fs.Get(@"C:\target").Errors[op] = error;
 
-        Assert.Equal(FatalKind.TargetCheckFailed, Check(fs, @"C:\target"));
+        var result = TargetRootValidator.Open(fs, @"C:\target", Policy);
+        Assert.Null(result.Root);
+        Assert.Equal(FatalKind.TargetCheckFailed, result.Error!.Kind);
+        Assert.Equal(error, result.Error.Win32Error);
+        Assert.Null(result.Error.Step);
+        Assert.Equal(0, fs.OpenHandleCount);
     }
 
     // P08: 最終パスが \\?\UNC\ で始まる target → UNC 拒否として入力エラー

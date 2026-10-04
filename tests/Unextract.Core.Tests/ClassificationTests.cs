@@ -441,6 +441,14 @@ public class ClassificationTests
 
         Assert.Equal(expected, result.Fatal?.Kind);
         Assert.Equal("x.txt", result.Fatal!.Entry!.Name);
+        Assert.Equal(5, result.Fatal.Win32Error);
+        Assert.Equal(op switch
+        {
+            FakeOp.OpenComparison => EntryStep.Open,
+            FakeOp.VolumeFileId or FakeOp.FinalPath => EntryStep.Verify,
+            FakeOp.Read => EntryStep.Compare,
+            _ => EntryStep.Inspect,
+        }, result.Fatal.Step);
         Assert.Equal(Candidate(mode), Assert.Single(result.Results).Classification);
     }
 
@@ -460,6 +468,8 @@ public class ClassificationTests
         var result = harness.Run();
 
         Assert.Equal(FatalKind.ComparisonOpenFailed, result.Fatal?.Kind);
+        Assert.Equal(error, result.Fatal!.Win32Error);
+        Assert.Equal(EntryStep.Open, result.Fatal.Step);
         Assert.Contains($"Win32 エラー {error}", result.Fatal!.Describe(), StringComparison.Ordinal);
     }
 
@@ -553,6 +563,13 @@ public class ClassificationTests
         var result = harness.Run();
 
         Assert.Equal(expected, result.Fatal?.Kind);
+        Assert.Equal(injection switch
+        {
+            "open-enumeration" or "enumeration-handle-info" => (int?)5,
+            "enumeration-midway" => 1117,
+            _ => null,
+        }, result.Fatal!.Win32Error);
+        Assert.Equal(injection == "comparison-id" ? EntryStep.Verify : EntryStep.Resolve, result.Fatal.Step);
         _ = file;
     }
 

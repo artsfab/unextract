@@ -9,10 +9,11 @@
   - Fast (`--fast` による明示的な opt-in): パスとサイズの一致 (`SAME_SIZE`) を削除候補とし、内容は読まない・比較しない。内容の一致は保証しない。
 - ファイルシステムの安全性 (パス検証、実名解決、reparse・hardlink・ADS、File ID・最終パスによる同一性、TOCTOU 対策、削除方式) は両モード共通。Fast を理由に弱めない。
 - 「その ZIP から展開された」という来歴は証明しない。不明・判定不能なら削除しない (両モード)。
+- 同梱の GUI (`unextract-gui.exe`、WPF) は ZIP 検索と複数 Target の順次実行を担うラッパー。CLI を子プロセスとして起動して機械可読出力を使い、一致判定・削除の安全性を実装しない ([GUI仕様](docs/spec/gui.md))。
 
 ## 2. 文書の優先順位
 
-- 規範本文は [SPEC](docs/SPEC.md) と [CLI](docs/spec/cli.md)・[ZIP](docs/spec/zip.md)・[ファイル安全性](docs/spec/filesystem.md)。[文書入口](docs/README.md)から担当節とテストへ直行する。
+- 規範本文は [SPEC](docs/SPEC.md) と [CLI](docs/spec/cli.md)・[ZIP](docs/spec/zip.md)・[ファイル安全性](docs/spec/filesystem.md)・[機械可読出力](docs/spec/machine-output.md)、GUI を変えるときは [GUI](docs/spec/gui.md)。[文書入口](docs/README.md)から担当節とテストへ直行する。
 - 実装の地図は [ARCHITECTURE](docs/ARCHITECTURE.md)、理由は [RATIONALE](docs/RATIONALE.md)、検証は [TESTING](docs/TESTING.md)、未確認・手動実施状態は [OPEN_ISSUES](docs/OPEN_ISSUES.md)。利用者向け要約はルートREADMEで、仕様の正本ではない。
 - 食い違いや不足を見つけたら明示された規定・決定を調べ、製品判断が必要な意味変更は行わず報告する。
 - 文書は担当正本を更新し、同じ規則を複製しない。文書の新設・分割・統合・廃止、責務変更、情報の配置・保存判断を行う場合は [文書メンテナンス原則](docs/DOCUMENTATION.md)を読む。通常の仕様反映・誤字・既存リンク修正だけなら毎回の通読は不要。
@@ -22,6 +23,7 @@
 - 削除は、照合・検査 (Strict では全バイト比較も) と最終確認をした同じ削除用ハンドルへの `SetFileInformationByHandle(FileDispositionInfoEx)` の1か所だけ ([削除順序](docs/spec/filesystem.md#delete-flow))。`analyze` は削除用ハンドルを開かない。
 - flags は 0x3 (`DELETE | POSIX_SEMANTICS`)。`IGNORE_READONLY_ATTRIBUTE` は使わない。
 - パスベースの削除・改名 API (`File.Delete`、`DeleteFile`、`Directory.Delete`、`RemoveDirectory`、`MoveFile*` など) を `src/` に書かない。
+  - 唯一の例外: GUI が自分で一意な名前で新規作成した一時 `--entries` ファイルを、CLI プロセスの終了後 (起動失敗の場合はその判断後) に GUI が `File.Delete` で削除する1か所。target 内のファイル、利用者のファイル、ディレクトリ、それ以外の一時ファイルには使わず、Core・Windows・Cli には書かない。
 - 不明・判定不能は削除しない側 (FATAL または停止) に倒す。未知のエラーを推測で続行しない ([失敗の境界](docs/spec/filesystem.md#failure-boundary))。
 - 独自 ZIP パーサ、reflection、ntdll の未文書 API を使わない。ZIP の読み取りは `ZipArchive` のみ。
 - `Unextract.Core` は Win32 にも `Unextract.Windows` にも依存しない。
@@ -50,8 +52,12 @@ dotnet build unextract.sln
 dotnet test unextract.sln
 dotnet test tests/Unextract.E2E.Tests
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-e2e-tests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-smoke-tests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-ui-tests.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\clean-test-fixtures.ps1
 ```
+
+- `run-gui-ui-tests.ps1` (GUI の UI E2E) は通常の `dotnet test unextract.sln` に含まれない。ロックされていない対話デスクトップが必要で、実行中は人がマウスとキーボードに触れない。リモートデスクトップの最小化、サービスセッション、他の UI テストとの同時実行では行わない ([GUI検証](docs/TESTING.md#gui))。GUI の配布処理を変えたときも再実行する。
 
 - `dotnet run` は使わない。ビルド済みの exe を呼ぶ。
 - `dotnet publish` の出力先はリポジトリの外にする (`README.md` の「配布ビルド」)。

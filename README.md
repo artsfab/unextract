@@ -2,7 +2,7 @@
 
 本書は利用者向け要約です。仕様の正本は [SPECと担当仕様](docs/SPEC.md)、変更別の入口は [docs/README](docs/README.md)です。
 
-ZIP 内のファイルと照合して、target 内の対応するファイルだけを削除する Windows 11 用の CLI です。既定の Strict モードでは、**削除する直前に、ZIP 内のファイルと全バイト一致すると検証できたファイルだけ**を削除します。`--fast` を指定した Fast モードでは、**パスとサイズだけで判定し、内容は確認しません** (下記「Fast モード」)。
+ZIP 内のファイルと照合して、target 内の対応するファイルだけを削除する Windows 11 用の CLI です。既定の Strict モードでは、**削除する直前に、ZIP 内のファイルと全バイト一致すると検証できたファイルだけ**を削除します。`--fast` を指定した Fast モードでは、**パスとサイズだけで判定し、内容は確認しません** (下記「Fast モード」)。多数の ZIP をまとめて扱う GUI も同梱しています (下記「GUI」)。
 
 > **注意: `unextract delete` はファイルを実際に削除します。ごみ箱を使わない完全削除で、unextract に復旧手段はありません。** 必ず先に `unextract analyze` で結果を確認してください。
 
@@ -29,8 +29,8 @@ ZIP 内のファイルと照合して、target 内の対応するファイルだ
 ## 使い方
 
 ```text
-unextract analyze <archive.zip> --target <dir> [--fast]
-unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y]
+unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]
+unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
 ```
 
 | 引数 | 意味 |
@@ -41,8 +41,10 @@ unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--ye
 | `--fast` | その実行全体を Fast モードにします。指定しなければ Strict です |
 | `--entries <file>` | (`delete` のみ) 処理するエントリを、ファイルに列挙した ZIP エントリ名に限定します (下記「`--entries`」) |
 | `--yes`, `-y` | (`delete` のみ) 削除の確認 (`[y/N]`) だけを省略します。検証は省略しません |
+| `--jsonl` | 人間向け表示に代えて、ASCIIのJSON Linesを標準出力へ出します。`delete`では`--yes`/`-y`が必須です |
+| `--log <file>` | (`delete --jsonl` のみ) 標準出力と同じレコードを新規ログへ記録します。既存ファイルは上書きしません |
 
-不明なオプション、同じオプションの重複、`--target`・`--entries` の値が無い・空・`-` で始まる、ZIP の指定が無い・複数、`analyze` への `--entries`・`--yes` の指定は入力エラーです。
+不明なオプション、同じオプションの重複、`--target`・`--entries`・`--log` の値が無い・空・`-` で始まる、ZIP の指定が無い・複数、`analyze` への `--entries`・`--yes`・`--log` の指定は入力エラーです。機械モードの`delete`で`--yes`/`-y`がない場合や、`--jsonl`なしの`--log`も入力エラーです。
 
 ### 旧形式と `--dry-run` の廃止
 
@@ -78,7 +80,24 @@ unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--ye
 
 **`analyze` の結果は削除の許可証ではありません。** `delete` は `analyze` の結果を使わず、実行した時点の状態を改めて検証します。そのため、間にファイルが変わった場合や、ファイルを読めても削除の権限が無い場合などは、`analyze` と `delete` の結果が一致しないことがあります。
 
+## 機械可読出力と実行ログ
+
+```text
+unextract analyze archive.zip --target D:\work\extracted --jsonl
+unextract delete archive.zip --target D:\work\extracted --yes --jsonl --log run.jsonl
+```
+
+`--jsonl`では、Prepare成功時の`run`、エントリ完結後の`entry`、終了時の`result`をJSON Linesで出します。ヘッダー・確認・進捗・Fast警告の文は出さず、モードは`run.mode`で示します。機械モードの`delete`は明示的な`--yes`/`-y`を要求し、標準入力を読みません。削除の検証は通常実行と同じです。
+
+出力はASCIIだけでLF終端です。名前の`\uXXXX`はJSONとして復号してください。復号した`entry.name`はZIPのFullNameそのもので、UTF-8のentriesファイルの1行に使えます。`analyze`はZIP順でDIRECTORYを含み、`delete`は処理したファイルだけを出します。
+
+`--log`は機械モードの`delete`専用です。ログを新規作成し、各レコードをログへ渡してから標準出力へ出します。既存ファイルやログ作成失敗は削除前の入力エラーです。ディスク上のファイル以外 (`NUL`などのデバイスやパイプ) もログとして受け付けません。出力失敗を検出すると後続の処理を止めます。ログは監査・ジョブ再開用ではなく、電源断への耐性も保証しません。
+
+終了状態はまずプロセスの終了コードで判断します。終端`result`の配送やログのcloseが失敗すると、記録済み`result`が成功でも終了コードは1になります。`run`があり`result`がない場合の不明範囲と、出力途絶の解釈は[完了境界](docs/spec/machine-output.md#boundary)、レコードとログの例外規定は[機械可読出力仕様](docs/spec/machine-output.md)を参照してください。パイプ切断の検出を含む環境ごとの観測・未確認範囲は[OPEN_ISSUES](docs/OPEN_ISSUES.md#observations)によります。
+
 ## 動作の流れ
+
+以下の確認・表示の説明は、`--jsonl`なしの人間向け実行に適用します。判定・削除の手順は両経路共通です。
 
 ### analyze
 
@@ -192,7 +211,7 @@ Fast は、誤判定のリスクを利用者が受け入れたうえで、ZIP �
 - そのため、**同じパス・同じサイズで内容の違うファイル (利用者が変更したファイルを含む) も削除されることがあります。** 内容の一致が必要な場合は Strict を使ってください。
 - **内容の検証による FATAL・STOP は Fast では起きません**: Strict で FATAL・STOP になる「内容を読む ZIP エントリの異常」(暗号化、破損、CRC-32 不一致など) は、Fast では発生しません。**これは Fast が内容を読まないためであり、ZIP やエントリが健全であると確認されたという意味ではありません。**
 - **Strict と同じに行うこと**: パスの検査、大小文字まで一致する実名の確認、target の外へ出ないこと、reparse point・hardlink・ADS・属性による除外、File ID・親フォルダー・パスによる同じファイルであることの確認、削除直前の最終確認、判定できなければ削除しないこと、名前・構造・上限による中止、削除の方式、`DELETE_FAILED` と STOP の境界、終了コードは Strict と同じです。ZIP にない target 内のファイルは、Fast でも表示・削除しません。
-- **警告**: Fast では、パスとサイズだけで判定しており、内容の一致と ZIP からの正常な展開は確認していないことを示す警告を、`analyze` の結果の先頭、`delete` の先頭、`delete` の `[y/N]` の直前に表示します (`--yes` では確認が無いため、`delete` の先頭だけ)。Strict では表示しません。
+- **警告**: `--jsonl`なしのFast実行では、パスとサイズだけで判定しており、内容の一致と ZIP からの正常な展開は確認していないことを示す警告を、`analyze` の結果の先頭、`delete` の先頭、`delete` の `[y/N]` の直前に表示します (`--yes` では確認が無いため、`delete` の先頭だけ)。Strict では表示しません。
 - **性能**: Fast は ZIP の展開と target のファイルの読み取りを行わないため、内容の I/O はかかりません。
 
 ## 中止・停止する条件
@@ -258,7 +277,21 @@ FATAL のときは、判定済みのエントリの結果、原因のエント�
   - 読み取りはできても削除の権限が無いファイルは、`analyze` では分類されますが、`delete` では `DELETE_FAILED` などになります。
   - `ZipArchive` が ZIP を開くときのメモリ使用量 (Central Directory 全体の読み込み) は上限で制限できません。メモリ不足の場合は削除前に異常終了します。
 - **未確認の事項**: 実施状態・限定付き観測・次の確認は [OPEN_ISSUES](docs/OPEN_ISSUES.md) に集約しています。未確認を成立とは見なさず、判定できなければ削除しない側へ倒します。非NTFS・USN機能のないFSは対象外です。
-- JSON 出力、ログファイル、詳細な終了コード、上限を変更するオプションはありません。
+- 詳細な終了コード体系と、上限を変更するオプションはありません。詳細な終了原因は`--jsonl`の`result`に記録します。
+
+## GUI (`unextract-gui.exe`)
+
+大量の ZIP を保管しているフォルダーをまとめて整理するための GUI です。GUI 自身は一致判定や削除の安全性を判断せず、同梱の `cli\unextract.exe` を1件ずつ実行して、その結果を表示します。仕様の正本は [GUI仕様](docs/spec/gui.md) です。
+
+- **検索**: 選んだフォルダー (既定でサブフォルダーも) から ZIP を探します。各 ZIP (Archive) に、展開先のフォルダー (Target) を1つ以上追加します。Target は「Archiveと同じフォルダー」「Archive名のフォルダー」またはカスタム (固定パス、または `{{archive.dir}}`・`{{archive.name}}` を含むテンプレート) で指定でき、検索した全 Archive へ一括で追加することもできます。
+- **画面**: 左が Archive とその Target の一覧 (状態と削除候補の要約つき)、右が一覧で選んだ項目の詳細 (解析結果の全エントリ、削除結果、操作できない理由) です。詳細を見ても、チェック (一括操作の対象) は変わりません。
+- **解析**: Target 単位、Archive 配下の未解析、選択中の未解析を1件ずつ順に実行します (キャンセル可)。結果は分類・パスで絞り込め、削除候補の論理サイズの合計を表示します (実際に空く容量とは一致しないことがあります)。
+- **モード**: Strict (初期値) と Fast (内容を比較しない旨の警告つき) です。解析結果があるときに変えると、確認のうえ全結果を破棄します。
+- **削除**: 選択中の解析済み Target を一括で1回確認 (削除する Target の全件、表示の絞り込みで隠れている選択済み Target、除外した Target と理由、Target 数・最大候補件数・論理サイズ、完全削除で取り消せないこと、Fast の非保証) してから、1 Target ずつ実行します。削除するのは解析時に削除候補だったファイルだけで、CLI が実行時に再検証します。1つの Target がエラーで終わると、後続は開始せず「未実行」になります。一度削除を実行した Target は、再解析するまで再び削除できません。
+- **結果**: Target ごとに直前の削除結果 (削除成功件数・論理サイズ、停止理由、削除された可能性のある対象、結果不明) を表示します。
+- **実行ログ**: 削除ごとに `%LOCALAPPDATA%\unextract\logs\delete-<UTC開始時刻>-<通し番号>.jsonl` が残ります (CLI の `--jsonl` と同じ内容)。GUI は自動では消しません。画面から保存フォルダーを開けます。
+- **終了**: 削除の実行中に閉じても実行中の CLI は止めず、現在の Target の削除が終わってから (後続は開始せずに) 閉じます。
+- **保存するもの**: 最後に検索したフォルダー1件だけを `%LOCALAPPDATA%\unextract\settings.json` に保存します。Target・解析結果・削除結果は保存せず、次回起動時に復元しません。
 
 ## 開発者向け
 
@@ -291,6 +324,29 @@ wrapper は OS temp 直下の `unextract-e2e-publish-<GUID>` に Release / `win-
 Ctrl+C、進捗表示、コードページやフォント・折り返し・視認性など実端末での確認手順は [`docs/MANUAL_TESTS.md`](docs/MANUAL_TESTS.md) にあります。
 
 ### 配布ビルド
+
+通常buildのGUIの起動先は `src/Unextract.Gui/bin/<構成>/net10.0-windows/unextract-gui.exe` です (同じフォルダーの `cli\` に CLI がコピーされます)。
+
+GUIとCLIの一括配布は、新規のリポジトリ外ディレクトリを指定します。GUIはwin-x64の自己完結型フォルダー配布で、`unextract-gui.exe` と `cli\unextract.exe` (CLIは単独publishと同じ単一ファイルの自己完結型) だけで起動できます。CLIの相対位置は通常buildの出力 (`bin/<構成>/net10.0-windows/cli/`) と同じです。フォルダー全体を配布してください。インストーラーと自動更新はありません。`cli\unextract.exe` が無い、または出力が非互換のときも、GUIは起動し、解析・削除を開始できない理由と実行ログの確認先を画面に示します。テスト専用の偽CLI・FlaUIなどは配布物に入りません (`publish-gui.ps1` が検査します)。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish-gui.ps1 -OutputDirectory <リポジトリ外の新規出力先>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-gui-package.ps1 -PackageDirectory <配布先>
+```
+
+配布物の作成・GUIの起動と正常終了・CLI欠落時の起動・同梱CLIのJSONL起動をまとめて確認するには、次を使います。削除ジョブは実行せず、日本語と空白を含む自作tempだけを終了時に後始末します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-smoke-tests.ps1
+```
+
+同じ配布処理で作った配布物に対するUI E2E (FlaUI。配布物の `unextract-gui.exe` を別プロセスで操作し、実CLIの代わりに偽CLIを使う) は次で実行します。ロックされていない対話デスクトップが必要で、実行中はマウスとキーボードに触れないでください。通常の `dotnet test unextract.sln` には含まれません。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-ui-tests.ps1
+```
+
+GUI関連のプロジェクト (`Unextract.Gui`、`Unextract.Gui.Tests`、`Unextract.Gui.FakeCli`、`Unextract.Gui.UiTests`) は `unextract.sln` に含まれ、CIの `dotnet build -c Release` (警告はエラー) でビルドされます。`dotnet test -c Release --no-build` で実行されるのは `Unextract.Gui.Tests` までで、UI E2Eは実行されません (CIでのUI E2Eと配布スモークは設定していません)。CLI単独のpublish版E2Eは従来どおり上の手順 (CIも同じ) で、GUI配布の検証は上の2つのスクリプトです。リリース番号 (`Version`) はGUIの実装では変更していません。
 
 `src/Unextract.Cli` は単一ファイルの自己完結型 (win-x64、トリミングなし、出力名 `unextract.exe`) として publish できます。バージョンは `src/Unextract.Cli/Unextract.Cli.csproj` の `Version` の1か所です。
 

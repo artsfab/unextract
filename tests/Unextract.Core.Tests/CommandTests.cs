@@ -2,6 +2,7 @@ using Unextract.Core.Analysis;
 using Unextract.Core.Commands;
 using Unextract.Core.Deletion;
 using Unextract.Core.Display;
+using Unextract.Core.Entries;
 using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Tests.Fakes;
@@ -543,6 +544,35 @@ public class CommandTests
 
             var prompt = new ScriptedPrompt(true, "y");
             var run = h.Delete(entriesPath: entries, yes: false, prompt: prompt);
+
+            var failure = Assert.IsType<PrepareFailure>(run.Outcome.PreparationFailure);
+            var expectedStage = stage switch
+            {
+                "archive" => PrepareStage.Archive,
+                "entries-missing" or "entries-format" => PrepareStage.Entries,
+                "protected" => PrepareStage.ProtectedLocations,
+                "target" => PrepareStage.TargetRoot,
+                "zip-validation" => PrepareStage.ZipValidation,
+                "identity" => PrepareStage.ArchiveIdentity,
+                "entries-match" => PrepareStage.EntriesMatch,
+                _ => throw new ArgumentOutOfRangeException(nameof(stage)),
+            };
+            Assert.Equal(expectedStage, failure.Stage);
+            Assert.Equal(stage is "archive" or "zip-validation" or "identity", failure.IsFatal);
+            Assert.Same(run.Outcome.PrepareError, failure.Fatal);
+            Assert.Equal(run.ErrorLines[0], failure.Message);
+            Assert.Equal(stage switch { "zip-validation" => 3, "identity" or "entries-match" => 2, _ => (int?)null }, failure.TotalEntries);
+            if (stage is "entries-missing" or "entries-format" or "entries-match")
+            {
+                var entriesError = Assert.IsType<EntriesError>(failure.EntriesError);
+                Assert.Equal(stage switch { "entries-missing" => EntriesErrorKind.Unreadable, "entries-format" => EntriesErrorKind.EmptyLine, _ => EntriesErrorKind.NoMatch }, entriesError.Kind);
+                Assert.Equal(stage == "entries-missing" ? (int?)null : 2, entriesError.LineNumber);
+                Assert.Null(failure.Fatal);
+            }
+            else
+            {
+                Assert.Null(failure.EntriesError);
+            }
 
             Assert.Equal(ExitStatus.Error, run.Outcome.Status);
             Assert.Null(run.Outcome.Report);

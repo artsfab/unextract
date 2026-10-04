@@ -15,7 +15,7 @@ internal enum ContentVerdict
     NotRead,
 }
 
-internal readonly record struct ContentOutcome(ContentVerdict Verdict, FatalKind? FatalKind = null, string? Detail = null)
+internal readonly record struct ContentOutcome(ContentVerdict Verdict, FatalKind? FatalKind = null, string? Detail = null, int? Win32Error = null)
 {
     public static ContentOutcome Match { get; } = new(ContentVerdict.Match);
 
@@ -23,7 +23,7 @@ internal readonly record struct ContentOutcome(ContentVerdict Verdict, FatalKind
 
     public static ContentOutcome NotRead { get; } = new(ContentVerdict.NotRead);
 
-    public static ContentOutcome Fail(FatalKind kind, string? detail = null) => new(ContentVerdict.Fatal, kind, detail);
+    public static ContentOutcome Fail(FatalKind kind, string? detail = null, int? win32Error = null) => new(ContentVerdict.Fatal, kind, detail, win32Error);
 }
 
 // エントリ内容の検証基準 (docs/spec/zip.md#verification) による比較。analyze と delete が同じ実装を共有し (docs/ARCHITECTURE.md#dependencies)、1回の実行で1つのインスタンスを使う。
@@ -187,7 +187,7 @@ public sealed class ContentComparer
             var result = target.Read(_targetBuffer.AsSpan(filled, count - filled));
             if (!result.Succeeded)
             {
-                return (filled, ContentOutcome.Fail(FatalKind.TargetReadFailed, result.Describe()));
+                return (filled, ContentOutcome.Fail(FatalKind.TargetReadFailed, result.Describe(), result.Error));
             }
 
             if (result.Value == 0)

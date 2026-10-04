@@ -21,7 +21,7 @@ internal enum ResolutionKind
 
 // docs/spec/filesystem.md#resolution の手順1・2 の結果。Found のとき Item は最終成分の列挙項目、ParentFileId は手順1でたどった親ディレクトリの File ID
 // (target ルート直下なら target ルートの File ID、それ以外は親を見つけた列挙項目の File ID)。
-internal readonly record struct Resolution(ResolutionKind Kind, DirectoryItem Item, FileId ParentFileId, FatalKind? FatalKind, string? Detail)
+internal readonly record struct Resolution(ResolutionKind Kind, DirectoryItem Item, FileId ParentFileId, FatalKind? FatalKind, string? Detail, int? Win32Error = null)
 {
     public static Resolution Missing { get; } = new(ResolutionKind.Missing, default, default, null, null);
 
@@ -29,7 +29,7 @@ internal readonly record struct Resolution(ResolutionKind Kind, DirectoryItem It
 
     public static Resolution Found(DirectoryItem item, FileId parentFileId) => new(ResolutionKind.Found, item, parentFileId, null, null);
 
-    public static Resolution Fail(FatalKind kind, string? detail) => new(ResolutionKind.Failed, default, default, kind, detail);
+    public static Resolution Fail(FatalKind kind, string? detail, int? win32Error = null) => new(ResolutionKind.Failed, default, default, kind, detail, win32Error);
 }
 
 // 親成分と最終成分の解決 (docs/spec/filesystem.md#resolution の手順1・2、docs/spec/filesystem.md#real-names)。analyze と delete が共有する。
@@ -66,7 +66,7 @@ internal sealed class TargetResolver
             switch (lookup.Kind)
             {
                 case LookupKind.Failed:
-                    return Resolution.Fail(lookup.FatalKind!.Value, lookup.Detail);
+                    return Resolution.Fail(lookup.FatalKind!.Value, lookup.Detail, lookup.Win32Error);
                 case LookupKind.NotFound:
                     // 存在しない、または大小文字だけ違う (序数比較で一致しない)。
                     return Resolution.Missing;
@@ -98,7 +98,7 @@ internal sealed class TargetResolver
         var final = Names.Find(Prefix(components, last), directoryItem, components[last]);
         return final.Kind switch
         {
-            LookupKind.Failed => Resolution.Fail(final.FatalKind!.Value, final.Detail),
+            LookupKind.Failed => Resolution.Fail(final.FatalKind!.Value, final.Detail, final.Win32Error),
             LookupKind.NotFound => Resolution.Missing,
             _ => Resolution.Found(final.Item, directoryItem?.FileId ?? _root.Id.FileId),
         };

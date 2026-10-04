@@ -1,0 +1,42 @@
+<Window x:Class="Unextract.Gui.Views.TargetEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Unextract.Gui.Views"
+        Title="Target設定" Width="660" SizeToContent="Height" ResizeMode="NoResize"
+        FontFamily="Yu Gothic UI" FontSize="14" ShowInTaskbar="False" WindowStartupLocation="CenterOwner"
+        Background="White" UseLayoutRounding="True" AutomationProperties.AutomationId="TargetEditorWindow">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <local:Theme />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <StackPanel Margin="20,16,20,16">
+        <TextBlock x:Name="HeadingText" Style="{StaticResource SectionTitle}" AutomationProperties.AutomationId="TargetEditorHeading" />
+        <TextBox x:Name="ScopeText" Style="{StaticResource ReadOnlyText}" AutomationProperties.AutomationId="TargetEditorScope" Margin="0,0,0,10" />
+        <TextBlock Text="指定方法" Style="{StaticResource FieldLabel}" />
+        <ComboBox x:Name="PresetCombo" AutomationProperties.AutomationId="TargetEditorPresetCombo" AutomationProperties.Name="指定方法"
+                  SelectionChanged="PresetChanged" Margin="0,0,0,8">
+            <ComboBoxItem Content="Archiveと同じディレクトリ　{{archive.dir}}" />
+            <ComboBoxItem Content="Archive名のディレクトリ　{{archive.dir}}\{{archive.name}}" />
+            <ComboBoxItem Content="カスタム（固定のパス、または変数を含むテンプレート）" />
+        </ComboBox>
+        <TextBlock Text="Target（パスまたはテンプレート）" Style="{StaticResource FieldLabel}" />
+        <TextBox x:Name="TemplateBox" AutomationProperties.AutomationId="TargetEditorTemplateBox" AutomationProperties.Name="Target（パスまたはテンプレート）"
+                 TextChanged="TemplateChanged" Margin="0,0,0,6" />
+        <TextBlock Style="{StaticResource Subtle}" FontSize="12"
+                   Text="使える変数は {{archive.dir}}（Archiveのあるディレクトリ）と {{archive.name}}（Archiveのファイル名から最後の拡張子を除いたもの）の2つだけです（大文字・小文字を区別）。環境変数や ~ は展開しません。" />
+        <Border x:Name="PreviewPanel" Margin="0,10,0,0" Padding="10,6" CornerRadius="3" BorderThickness="2,1,1,1">
+            <TextBlock x:Name="PreviewText" TextWrapping="Wrap" AutomationProperties.AutomationId="TargetEditorPreview" />
+        </Border>
+        <TextBlock Style="{StaticResource Subtle}" FontSize="12" Margin="0,8,0,0"
+                   Text="ここで確認するのはパスの形式だけです。存在しないTargetも登録でき、Targetとして使えるかは解析のときにCLIが判定します。" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button x:Name="OkButton" IsDefault="True" Click="OkClicked" MinWidth="96" Style="{StaticResource PrimaryButton}"
+                    AutomationProperties.AutomationId="TargetEditorOkButton" />
+            <Button x:Name="CancelButton" Content="取消" IsCancel="True" MinWidth="96" Margin="0,3,0,3"
+                    AutomationProperties.AutomationId="TargetEditorCancelButton" />
+        </StackPanel>
+    </StackPanel>
+</Window>

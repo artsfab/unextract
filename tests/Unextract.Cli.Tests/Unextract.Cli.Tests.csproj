@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\Unextract.Core.Tests\Fakes\FakeFileSystem.cs" Link="Fakes\FakeFileSystem.cs" />
   </ItemGroup>
 
 </Project>
