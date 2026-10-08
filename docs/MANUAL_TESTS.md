@@ -1,6 +1,6 @@
 # 手動テスト手順
 
-役割: 現行M01〜M14のfixture・実端末操作・観測方法 (M14はGUI)。該当項目を実施するときに読む。実施状態は[OPEN_ISSUES](OPEN_ISSUES.md#manual-status)だけに記録する。
+役割: 現行M01〜M15のfixture・実端末操作・観測方法 (M14はGUI、M15はRARのDLLの導入と実物のRAR)。該当項目を実施するときに読む。実施状態は[OPEN_ISSUES](OPEN_ISSUES.md#manual-status)だけに記録する。
 
 [前提](#prerequisites) / [fixture](#fixtures) / [項目](#cases) / [記録](#recording) / [手動に残す理由](#manual-purpose)
 
@@ -296,6 +296,21 @@ py scripts\make_manual_fixtures.py "$exe"
 - 期待結果: 各手順で指摘が無いこと。`yn-y` では一致した `same1.txt`・`same2.txt`・`docs\deep.txt` だけが消え、`changed.txt`・`unrelated.txt` が残り、`%LOCALAPPDATA%\unextract\logs\` に命名どおりのログができる。指摘が出たら画面確認へ戻って直し、影響する手順を再確認する。
 - 記録: 手順ごとに実施・未実施・前提不成立・失敗を分けて [OPEN_ISSUES](OPEN_ISSUES.md#manual-status) に記録する。合格は実データ・実 GPU での性能、実 CLI 出力を受信している間の長時間の体感、既存の安全性の未確認事項を保証しない。
 
+<a id="m15"></a>
+### M15: UnRAR.dll の導入と WinRAR で作った RAR (実端末)
+
+- 目的: 利用者向けの [UnRAR.dll の導入手順](../README.md#rar-dll) がそのとおりに実行でき、DLL の有無で RAR だけが変わること、WinRAR で作って WinRAR で展開した実際のフォルダーで RAR の analyze/delete が期待どおりになることを人間が確かめる。自動試験の RAR は生成器 (Stored) で、WinRAR の実物の受理・拒否・内容検証はローカル検証 ([実物のRAR](TESTING.md#rar-real)) で確かめるので、ここでは利用者の導入手順と実際の操作を確かめる。
+- 実施タイミング: README の導入手順、DLL の版、RAR の配置・読み込み元を変えたとき。
+- 前提: WinRAR (試用期間内を含め、そのライセンス条件の範囲内。RAR4 は対応する旧版) を使う。作った RAR はローカル検証専用で、リポジトリに収録しない ([実物のRAR](TESTING.md#rar-real))。WinRAR が使えない環境では行わず「前提不成立」と記録する。CLI は `dotnet publish` (README の「配布ビルド」) のリポジトリ外の出力、GUI は `publish-gui.ps1` の配布物を使う。fixture は自作データだけで作り、実在のデータを使わない。
+- 手順:
+  1. DLL を置かずに、自作フォルダー (例: `src\a.txt`、`src\sub\日本語.txt`、`src\b.bin` (数 MB)) を WinRAR で RAR5 (既定の圧縮) にした `archive.rar` と、同じフォルダーを WinRAR で `target\` に展開したものに対して `unextract analyze archive.rar --target target` を実行する。FATAL の説明に「見つかりません」・読み込み元の絶対パス (exe と同じフォルダーの `UnRAR64.dll`)・必要な版・ZIP に影響しないことが出て、終了コード 1 であること。同じ exe で ZIP の analyze が成功すること。
+  2. README の手順どおりに `unrardll-723.exe` から `x64\UnRAR64.dll` を取り出し、SHA-256 を確かめて exe と同じフォルダーに置く。手順1の analyze が全件 `MATCHED`・`DIRECTORY` になること。`target\a.txt` の内容を変えて `MODIFIED` になること。
+  3. 手順2の後、`delete` で一致したファイルだけが消え、変えたファイル・フォルダーが残ること (**target の実パスが fixture であることを目で確かめてから承認**)。
+  4. GUI の配布物の `cli\` に同じ DLL を置き、手順1と同じ作り方の新しい fixture を GUI で検索 (`.rar` が見つかること)・解析・削除する。`cli\UnRAR64.dll` を外すと、解析の失敗の詳細に CLI の説明が出ること。
+  5. (RAR4) 対応する旧版の WinRAR で RAR4 を作り、手順2と同じ analyze をする。
+- 期待結果: 各手順の記載どおり。DLL を置く前後で ZIP の動作が変わらない。
+- 記録: 手順ごとに実施・未実施・前提不成立・失敗を分けて [OPEN_ISSUES](OPEN_ISSUES.md#manual-status) に記録する。使った WinRAR の版とライセンスの状態も残す。
+
 
 <a id="recording"></a>
 ## 結果の記録方法
@@ -325,6 +340,6 @@ exe を別プロセスとして起動する E2E (`tests/Unextract.E2E.Tests`、[
 | 実際の `[y/N]` → `n` → 終了コード 2・非削除、Fast の警告の順序 | X28 (PTY) |
 | 逐次処理中の競合 (プロセス内のフックで注入) | `Unextract.Windows.Tests` の S21〜S29 |
 
-GUI の機能は Gui.Tests と UI E2E ([TESTINGのGUI](TESTING.md#gui)) で自動化している。UI E2E は OS の表示拡大率を変えず、写真の評価も論理寸法で行うため、実際の拡大率・モニター間の移動・エクスプローラーと OS ダイアログでの実操作・全体の使い勝手を M14 に残す。
+GUI の機能は Gui.Tests と UI E2E ([TESTINGのGUI](TESTING.md#gui)) で自動化している。UI E2E は OS の表示拡大率を変えず、写真の評価も論理寸法で行うため、実際の拡大率・モニター間の移動・エクスプローラーと OS ダイアログでの実操作・全体の使い勝手を M14 に残す。RAR の自動試験は生成器 (Stored) の RAR で行い、WinRAR の実物はスクリプトによるローカル検証で確かめるため、利用者による DLL の導入手順と、WinRAR で作って展開した実際のフォルダーでの動作を M15 に残す。
 
 手動に残した理由: X 系の E2E はリダイレクト実行で非対話であり、PTY は機能の確認に限る。実端末での操作 (M01〜M03、M07)、Ctrl+C (M04、M10)、進捗と逐次結果の見え方 (M05)、コードページとフォントによる表示 (M06)、警告の視認性 (M08)、PowerShell の挙動 (M13) は手動で確認する。M09・M11・M12 のうちM12はS26/S37に対する近似補助である。M09は設計非依存の同時open調査、M11は手順未確立であり、S26/S37/S38が代替したとは扱わない。

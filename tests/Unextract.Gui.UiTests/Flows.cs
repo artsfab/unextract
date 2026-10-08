@@ -9,7 +9,7 @@ namespace Unextract.Gui.UiTests;
 internal static class Flows
 {
     public const string FastWarningText =
-        "Fastは内容の一致を確認しません。同じパス・同じサイズの変更されたファイルも削除候補になり、ZIPから正常に展開できることも確認しません。";
+        "Fastは内容の一致を確認しません。同じパス・同じサイズの変更されたファイルも削除候補になり、アーカイブから正常に展開できることも確認しません。";
 
     public static string Status(this GuiSession ui) => ui.TextOf("StatusText");
 

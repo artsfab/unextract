@@ -49,7 +49,7 @@ internal sealed class ArchiveSearch(IArchiveSearchFileSystem fileSystem) : IArch
                         {
                             if (recursive) directories.Push(path);
                         }
-                        else if (Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                        else if (IsArchive(path))
                             archives.Add(fileSystem.ReadArchive(path));
                     }
                     catch (Exception e) when (IsInspectionFailure(e))
@@ -67,6 +67,13 @@ internal sealed class ArchiveSearch(IArchiveSearchFileSystem fileSystem) : IArch
         archives.Sort((a, b) => StringComparer.Ordinal.Compare(a.Path, b.Path));
         diagnostics.Sort((a, b) => StringComparer.Ordinal.Compare(a.Path, b.Path));
         return new(archives.AsReadOnly(), diagnostics.AsReadOnly());
+    }
+
+    // ZIP and RAR by extension only (case-insensitive); contents are never read and the format is never judged here.
+    internal static bool IsArchive(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".zip", StringComparison.OrdinalIgnoreCase) || extension.Equals(".rar", StringComparison.OrdinalIgnoreCase);
     }
 
     public Task<TargetObservation> ObserveTargetAsync(string path) => Task.Run(() =>
@@ -110,7 +117,7 @@ internal sealed class ArchiveSearchFileSystem : IArchiveSearchFileSystem
         var file = new FileInfo(path);
         file.Refresh();
         // FileInfo timestamps can return a sentinel for a vanished file. Never publish it as metadata.
-        if (!file.Exists) throw new FileNotFoundException("検索中にZIPが消失したか、属性を取得できませんでした。", path);
+        if (!file.Exists) throw new FileNotFoundException("検索中にアーカイブが消失したか、属性を取得できませんでした。", path);
         return new(path, file.Length, file.LastWriteTimeUtc);
     }
 }

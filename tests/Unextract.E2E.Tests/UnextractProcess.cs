@@ -31,9 +31,12 @@ public static class UnextractProcess
     public static string ExePath => Exe.Value;
 
     // stdin: null なら何も書かずに閉じる (空の入力・EOF)。
-    public static ProcessResult Run(string workingDirectory, string? stdin, params string[] args)
+    public static ProcessResult Run(string workingDirectory, string? stdin, params string[] args) => RunExe(ExePath, workingDirectory, stdin, args);
+
+    // exe を指定して実行する (UnRAR64.dll を隣に置いた複製の exe など。RarE2ETests)。
+    public static ProcessResult RunExe(string exe, string workingDirectory, string? stdin, params string[] args)
     {
-        var info = new ProcessStartInfo(ExePath)
+        var info = new ProcessStartInfo(exe)
         {
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
@@ -49,7 +52,7 @@ public static class UnextractProcess
             info.ArgumentList.Add(arg);
         }
 
-        using var process = Process.Start(info) ?? throw new InvalidOperationException($"起動できない: {ExePath}");
+        using var process = Process.Start(info) ?? throw new InvalidOperationException($"起動できない: {exe}");
 
         // 出力の読み取りを先に始める (パイプの詰まりで子が止まらないように)。
         var stdout = process.StandardOutput.ReadToEndAsync();

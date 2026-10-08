@@ -19,6 +19,18 @@ jobs:
         with:
           global-json-file: global.json
 
+      # RAR のテストが使う採用版の UnRAR64.dll を rarlab から取得し、外側の exe と DLL の SHA-256 を照合してリポジトリ外 (runner.temp) に置く
+      # (docs/TESTING.md#rar)。DLL はリポジトリにも配布物にも入れない (docs/spec/rar.md#pinning)。取得・照合に失敗したらこのステップで CI を失敗にする
+      # (RAR のテストを成功扱いにしない)。以降のステップ (Test・E2E) は UNEXTRACT_TEST_UNRAR_DLL で DLL を読む。
+      # GITHUB_ENV への追記は BOM を付けない (Windows PowerShell 5.1 の Out-File -Encoding utf8 は BOM を付ける)。
+      - name: UnRAR.dll for RAR tests (pinned, outside the repository)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = & ./scripts/get-unrar-dll.ps1 -OutputDirectory "${{ runner.temp }}\unrar"
+          if ([string]::IsNullOrEmpty($dll) -or -not (Test-Path -LiteralPath $dll -PathType Leaf)) { throw 'UnRAR64.dll was not prepared.' }
+          [System.IO.File]::AppendAllText($env:GITHUB_ENV, "UNEXTRACT_TEST_UNRAR_DLL=$dll`n")
+
       # TreatWarningsAsErrors (Directory.Build.props) により、警告が1件でもあればビルドが失敗する。
       - name: Build
         run: dotnet build -c Release

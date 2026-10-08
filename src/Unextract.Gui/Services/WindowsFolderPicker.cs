@@ -9,7 +9,7 @@ internal sealed class WindowsFolderPicker : IFolderPicker
     {
         var dialog = new OpenFolderDialog
         {
-            Title = "ZIPを検索するディレクトリを選択",
+            Title = "アーカイブを検索するディレクトリを選択",
             Multiselect = false,
         };
         if (!string.IsNullOrEmpty(initialDirectory)) dialog.InitialDirectory = initialDirectory;

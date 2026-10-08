@@ -1,3 +1,4 @@
+using Unextract.Core.Rar;
 using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Zip;
@@ -7,6 +8,7 @@ namespace Unextract.Core.Analysis;
 // analyze のエントリ処理の入力。Entries は ZIP 事前検証 (ZipPrevalidator) を通過した全エントリ (ZIP 内の順序)。
 // Progress は (n, total) で各エントリの判定の前に呼ばれる (Checking n / total)。Mode は実行全体のモード (docs/SPEC.md#modes)。
 // OnResult は Classify のハンドルを閉じた後、DIRECTORY を含めて ZIP 順に呼ぶ。FATAL 原因は通知しない。
+// Session は Strict の RAR の内容読み取りのセッション (docs/spec/rar.md#session。Prepared が所有し、ここでは借用する)。ZIP と Fast では null。
 public sealed record AnalyzeRequest(
     IReadOnlyList<ValidatedZipEntry> Entries,
     IZipContentProvider Contents,
@@ -16,7 +18,8 @@ public sealed record AnalyzeRequest(
     Limits Limits,
     Action<int, int>? Progress = null,
     RunMode Mode = RunMode.Strict,
-    Action<EntryResult>? OnResult = null);
+    Action<EntryResult>? OnResult = null,
+    IRarReadSession? Session = null);
 
 // analyze のエントリ処理 (docs/SPEC.md#execution、docs/spec/filesystem.md#classification、docs/spec/filesystem.md#special-files)。完全な非破壊操作で、比較用ハンドルだけを使う。
 // 削除の能力を型として持たない (IDeletionProbe を受け取らない。docs/ARCHITECTURE.md#dependencies)。削除候補・スナップショットを作らない。
@@ -57,6 +60,13 @@ internal sealed class AnalyzeRun
 
             var entry = entries[i];
             var reference = new ZipEntryRef(entry.Entry.Index, entry.Entry.FullName);
+
+            // RAR: 全エントリ (ディレクトリを含む) の処理の最初に、セッションを前進させる。失敗はこのエントリの FATAL (target には触れていない)。
+            if (_request.Session?.Advance(entry.Entry.Index) is { Succeeded: false } advance)
+            {
+                return new AnalysisResult(entries.Count, results, new FatalError(advance.FailureKind!.Value, reference, advance.Describe(), Format: ArchiveFormat.Rar));
+            }
+
             var expectedPath = _request.Root.ExpectedPath(entry.Components);
             EntryResult result;
             if (entry.IsDirectory)
@@ -128,7 +138,7 @@ internal sealed class AnalyzeRun
         }
 
         // 手順8: 内容検証 (Strict と Fast の唯一の分岐。Strict は同じハンドルから読んで1回だけ比較する)。
-        var compared = _comparer.Verify(_request.Mode, _request.Contents, entry.Entry.Index, handle);
+        var compared = _comparer.Verify(_request.Mode, _request.Contents, _request.Session, entry.Entry.Index, handle);
         return compared.Verdict switch
         {
             ContentVerdict.Fatal => Outcome.Fail(compared.FatalKind!.Value, compared.Detail, EntryStep.Compare, compared.Win32Error),

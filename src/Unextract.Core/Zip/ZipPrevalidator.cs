@@ -61,32 +61,19 @@ public static class ZipPrevalidator
     private sealed class State(Limits limits)
     {
         private readonly ZipStructure _structure = new();
-        private long _count;
+        private readonly EntryBudget _budget = new(limits);
 
         // 合計は桁あふれしない型で加算する。
-        private Int128 _metadataBytes;
-
         public Int128 DeclaredTotal { get; private set; }
 
         public EntryResult Check(ZipEntryInfo entry)
         {
             var name = entry.FullName;
 
-            _count++;
-            if (_count > limits.MaxEntries)
+            // エントリ総数・名前長・メタデータ総量。RAR では列挙中に同じ検査を通過済みで、ここでは必ず通る。
+            if (_budget.Add(name.Length) is { } budgetError)
             {
-                return Fail(FatalKind.TooManyEntries);
-            }
-
-            if (name.Length > limits.MaxNameLength)
-            {
-                return Fail(FatalKind.NameTooLong);
-            }
-
-            _metadataBytes += ((Int128)name.Length * sizeof(char)) + limits.MetadataBytesPerEntry;
-            if (_metadataBytes > limits.MaxMetadataBytes)
-            {
-                return Fail(FatalKind.MetadataTooLarge);
+                return Fail(budgetError);
             }
 
             // 不正な UTF-8 は例外にならず U+FFFD に置換されるため、復号後の名前で検出する (docs/spec/zip.md#decoding)。
@@ -106,14 +93,15 @@ public static class ZipPrevalidator
                 return Fail(FatalKind.PathTooDeep);
             }
 
-            // ZIP の特殊エントリ (docs/spec/zip.md#types、docs/RATIONALE.md#real-names)。
-            if (ZipEntryTypeRules.Check(entry, path.IsDirectory) is { } typeError)
+            // ZIP の特殊エントリ (docs/spec/zip.md#types、docs/RATIONALE.md#real-names)。RAR のエントリの種別・属性は RarPrevalidator が検査済み
+            // (docs/spec/rar.md#types)。
+            if (entry.Rar is null && ZipEntryTypeRules.Check(entry, path.IsDirectory) is { } typeError)
             {
                 return Fail(typeError);
             }
 
             // 宣言展開量は MISSING 相当を含む全ファイルエントリに適用する (docs/spec/zip.md#limits、docs/RATIONALE.md#zip-limits)。
-            // ディレクトリエントリの Length は上で 0 であることを確認済み。
+            // ディレクトリエントリの Length は上 (RAR は RarPrevalidator) で 0 であることを確認済み。
             if (!path.IsDirectory)
             {
                 if (entry.Length < 0)

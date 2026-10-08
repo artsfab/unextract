@@ -68,6 +68,12 @@ internal sealed class CommandHarness
     // ZIP を開く処理の差し替え (null なら _zip をメモリ上で開く)。
     public Func<string, ZipOpenResult>? OpenArchive { get; set; }
 
+    // RAR (.rar) を開く処理。null なら CommandContext に渡さない。
+    public Func<string, Limits, ZipOpenResult>? OpenRarArchive { get; set; }
+
+    // コマンドに渡すアーカイブのパス (RAR の試験では .rar にする)。
+    public string Archive { get; set; } = ArchivePath;
+
     public CommandNotifications? Notifications { get; set; }
 
     // 直前の実行の ZIP の内容の呼び出し記録。
@@ -88,7 +94,7 @@ internal sealed class CommandHarness
     {
         var (output, error, context) = Context();
         var start = Fs.Calls.Count;
-        var outcome = AnalyzeCommand.Run(new AnalyzeCommandRequest(ArchivePath, TargetPath, Mode, context, afterResults));
+        var outcome = AnalyzeCommand.Run(new AnalyzeCommandRequest(Archive, TargetPath, Mode, context, afterResults));
 
         // analyze は非破壊: 削除用オープン・識別確認・削除の指示を一度も呼ばない。比較用ハンドルは同時に1つまで。
         Assert.DoesNotContain(Fs.Calls.Skip(start), PipelineHarness.IsDeletionCall);
@@ -109,7 +115,7 @@ internal sealed class CommandHarness
         var start = Fs.Calls.Count;
         var comparisons = Fs.ComparisonOpenCount;
         var outcome = DeleteCommand.Run(new DeleteCommandRequest(
-            ArchivePath,
+            Archive,
             TargetPath,
             Mode,
             entriesPath,
@@ -156,7 +162,8 @@ internal sealed class CommandHarness
                 Contents = new RecordingContentProvider(source);
                 return Contents;
             },
-            Notifications);
+            Notifications,
+            OpenRarArchive);
         return (output, error, context);
     }
 }

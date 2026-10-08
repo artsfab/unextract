@@ -35,6 +35,9 @@ try {
     $testOnly = @(Get-ChildItem -LiteralPath $destination -Recurse -File |
         Where-Object { $_.Name -match '^(unextract-fake-cli|Unextract\.Gui\.(FakeCli|UiTests|Tests))|^FlaUI\.' })
     if ($testOnly.Count -gt 0) { throw "Test-only file in the distribution: $($testOnly[0].FullName)" }
+    # UnRAR.dll is not shipped; users place cli\UnRAR64.dll themselves (docs/spec/rar.md#pinning).
+    $unrar = @(Get-ChildItem -LiteralPath $destination -Recurse -File | Where-Object { $_.Name -match '^unrar' })
+    if ($unrar.Count -gt 0) { throw "UnRAR.dll must not be in the distribution: $($unrar[0].FullName)" }
     Write-Output "GUI distribution: $destination"
 }
 catch {

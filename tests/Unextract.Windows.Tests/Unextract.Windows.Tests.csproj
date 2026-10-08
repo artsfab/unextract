@@ -26,6 +26,12 @@
     <Compile Include="..\Unextract.Core.Tests\Fixtures\ZipPatcher.cs" Link="Fixtures\ZipPatcher.cs" />
   </ItemGroup>
 
+  <!-- テスト専用の RAR 生成器と、採用版 UnRAR.dll の場所 (リポジトリ外。docs/TESTING.md#rar)。 -->
+  <ItemGroup>
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\RarWriter.cs" Link="Fixtures\RarWriter.cs" />
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\UnrarTestDll.cs" Link="Fixtures\UnrarTestDll.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>

@@ -49,6 +49,9 @@ public sealed class DeploymentTests
         Assert.True(File.Exists(Path.Combine(output, "cli", "unextract.runtimeconfig.json")));
         Assert.True(File.Exists(Path.Combine(output, "cli", "Unextract.Core.dll")));
         Assert.True(File.Exists(Path.Combine(output, "cli", "Unextract.Windows.dll")));
+        // UnRAR.dll is not bundled (docs/spec/rar.md#pinning): neither the GUI nor cli\ carries it, and the GUI does not depend on it.
+        Assert.Empty(Directory.EnumerateFiles(output, "UnRAR*", SearchOption.AllDirectories));
+        Assert.DoesNotContain("unrar", File.ReadAllText(Path.Combine(output, "unextract-gui.deps.json")), StringComparison.OrdinalIgnoreCase);
 
         // No arguments: input error only. No user archive or target is touched.
         using var process = Process.Start(new ProcessStartInfo(cli)

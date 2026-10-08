@@ -15,7 +15,7 @@ internal sealed partial class MainViewModel : ObservableModel
     private bool _busy;
     private bool _hasSession;
     private string _filter = "";
-    private string _status = "ディレクトリを選択してZIPを検索してください。";
+    private string _status = "ディレクトリを選択してアーカイブを検索してください。";
     private IReadOnlyList<ArchiveViewModel> _archives = [];
     private IReadOnlyList<ArchiveViewModel> _visibleArchives = [];
     private IReadOnlyList<SearchDiagnostic> _diagnostics = [];
@@ -88,7 +88,7 @@ internal sealed partial class MainViewModel : ObservableModel
         }
         bool recursive = Recursive;
         SetBusy(true);
-        Status = "ZIPを検索しています。";
+        Status = "アーカイブを検索しています。";
         try
         {
             var saved = await _settings.SaveAsync(directory);

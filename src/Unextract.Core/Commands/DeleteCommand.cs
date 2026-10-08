@@ -3,6 +3,7 @@ using Unextract.Core.Deletion;
 using Unextract.Core.Display;
 using Unextract.Core.Results;
 using Unextract.Core.Target;
+using Unextract.Core.Zip;
 
 namespace Unextract.Core.Commands;
 
@@ -36,6 +37,7 @@ public static class DeleteCommand
         var output = context.Output;
         var error = context.ErrorOutput;
         var notifications = context.Notifications;
+        var format = ArchiveFormats.FromPath(request.ArchivePath);
         // CLI は引数解析で拒否する。通知経路の直接呼び出しでも確認の同意を推論しない。
         if (notifications is not null && !request.AssumeYes)
         {
@@ -43,7 +45,7 @@ public static class DeleteCommand
         }
 
         // Prepare: どの段階の失敗でも削除0件。確認も出さない。
-        var (prepared, failure) = Preparation.Run(request.ArchivePath, request.TargetPath, request.EntriesPath, context);
+        var (prepared, failure) = Preparation.Run(request.ArchivePath, request.TargetPath, request.EntriesPath, request.Mode, context);
         if (prepared is null)
         {
             if (notifications is null)
@@ -107,9 +109,10 @@ public static class DeleteCommand
                     context.Limits,
                     request.Mode,
                     notifications is null ? context.Progress : null,
-                    notifications is null ? result => output.WriteLine(DeleteOutput.Line(result)) : notifications.OnDeleteResult,
+                    notifications is null ? result => output.WriteLine(DeleteOutput.Line(result, format)) : notifications.OnDeleteResult,
                     request.Hooks,
-                    notifications?.OnDirectoryCount));
+                    notifications?.OnDirectoryCount,
+                    prepared.SessionFor(request.Mode)));
 
                 if (notifications is null)
                 {
@@ -151,7 +154,7 @@ public static class DeleteCommand
         }
 
         request.AwaitingConfirmation?.Invoke();
-        if (IsConfirmation(request.Prompt.Ask(DeleteOutput.ConfirmationPrompt(fileEntries, request.Mode))))
+        if (IsConfirmation(request.Prompt.Ask(DeleteOutput.ConfirmationPrompt(fileEntries, request.Mode, ArchiveFormats.FromPath(request.ArchivePath)))))
         {
             return true;
         }

@@ -7,6 +7,23 @@ public enum FatalKind
     ArchiveOpenFailed,
     ArchiveUnreadable,
 
+    // RAR の DLL と形式 (docs/spec/rar.md#pinning、docs/spec/rar.md#format、docs/spec/rar.md#scope)
+    RarLibraryUnavailable,
+    ArchiveNotRar,
+    ArchiveSolid,
+    ArchiveMultiVolume,
+    ArchiveEncrypted,
+
+    // RAR のエントリ (docs/spec/rar.md#listing、docs/spec/rar.md#names、docs/spec/rar.md#types、docs/spec/rar.md#limits)
+    EntrySolid,
+    EntrySplit,
+    EntryEncrypted,
+    EntryRedirection,
+    EntryWithoutHash,
+    UnsupportedHostOs,
+    FileEntryNameEndsWithSeparator,
+    EntryDictionaryTooLarge,
+
     // resource limits (docs/spec/zip.md#limits)
     TooManyEntries,
     NameTooLong,
@@ -77,4 +94,7 @@ public enum FatalKind
     ContentTooShort,
     ContentCrcMismatch,
     TotalReadLengthTooLarge,
+
+    // RAR の内容読み取りのヘッダーが Prepare の列挙と異なる・足りない (docs/spec/rar.md#session)
+    ArchiveChanged,
 }

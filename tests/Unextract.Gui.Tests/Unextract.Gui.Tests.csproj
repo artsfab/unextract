@@ -7,7 +7,14 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Test-only RAR generator (RarWriter) computes CRC-32. Not a GUI dependency (DeploymentTests checks the GUI deps). -->
+    <PackageReference Include="System.IO.Hashing" Version="10.0.12" />
     <ProjectReference Include="..\..\src\Unextract.Gui\Unextract.Gui.csproj" />
     <Using Include="Xunit" />
+  </ItemGroup>
+  <!-- Test-only RAR generator and the location of the adopted UnRAR.dll (outside the repository; docs/TESTING.md#rar). -->
+  <ItemGroup>
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\RarWriter.cs" Link="Fixtures\RarWriter.cs" />
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\UnrarTestDll.cs" Link="Fixtures\UnrarTestDll.cs" />
   </ItemGroup>
 </Project>

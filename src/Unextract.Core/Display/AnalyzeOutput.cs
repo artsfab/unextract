@@ -1,5 +1,6 @@
 using Unextract.Core.Analysis;
 using Unextract.Core.Results;
+using Unextract.Core.Zip;
 
 namespace Unextract.Core.Display;
 
@@ -35,7 +36,7 @@ public static class AnalyzeOutput
     // 正常完走: 見出し、カテゴリー順 (カテゴリー内は ZIP の順) の結果行、合計行、analyze は削除しないことの案内。
     // 判定中の FATAL: 判定済みの結果行と件数、FATAL の原因が1件、未判定の件数 (パスは列挙しない)。
     // target に触れる前の FATAL (ZIP 事前検証など): 結果行と見出しを出さず、判定済み 0 と未判定の件数。
-    public static IReadOnlyList<string> Format(AnalysisResult result, RunMode mode)
+    public static IReadOnlyList<string> Format(AnalysisResult result, RunMode mode, ArchiveFormat format = ArchiveFormat.Zip)
     {
         ArgumentNullException.ThrowIfNull(result);
 
@@ -53,7 +54,7 @@ public static class AnalyzeOutput
         {
             foreach (var entry in result.Results.Where(r => r.Classification == category))
             {
-                lines.Add(ReportText.Line(category.ToDisplayString(), entry.Entry.Name, entry.Target, ReportText.SkipSuffix(entry.SkipReason)));
+                lines.Add(ReportText.Line(category.ToDisplayString(), entry.Entry.Name, entry.Target, ReportText.SkipSuffix(entry.SkipReason, format)));
             }
         }
 

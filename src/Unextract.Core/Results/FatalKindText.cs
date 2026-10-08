@@ -1,11 +1,35 @@
+using Unextract.Core.Zip;
+
 namespace Unextract.Core.Results;
 
 public static class FatalKindText
 {
-    public static string Describe(FatalKind kind) => kind switch
+    // 処理中のアーカイブを指す「ZIP」は、RAR の実行では「RAR」と表示する (docs/spec/cli.md#archive-wording)。既定は ZIP で、ZIP の文言は変えない。
+    public static string Describe(FatalKind kind, ArchiveFormat format = ArchiveFormat.Zip) => (kind, format) switch
+    {
+        (FatalKind.ArchiveOpenFailed, ArchiveFormat.Rar) => "RAR を開けません",
+        (FatalKind.ArchiveUnreadable, ArchiveFormat.Rar) => "RAR として読み取れません",
+        (FatalKind.ArchiveIdentityFailed, ArchiveFormat.Rar) => "RAR 自身の File ID を取得できません",
+        _ => Describe(kind),
+    };
+
+    private static string Describe(FatalKind kind) => kind switch
     {
         FatalKind.ArchiveOpenFailed => "ZIP を開けません",
         FatalKind.ArchiveUnreadable => "ZIP として読み取れません",
+        FatalKind.RarLibraryUnavailable => "UnRAR.dll を使用できないため、RAR を処理できません",
+        FatalKind.ArchiveNotRar => "RAR の署名で始まっていません (SFX を含む)",
+        FatalKind.ArchiveSolid => "Solid の RAR には対応していません",
+        FatalKind.ArchiveMultiVolume => "分割された RAR (ボリューム) には対応していません",
+        FatalKind.ArchiveEncrypted => "暗号化された RAR には対応していません",
+        FatalKind.EntrySolid => "Solid のエントリです",
+        FatalKind.EntrySplit => "前後の巻へ続く (分割された) エントリです",
+        FatalKind.EntryEncrypted => "暗号化されたエントリです",
+        FatalKind.EntryRedirection => "リンク・参照のエントリです (symlink、junction、hardlink、ファイルの参照コピー)",
+        FatalKind.EntryWithoutHash => "ハッシュ (CRC-32、BLAKE2) を持たないファイルエントリです",
+        FatalKind.UnsupportedHostOs => "作成元 OS が Windows・Unix 以外です",
+        FatalKind.FileEntryNameEndsWithSeparator => "ファイルエントリの名前が区切りで終わっています",
+        FatalKind.EntryDictionaryTooLarge => "辞書サイズが上限を超えています",
         FatalKind.TooManyEntries => "エントリ数が上限を超えています",
         FatalKind.NameTooLong => "エントリ名が長さの上限を超えています",
         FatalKind.MetadataTooLarge => "メタデータ総量が上限を超えています",
@@ -63,6 +87,7 @@ public static class FatalKindText
         FatalKind.ContentTooShort => "エントリの内容が宣言展開量より短いです",
         FatalKind.ContentCrcMismatch => "エントリの CRC-32 が一致しません",
         FatalKind.TotalReadLengthTooLarge => "読み取った展開量の合計が上限を超えています",
+        FatalKind.ArchiveChanged => "RAR のヘッダーが Prepare で列挙したものと一致しません",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 }

@@ -26,7 +26,7 @@ internal sealed class DeleteHarness : IDisposable
 
     public RecordingContentProvider Contents => _inner.Contents;
 
-    public ZipArchiveSource Source => _inner.Source;
+    public IArchiveSource Source => _inner.Source;
 
     // 差し替えた ZIP の内容の取得元 (null なら Contents)。
     public IZipContentProvider? ContentsOverride { get; set; }

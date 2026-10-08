@@ -1,5 +1,6 @@
 using Unextract.Core.Analysis;
 using Unextract.Core.Deletion;
+using Unextract.Core.Zip;
 
 namespace Unextract.Core.Display;
 
@@ -18,9 +19,9 @@ public static class DeleteOutput
 
     // 確認プロンプト (docs/spec/cli.md#confirmation、docs/spec/cli.md#delete-output)。fileEntries は処理対象のファイルエントリの件数 (削除される最大件数)。
     // Fast では [y/N] の直前に警告を置く (docs/spec/cli.md#streams の (3))。
-    public static string ConfirmationPrompt(int fileEntries, RunMode mode)
+    public static string ConfirmationPrompt(int fileEntries, RunMode mode, ArchiveFormat format = ArchiveFormat.Zip)
     {
-        var warning = mode == RunMode.Fast ? ReportText.FastWarning + Environment.NewLine : string.Empty;
+        var warning = mode == RunMode.Fast ? ReportText.FastWarningFor(format) + Environment.NewLine : string.Empty;
         return warning
             + $"最大 {fileEntries} 件のファイルエントリを1件ずつ検証し、条件を満たしたものをその場で完全に削除します。" + Environment.NewLine
             + "途中で停止した場合、それまでに削除したファイルは元に戻りません。" + Environment.NewLine
@@ -28,13 +29,13 @@ public static class DeleteOutput
     }
 
     // 処理したファイルエントリ1件の結果行。SKIPPED_SPECIAL_FILE は理由、DELETE_FAILED は " : <理由>" を続ける。
-    public static string Line(DeleteEntryResult result)
+    public static string Line(DeleteEntryResult result, ArchiveFormat format = ArchiveFormat.Zip)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         var suffix = result.Status switch
         {
-            DeleteStatus.SkippedSpecialFile => ReportText.SkipSuffix(result.SkipReason),
+            DeleteStatus.SkippedSpecialFile => ReportText.SkipSuffix(result.SkipReason, format),
             DeleteStatus.DeleteFailed => $" : {SafeDisplay.EscapeForList(result.Reason ?? string.Empty, out _)}",
             _ => string.Empty,
         };

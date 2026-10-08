@@ -59,7 +59,7 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
         bool zipChanged = output.Run.EntriesTotal != analysisEntriesTotal ||
             received.Any(e => approvedByName[e.Name].Index != e.Index);
         if (zipChanged)
-            lines.Add($"ZIPのエントリ数またはentryの番号が解析時と異なります（解析時 {analysisEntriesTotal:N0}、削除時 {output.Run.EntriesTotal:N0} エントリ）。解析後にZIPが変更された可能性があります。");
+            lines.Add($"アーカイブのエントリ数またはentryの番号が解析時と異なります（解析時 {analysisEntriesTotal:N0}、削除時 {output.Run.EntriesTotal:N0} エントリ）。解析後にアーカイブが変更された可能性があります。");
         if (result.Succeeded)
         {
             UInt128 length = 0;
@@ -122,7 +122,7 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
             var seen = received.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
             var remaining = approved.Where(c => !seen.Contains(c.Name) && c.Name != reportedName).ToArray();
             unknownRemaining = remaining.Length;
-            lines.Add("解析後にZIPの内容または順序が変わったため、途絶した位置の次の1件を特定できません。");
+            lines.Add("解析後にアーカイブの内容または順序が変わったため、途絶した位置の次の1件を特定できません。");
             if (remaining.Length != 0)
             {
                 lines.Add($"結果不明（削除された可能性あり）: entryを受信していない承認候補 {remaining.Length:N0} 件。実行ログで確認してください。");
@@ -138,7 +138,7 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
             unprocessed = approved.Count(c => c.Index > unknown.Index);
             lines.Add("不明（削除された可能性あり）の1件は、CLIが報告した上記の対象です。");
             lines.Add($"未処理（触れていない）: {unprocessed:N0} 件");
-            lines.Add("未処理の件数は解析時のZIPの順による推定です。受信内容に表れない形で解析後にZIPが置き換えられた場合は、実行ログで確認してください。");
+            lines.Add("未処理の件数は解析時のアーカイブの順による推定です。受信内容に表れない形で解析後にアーカイブが置き換えられた場合は、実行ログで確認してください。");
         }
         else if (interrupted)
         {
@@ -150,7 +150,7 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
                 unprocessed = approved.Count(c => c.Index > unknown.Index);
                 lines.Add($"不明（削除された可能性あり）: #{unknown.Index} {DisplayText.Escape(unknown.Name)}");
                 lines.Add($"未処理（触れていない）: {unprocessed:N0} 件");
-                lines.Add("不明の1件は解析時のZIPの順による推定です。受信内容に表れない形で解析後にZIPが置き換えられた場合は、実行ログで確認してください。");
+                lines.Add("不明の1件は解析時のアーカイブの順による推定です。受信内容に表れない形で解析後にアーカイブが置き換えられた場合は、実行ログで確認してください。");
             }
             else lines.Add("最後に受信したentryの次に承認した候補はありません。");
         }

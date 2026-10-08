@@ -7,21 +7,25 @@ using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Zip;
 using Unextract.Windows;
+using Unextract.Windows.Rar;
 
 namespace Unextract.Cli;
 
 // CLI が使う外部とのつながり。テストでは偽の probe などに差し替える。
+// OpenRarArchive は RAR を開く関数 (製品は UnRAR.dll の読み込み元を実行中の exe のフォルダーに固定した RarArchives.Open。docs/spec/rar.md#pinning)。
+// 引数・環境変数・設定で DLL の場所を変えない。ZIP の実行では呼ばれない (DLL を探さない)。
 internal sealed record CliEnvironment(
     IFileSystemProbe Probe,
     IDeletionProbe DeletionProbe,
     Func<ProtectedLocationsResult> ResolveProtectedLocations,
     IConfirmationPrompt Prompt,
-    bool ShowProgress)
+    bool ShowProgress,
+    Func<string, Limits, ZipOpenResult>? OpenRarArchive = null)
 {
     public static CliEnvironment Windows()
     {
         var probe = new WindowsFileSystemProbe();
-        return new(probe, probe, ProtectedLocations.Resolve, new ConsolePrompt(), !Console.IsErrorRedirected);
+        return new(probe, probe, ProtectedLocations.Resolve, new ConsolePrompt(), !Console.IsErrorRedirected, RarArchives.Open);
     }
 }
 
@@ -89,7 +93,7 @@ internal static class CliApplication
                     {
                         var locations = runtime.ResolveProtectedLocations();
                         return new TargetLocationPolicyResult(locations.Policy, locations.Error);
-                    }, Limits.Default, TextWriter.Null, TextWriter.Null, Notifications: notifications);
+                    }, Limits.Default, TextWriter.Null, TextWriter.Null, Notifications: notifications, OpenRarArchive: runtime.OpenRarArchive);
 
                     // 既存commandを実行し、Preparedの終了処理が済んでから終端を確定する。
                     result = options.Command == CommandKind.Analyze
@@ -204,7 +208,8 @@ internal static class CliApplication
             Limits.Default,
             output,
             error,
-            progress is null ? null : progress.Report);
+            progress is null ? null : progress.Report,
+            OpenRarArchive: environment.OpenRarArchive);
 
         return analyze
             ? AnalyzeCommand.Run(new AnalyzeCommandRequest(options.ArchivePath, options.TargetPath, options.Mode, context)).Status

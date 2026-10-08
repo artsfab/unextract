@@ -186,7 +186,7 @@ public static class EntriesList
 
     // 各行を事前検証を通過したエントリの FullName と序数比較で照合する (docs/spec/cli.md#entries)。大小文字と区切りを補正しない。
     // 一致するエントリが無い行、ディレクトリエントリを指定した行は入力エラー。大小文字・区切りだけが違うエントリがあればヒントにする。
-    public static EntriesMatchResult Match(IReadOnlyList<EntriesLine> lines, IReadOnlyList<ValidatedZipEntry> entries)
+    public static EntriesMatchResult Match(IReadOnlyList<EntriesLine> lines, IReadOnlyList<ValidatedZipEntry> entries, ArchiveFormat format = ArchiveFormat.Zip)
     {
         ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(entries);
@@ -202,7 +202,7 @@ public static class EntriesList
         {
             if (!byName.TryGetValue(line.Name, out var entry))
             {
-                return new EntriesMatchResult(null, new EntriesError(EntriesErrorKind.NoMatch, line.LineNumber, Unknown(line.Name, entries)));
+                return new EntriesMatchResult(null, new EntriesError(EntriesErrorKind.NoMatch, line.LineNumber, Unknown(line.Name, entries, format)));
             }
 
             if (entry.IsDirectory)
@@ -216,9 +216,10 @@ public static class EntriesList
         return new EntriesMatchResult(entries.Where(e => selected.Contains(e.Entry.Index)).ToList(), null);
     }
 
-    private static string Unknown(string name, IReadOnlyList<ValidatedZipEntry> entries)
+    private static string Unknown(string name, IReadOnlyList<ValidatedZipEntry> entries, ArchiveFormat format)
     {
-        var text = $"ZIP に一致するエントリがありません ({Quote(name)})";
+        // 処理中のアーカイブを指す「ZIP」は RAR の実行では「RAR」(docs/spec/cli.md#archive-wording)。
+        var text = $"{(format == ArchiveFormat.Rar ? "RAR" : "ZIP")} に一致するエントリがありません ({Quote(name)})";
         var normalized = Normalize(name);
 
         // docs/spec/zip.md#structure により、大小文字・区切りだけが違うエントリは ZIP の中に高々1つ。

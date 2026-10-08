@@ -18,7 +18,7 @@ target ルートを確認して保持する。保持用ハンドルで開く**�
 
 `analyze` は全てのエントリに表示行を与える。`delete` は処理対象のファイルエントリに結果行を与える ([表示](cli.md#output))。
 
-| 分類 | 条件 | ZIP 内容を読むか | `delete` での扱い |
+| 分類 | 条件 | アーカイブの内容を読むか | `delete` での扱い |
 |---|---|---|---|
 | `MATCHED` | 安全な通常ファイルで、[内容検証基準](zip.md#verification) をすべて満たし全バイト一致 (Strict) | 読む | 最終確認の後に削除する (結果は `DELETED`) |
 | `SAME_SIZE` | 安全な通常ファイルで、サイズが `Length` と一致する (内容一致を意味しない。Fast。[モード契約](../SPEC.md#modes)) | 読まない | 最終確認の後に削除する (結果は `DELETED`) |
@@ -89,7 +89,7 @@ target ルートを確認して保持する。保持用ハンドルで開く**�
 - reparse point である (`FILE_ATTRIBUTE_REPARSE_POINT` または reparse tag が 0 でない)。symlink、junction、クラウド placeholder を含む。
 - hardlink のリンク数が2以上 (`FILE_STANDARD_INFO.NumberOfLinks`)。
 - 既定の `::$DATA` 以外の名前付きデータストリーム (ADS) がある (`FileStreamInfo`)。`Zone.Identifier` を含む。
-- ZIP 自身と同じ個体 (ボリュームシリアルと 128 ビット File ID が一致)。
+- アーカイブ自身 (処理中の ZIP または RAR) と同じ個体 (ボリュームシリアルと 128 ビット File ID が一致)。
 - 属性に次の**許可集合以外のビット**が1つでもある。
 
 **`delete` の事前判定**: 削除用ハンドルは `FILE_FLAG_BACKUP_SEMANTICS` を持たずディレクトリを開けないため ([ハンドル構成](#handles))、`delete` では削除用ハンドルを開く前に、最終成分の列挙項目 ([実名確認](#real-names)) の属性と reparse tag で次を判定し、該当すれば削除用ハンドルを開かずに `SKIPPED_SPECIAL_FILE` とする: ディレクトリ属性 (0x10) がある、reparse point (属性 0x400 または reparse tag が 0 でない)、属性に許可集合以外のビットがある。この判定は「削除しない」側にだけ使う。該当しなかった対象は削除用ハンドルを開き、上の全ての判定 (ディレクトリ、reparse、リンク数、ADS、ZIP 自身、属性) をハンドル上で改めて行う。列挙とハンドルの値の一般的一致は保証しない。S38の限定付き観測と未確認範囲は[OPEN_ISSUES](../OPEN_ISSUES.md#observations)に置く。一致しない場合でも、事前判定は削除しない側にしか働かず、ハンドル上の判定は省略しないため、削除の安全性はこの一致に依存しない。
@@ -118,12 +118,13 @@ target ファイルの内容は特殊判定の後でだけ読む。比較用・�
 
 | 用途 | アクセス | 共有モード | フラグ | 保持期間 |
 |---|---|---|---|---|
-| ZIP | 読み取り | `FILE_SHARE_READ` | — | 実行終了まで |
+| アーカイブ (ZIP・RAR) | 読み取り | `FILE_SHARE_READ` | — | 実行終了まで |
 | target ルート | `FILE_LIST_DIRECTORY \| FILE_READ_ATTRIBUTES` | `FILE_SHARE_READ \| FILE_SHARE_WRITE` (DELETE を共有しない) | `FILE_FLAG_BACKUP_SEMANTICS` | 実行終了まで |
 | 列挙用 (target ルート以外のディレクトリ) | `FILE_LIST_DIRECTORY \| FILE_READ_ATTRIBUTES` | `FILE_SHARE_READ \| FILE_SHARE_WRITE` | `FILE_FLAG_BACKUP_SEMANTICS \| FILE_FLAG_OPEN_REPARSE_POINT` | そのディレクトリの検証と列挙の間だけ |
 | 比較用 (`analyze`) | `GENERIC_READ` | `FILE_SHARE_READ` | `FILE_FLAG_BACKUP_SEMANTICS \| FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_OPEN_NO_RECALL \| FILE_FLAG_SEQUENTIAL_SCAN` | `analyze` のそのエントリの判定中だけ |
 | 削除用 (`delete`) | `GENERIC_READ \| DELETE \| FILE_READ_ATTRIBUTES \| SYNCHRONIZE` | `FILE_SHARE_READ` | `FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_OPEN_NO_RECALL` | `delete` のそのエントリの検査・比較・最終確認・削除の間だけ |
 
+- RAR では UnRAR.dll がパスでアーカイブを別に開く ([RARのDLL](rar.md#runtime))。これはアーカイブ側の読み取りであり、上表の target 側のハンドルには含めない。
 - `analyze` は比較用ハンドルだけを使い、削除用ハンドルを開かない。`delete` は削除用ハンドルだけを使い、比較用ハンドルを開かない。同じ対象に比較用と削除用を同時に開くことはしない (同時に開けるかどうかは未実測。[手動確認M09](../OPEN_ISSUES.md#manual-status))。
 - 比較用・削除用の共有モードは `FILE_SHARE_WRITE` と `FILE_SHARE_DELETE` を含めない。開いている間、他プロセスは書き込み・改名・削除のために開けず、書き込み・削除アクセスのハンドル (または `FILE_SHARE_DELETE` を許さないハンドル) が既にあれば、こちらのオープンが共有違反で失敗する。削除用ハンドルは自分自身の `DELETE` のために `FILE_SHARE_DELETE` を必要としない。読み取りだけで `FILE_SHARE_DELETE` を許すハンドル (インデクサ・バックアップ相当) や `FILE_READ_ATTRIBUTES` だけのハンドルとは共存し、その場合も削除は成立する ([共有モードの理由と観測条件](../RATIONALE.md#sharing-limits))。
 - 削除用ハンドルは `DELETE` アクセスを要求するため、読み取りはできても削除の権限が無い対象 (対象の DELETE と親の DELETE_CHILD の両方が拒否されている) は開けない。この場合 `analyze` は分類できるが、`delete` は [失敗の境界](#failure-boundary) の識別確認で扱う。

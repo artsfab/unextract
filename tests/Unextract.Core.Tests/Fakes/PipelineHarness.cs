@@ -50,7 +50,7 @@ internal sealed class PipelineHarness : IDisposable
     public const string TargetPath = @"C:\target";
     public const string ArchivePath = @"C:\in\archive.zip";
 
-    private readonly ZipArchiveSource _source;
+    private readonly IArchiveSource _source;
 
     public PipelineHarness(byte[] zip, FakeFileSystem? fs = null)
     {
@@ -82,7 +82,7 @@ internal sealed class PipelineHarness : IDisposable
     // analyze のモード (docs/SPEC.md#modes)。共通の安全性テストを Fast でも実行するために切り替える。
     public RunMode Mode { get; set; } = RunMode.Strict;
 
-    public ZipArchiveSource Source => _source;
+    public IArchiveSource Source => _source;
 
     // 実行に使った AnalyzeRun (RealNameResolver の保持内容の確認用)。
     public AnalyzeRun? LastRun { get; private set; }

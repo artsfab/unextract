@@ -126,7 +126,7 @@ internal sealed partial class MainViewModel
             _analyzing ? "解析中です。完了するまで設定と選択は変更できません（閲覧と解析のキャンセルはできます）。" :
             IsBusy ? "処理中です。" :
             !HasSession ? "1. 検索するディレクトリを指定して「検索」を押してください。" :
-            Archives.Count == 0 ? "ZIPが見つかりませんでした。別のディレクトリを検索してください。" :
+            Archives.Count == 0 ? "アーカイブが見つかりませんでした。別のディレクトリを検索してください。" :
             total == 0 ? "2. Targetを追加してください（「全Archiveに一括追加」、または一覧でArchiveを選んで「このArchiveにTargetを追加」）。" :
             selected == 0 ? "一括操作の対象がありません。一覧のチェックボックスでTargetを選択してください。" :
             unanalyzed != 0 ? $"3. 「選択中の未解析Targetを解析」で解析してください（未解析 {unanalyzed:N0} Targets）。" :

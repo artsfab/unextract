@@ -9,18 +9,24 @@
 
 Cli → Core、Windows → Core。CoreはWin32にもWindows projectにも依存しない。CliがWindowsFileSystemProbeとCoreのcommandを組み立てる。Win32は文書化kernel32/FSCTLだけをLibraryImportとSafeFileHandleで呼び、ntdll未文書API/reflectionを使わない。
 
+RAR ([RAR仕様](spec/rar.md)) の配置の制約: UnRAR.dllのP/Invoke・照合・ロードはWindows側に置き、CoreはZIPと共通のアーカイブの抽象 (IArchiveSource) と、DLLの型・定数を持たないRARの受理規則・読み取りセッションの抽象だけを持つ。RAR専用の判定層・Fast専用の分岐を作らず、名前・構造・上限・内容検証の6基準とファイル安全性はZIPと同じコードを通す。形式は拡張子だけで決め (ArchiveFormats)、ZIPの経路は呼び出し先も引数も変えない。CLIだけがRARを開く関数 (DLLの読み込み元を実行中のexeのフォルダーに固定) をCommandContextに渡し、ZIPの実行では呼ばれない。GUIはDLLを参照しない。DLLはbuild・publish出力にも配布物にも置かず (利用者が置く。[版の固定](spec/rar.md#pinning))、配布処理 (`scripts/publish-gui.ps1`) とDeploymentTests・RarE2ETestsが含まれないことを検査する。
+
 | 場所 | 現在の担当 |
 |---|---|
 | [CliApplication](../src/Unextract.Cli/CliApplication.cs)、[Program](../src/Unextract.Cli/Program.cs) | 引数、ConsolePrompt/ProgressLine、stdout/stderr、Windowsとの組立てと例外境界 |
 | [MachineOutput](../src/Unextract.Cli/MachineOutput.cs)、[MachineOutputWriter](../src/Unextract.Cli/MachineOutputWriter.cs)、[ExecutionLog](../src/Unextract.Cli/ExecutionLog.cs) | Core型からv1レコードへの対応と明示的JSON生成、報告専用の途中件数、ログ先行の同期byte配送、CLI所有ログの作成・終了 |
 | [Preparation](../src/Unextract.Core/Commands/Preparation.cs)、[AnalyzeCommand](../src/Unextract.Core/Commands/AnalyzeCommand.cs)、[DeleteCommand](../src/Unextract.Core/Commands/DeleteCommand.cs)、[CommandNotifications](../src/Unextract.Core/Commands/CommandNotifications.cs) | 共通Prepare・寿命と2入口、値だけの同期通知。AnalyzerにIDeletionProbeを渡さず削除能力を型で持たせない |
 | [ZipArchiveSource](../src/Unextract.Core/Zip/ZipArchiveSource.cs)、[ZipPrevalidator](../src/Unextract.Core/Zip/ZipPrevalidator.cs)、[EntriesList](../src/Unextract.Core/Entries/EntriesList.cs) | ZIP公開APIのアダプター、名前/種別/構造/宣言量、exact選択入力 |
+| [IArchiveSource](../src/Unextract.Core/Zip/IArchiveSource.cs)、[EntryBudget](../src/Unextract.Core/Zip/EntryBudget.cs) | ZIP・RAR共通のアーカイブの抽象と形式の判定、件数・名前長・メタデータ総量の判定 (ZIPは手順6、RARは列挙中に同じ計算を呼ぶ) |
+| [IRarArchiveSource](../src/Unextract.Core/Rar/IRarArchiveSource.cs)、[RarPrevalidator](../src/Unextract.Core/Rar/RarPrevalidator.cs) | RARのソース・読み取りセッション・押し込み型の内容の抽象 (実体はWindows)、手順6のRAR固有の受理規則 (ZipPrevalidatorの前。種別・属性はRAR側だけで行う) |
 | [TargetRoot](../src/Unextract.Core/Target/TargetRoot.cs)、[TargetResolver](../src/Unextract.Core/Analysis/TargetResolver.cs)、[RealNameResolver](../src/Unextract.Core/Analysis/RealNameResolver.cs) | root検証、検証済み列挙と実名対応・結果再利用 |
 | [HandleInspection](../src/Unextract.Core/Analysis/HandleInspection.cs)、[ContentComparer](../src/Unextract.Core/Analysis/ContentComparer.cs) | 共通の個体/特殊性/サイズ検査と内容検証・比較 |
 | [Analyzer](../src/Unextract.Core/Analysis/Analyzer.cs)、[SequentialDeleter](../src/Unextract.Core/Deletion/SequentialDeleter.cs) | 操作別のハンドル種別、FATAL/STOP、逐次結果・指示/成立確認 |
 | [Display](../src/Unextract.Core/Display/ReportText.cs) | ReportText/AnalyzeOutput/DeleteOutput/SafeDisplayの純粋な表示生成 |
 | [WindowsFileSystemProbe](../src/Unextract.Windows/WindowsFileSystemProbe.cs)、[WindowsHandles](../src/Unextract.Windows/WindowsHandles.cs) | Core抽象のWin32実装・SafeFileHandle所有 |
 | [HandleOpener](../src/Unextract.Windows/HandleOpener.cs)、[FileInformation](../src/Unextract.Windows/FileInformation.cs)、[DirectoryEnumerator](../src/Unextract.Windows/DirectoryEnumerator.cs)、[ProtectedLocations](../src/Unextract.Windows/ProtectedLocations.cs) | 用途別open、同一ハンドル情報、列挙、拒否位置の実体解決 |
+| [UnrarLibrary](../src/Unextract.Windows/Rar/UnrarLibrary.cs)、[UnrarNative](../src/Unextract.Windows/Rar/UnrarNative.cs)、[UnrarCallbackState](../src/Unextract.Windows/Rar/UnrarCallbackState.cs) | DLLの照合 (保持したままSHA-256) とロード (LoadLibraryExW/GetProcAddress、インスタンスごとに1回)、構造体・定数、ネイティブ呼び出しの差し替え口 (IUnrarApi。テストは台本の偽物)、例外を境界の外へ出さないコールバック |
+| [RarArchiveSource](../src/Unextract.Windows/Rar/RarArchiveSource.cs)、[RarReadSession](../src/Unextract.Windows/Rar/RarReadSession.cs)、[UnrarHeaderBuffer](../src/Unextract.Windows/Rar/UnrarHeaderBuffer.cs) | 手順2 (署名 → DLL → 一覧用open → ボリューム → 列挙と上限) と手順10、前進・ヘッダー照合 (生の値はWindows側だけが持つ)・RAR_SKIP/RAR_TEST、ハンドルごとのNativeMemoryのバッファ |
 
 <a id="gui"></a>
 ## GUIの配置と実行配置
@@ -29,7 +35,7 @@ Cli → Core、Windows → Core。CoreはWin32にもWindows projectにも依存�
 
 GUIはCore / Windows / CliのDLLを参照しない。受信DTO・列挙はGUI所有で、CLIの内部型をコピーして共通契約にしない。`CliLocation` はアプリケーション配置先の `cli/unextract.exe` だけを解決する。CLIの安全性判定をGUIへ移さない。
 
-[ArchiveSearch](../src/Unextract.Gui/Services/ArchiveSearch.cs)はUI外でディレクトリを逐次列挙し、属性の確認後に次のディレクトリへ進む。ZIPは名前とメタデータだけを取得し、検索診断を結果と分けて返す。存在の表示用観測もこの境界に置き、属性取得の失敗を不存在に変換しない。内部のIArchiveSearchFileSystemは列挙途中の失敗・差替えを検証するadapterであり、削除の安全性を判定する層ではない。
+[ArchiveSearch](../src/Unextract.Gui/Services/ArchiveSearch.cs)はUI外でディレクトリを逐次列挙し、属性の確認後に次のディレクトリへ進む。ZIP・RAR (拡張子 `.zip`・`.rar`) は名前とメタデータだけを取得し、形式を判定・検査しない。検索診断は結果と分けて返す。存在の表示用観測もこの境界に置き、属性取得の失敗を不存在に変換しない。内部のIArchiveSearchFileSystemは列挙途中の失敗・差替えを検証するadapterであり、削除の安全性を判定する層ではない。
 
 [TargetTemplate](../src/Unextract.Gui/Models/TargetTemplate.cs)はテンプレート解決と入力形式検査だけを行う。生の解決パス、重複比較キー、[表示用変換](../src/Unextract.Gui/Models/DisplayText.cs)を分け、最終パスやFile IDは求めない。[MainViewModel](../src/Unextract.Gui/ViewModels/MainViewModel.cs)が検索セッションと操作ロックを所有し、[ArchiveViewModel](../src/Unextract.Gui/ViewModels/ArchiveViewModel.cs)がTarget登録順と親チェック、[TargetViewModel](../src/Unextract.Gui/ViewModels/TargetViewModel.cs)が個別の選択・表示用観測を保持する。一括選択を保持するのは `TargetViewModel.IsSelected` だけで、Archive単位の三状態はそこから導出し保持しない。表示フィルタは全検索モデルを置き換えず、表示用の参照リストだけを更新する。画面 ([MainWindow](../src/Unextract.Gui/Views/MainWindow.xaml)) は、表示中のArchiveの後にそのTargetを並べた1つの仮想化された作業一覧 (`MainViewModel.WorkItems`) と、閲覧対象1件の詳細欄からなる。閲覧対象 (`MainViewModel.Viewed`) は一括選択 (`TargetViewModel.IsSelected`) と別の状態で、閲覧・絞り込み・行の再生成は選択・キュー・計画を変えない。絞り込みで一覧から消えた閲覧対象は詳細欄に残してその旨を示し、除去された閲覧中のTargetはそのArchiveの表示へ戻る。状態バッジ・行の要約・操作できない理由・次の操作の案内・選択の要約 (`MainViewModel.View.cs`) は表示専用で、実行可否の判定には使わない。一括処理中はこれらの更新をまとめ、最後に1回だけ作り直す。共通の色・ボタン・フォーカス枠は[Theme](../src/Unextract.Gui/Views/Theme.xaml)にあり、各ウィンドウが自分で読み込む。ウィンドウは作業領域より大きくせず、作業一覧と詳細欄に最低限の高さを確保できない小さい寸法ではウィンドウ全体が縦にスクロールする (一覧は常に有限の高さを持ち、仮想化を保つ)。
 
@@ -55,7 +61,7 @@ GUIはCore / Windows / CliのDLLを参照しない。受信DTO・列挙はGUI所
 <a id="shared-path"></a>
 ## 共通解決・検査・比較とモード分岐
 
-Prepare、TargetResolver/RealNameResolver、HandleInspector、ContentComparer.Verifyを両操作で共有する。操作差は呼び出し側に明示する。analyzeは比較用、deleteは削除用だけを使う。モード分岐はContentComparer.Verifyの非読取経路であり、Fast専用の層・実装クラス・抽象化・追加状態・API・ハンドル構成を作らない。[採用理由](RATIONALE.md#structure)と[モード契約](SPEC.md#modes)による。
+Prepare、TargetResolver/RealNameResolver、HandleInspector、ContentComparer.Verifyを両操作で共有する。ContentComparerは基準3〜6を任意長のチャンクで判定する検証器 (ContentVerifier) と、ZIPのpullループ・RARの押し込み (RAR_TESTのコールバック) の2つの読み方に分かれ、判定はどちらも同じ検証器が行う。RARではAnalyzer・SequentialDeleterが、借用したセッション (Strictだけ) をエントリの処理の最初に前進させる。前進の失敗は前進先のFATAL/STOPで、deleteは照合を終えるまでディレクトリを数えずに保留する ([読む範囲と順序](spec/rar.md#session))。操作差は呼び出し側に明示する。analyzeは比較用、deleteは削除用だけを使う。モード分岐はContentComparer.Verifyの非読取経路であり、Fast専用の層・実装クラス・抽象化・追加状態・API・ハンドル構成を作らない。[採用理由](RATIONALE.md#structure)と[モード契約](SPEC.md#modes)による。
 
 ZIP構造の独自パーサを製品へ入れない。テストのZipFixture/ZipPatcherは異常を作る専用生成器で、製品パーサを兼ねない。フックは内部差し込み口で[TESTING](TESTING.md#hooks)が位置と適用条件を定める。
 
@@ -78,7 +84,7 @@ Analyzer.OnResultはDIRECTORYを含む結果をZIP順に通知し、FATAL原因�
 <a id="lifetimes"></a>
 ## 資源の寿命
 
-PreparationのPreparedがZIPとtargetルートを実行終了まで所有し、Disposeで閉じる。targetルートのcloseが例外を投げてもfinallyでZIPの終了処理を行う。entriesはPrepare中に読み終え閉じ、選択情報だけを使う。確認待ちに個々のtargetハンドルはない。列挙用は検証/列挙の間だけ開き、照合結果だけをRealNameResolverが再利用する。
+PreparationのPreparedがZIPとtargetルート (StrictのRARでは内容読み取りのセッションも) を実行終了まで所有し、Disposeでセッション → targetルート → アーカイブの順に閉じる。前のcloseが例外を投げてもfinallyで後の終了処理を行う。要求の組立て時 (Prepared.SessionFor) に、StrictのRARならセッションあり、ZIPとFastならなしを確かめ、崩れていれば例外にする。RARの一覧用・内容読み取り用のDLLのハンドルは、close → コールバックの状態 (GCHandle) → ヘッダー構造体・バッファの順に解放し、closeの失敗は解放の後に例外 (internal_error) にする (元の失敗の処理中なら元の失敗を優先)。finalizerは置かない。entriesはPrepare中に読み終え閉じ、選択情報だけを使う。確認待ちに個々のtargetハンドルはない。列挙用は検証/列挙の間だけ開き、照合結果だけをRealNameResolverが再利用する。
 
 各エントリの比較用/削除用はその判定/処理中だけ所有し、usingで通常結果・STOP・例外の各経路で閉じる。M0と列挙由来の削除基準はエントリ中だけで、全件の候補/状態を保持しない。内容比較器の実測累計は実行内だけ。具体的なアクセス・共有・フラグ、情報項目と処理順は[FS仕様](spec/filesystem.md#handles)で定める。
 

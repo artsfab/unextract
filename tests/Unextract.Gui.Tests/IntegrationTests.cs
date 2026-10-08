@@ -41,6 +41,73 @@ public sealed class IntegrationTests
         return new(model, root, logs, temp, archive);
     }
 
+    // RAR through the same GUI path. guiRoot is the folder whose cli\unextract.exe runs (the GUI never loads UnRAR.dll).
+    private static async Task<Real> OpenRar(string kind, string guiRoot, byte[] rar)
+    {
+        string root = ArchiveSearchTests.Fixture(kind);
+        string archive = Path.Combine(root, "a.rar");
+        File.WriteAllBytes(archive, rar);
+        string logs = Path.Combine(root, "logs");
+        string temp = Directory.CreateDirectory(Path.Combine(root, "temp")).FullName;
+        var runner = new CliProcessRunner(new CliLocation(guiRoot));
+        var search = new FakeSearch { Result = new([new(archive, new FileInfo(archive).Length, DateTime.UtcNow)], []) };
+        var model = new MainViewModel(new("cli", true, "ok"), search, new FakeSettings(), runner, new EntriesStore(temp), new LogLocation(logs))
+            { SearchDirectory = root };
+        Assert.True(await model.SearchAsync());
+        return new(model, root, logs, temp, archive);
+    }
+
+    // A copy of the bundled cli\ with the adopted UnRAR64.dll placed beside it, as a user would (the DLL is not shipped).
+    private static string GuiRootWithUnrar()
+    {
+        string root = Path.Combine(AppContext.BaseDirectory, "fixtures", "gui-unrar-app-" + Guid.NewGuid().ToString("N"));
+        string cli = Directory.CreateDirectory(Path.Combine(root, "cli")).FullName;
+        foreach (string file in Directory.EnumerateFiles(Path.Combine(DeploymentTests.GuiOutputDirectory, "cli")))
+            File.Copy(file, Path.Combine(cli, Path.GetFileName(file)));
+        Unextract.Core.Tests.Fixtures.UnrarTestDll.CopyTo(cli);
+        return root;
+    }
+
+    [Fact]
+    public async Task RarIsAnalyzedAndDeletedThroughTheCliWhenUnrarIsPlacedBesideIt()
+    {
+        byte[] rar = Unextract.Core.Tests.Fixtures.Rar5Writer.Build(
+        [
+            new() { Name = "same.txt", Data = Bytes },
+            new() { Name = "d", IsDirectory = true, Attributes = 0x10 },
+            new() { Name = "d/keep.txt", Data = Bytes },
+        ]);
+        var r = await OpenRar("int-rar", GuiRootWithUnrar(), rar);
+        string target = Dir(r, "t");
+        File.WriteAllBytes(Path.Combine(target, "same.txt"), Bytes);
+        Directory.CreateDirectory(Path.Combine(target, "d"));
+        File.WriteAllBytes(Path.Combine(target, "d", "keep.txt"), [3, 2, 1]);
+        await r.Model.AddTargetsAsync(target);
+        Assert.Equal(1, (await r.Model.AnalyzeSelectedAsync().WaitAsync(Limit)).Succeeded);
+        var plan = r.Model.PlanDeletion()!;
+        Assert.Equal(["same.txt"], plan.Items.Single().Candidates.Select(c => c.Name));
+        Assert.Equal(new DeletionBatchResult(DeletionStop.None, 1, 1, 1), await r.Model.DeleteAsync(plan, approved: true).WaitAsync(Limit));
+        Assert.False(File.Exists(Path.Combine(target, "same.txt")));
+        Assert.Equal(new byte[] { 3, 2, 1 }, File.ReadAllBytes(Path.Combine(target, "d", "keep.txt")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(r.Temp));
+    }
+
+    [Fact]
+    public async Task WithoutUnrarTheRarAnalysisFailsWithTheCliExplanationAndNothingChanges()
+    {
+        byte[] rar = Unextract.Core.Tests.Fixtures.Rar5Writer.Build([new() { Name = "same.txt", Data = Bytes }]);
+        var r = await OpenRar("int-rar-nodll", DeploymentTests.GuiOutputDirectory, rar);
+        string target = Dir(r, "t");
+        File.WriteAllBytes(Path.Combine(target, "same.txt"), Bytes);
+        await r.Model.AddTargetsAsync(target);
+        Assert.Equal(0, (await r.Model.AnalyzeSelectedAsync().WaitAsync(Limit)).Succeeded);
+        var state = r.Model.Archives[0].Targets[0];
+        string library = Path.Combine(DeploymentTests.GuiOutputDirectory, "cli", "UnRAR64.dll");
+        Assert.Contains($"{library} に UnRAR.dll 7.23 (x64) の UnRAR64.dll を置いてください。ZIP の処理には影響しません。", state.FailureDetail, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(target, "same.txt")));
+        Assert.Empty(r.Model.PlanDeletion()!.Items);
+    }
+
     private static string Dir(Real r, params string[] parts)
     {
         string path = Directory.CreateDirectory(Path.Combine([r.Root, .. parts])).FullName;

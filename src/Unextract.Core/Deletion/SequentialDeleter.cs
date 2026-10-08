@@ -1,4 +1,5 @@
 using Unextract.Core.Analysis;
+using Unextract.Core.Rar;
 using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Zip;
@@ -114,6 +115,7 @@ public sealed class DeleteHooks
 // 逐次削除の入力。Entries は処理対象 (全エントリ、または --entries で選んだエントリ。ZIP の順)。
 // Progress は (n, total) で各エントリの処理の前に呼ばれる (Processing n / total)。OnResult はファイルエントリの結果ごとに呼ばれる。
 // OnResult は ProcessFile の外で close 後に呼ぶ。OnDirectoryCount は完結した DIRECTORY の累計を渡す。
+// Session は Strict の RAR の内容読み取りのセッション (docs/spec/rar.md#session。Prepared が所有し、ここでは借用する)。ZIP と Fast では null。
 public sealed record DeleteRequest(
     IReadOnlyList<ValidatedZipEntry> Entries,
     IZipContentProvider Contents,
@@ -126,7 +128,8 @@ public sealed record DeleteRequest(
     Action<int, int>? Progress = null,
     Action<DeleteEntryResult>? OnResult = null,
     DeleteHooks? Hooks = null,
-    Action<int>? OnDirectoryCount = null);
+    Action<int>? OnDirectoryCount = null,
+    IRarReadSession? Session = null);
 
 // 削除用オープンの失敗の分類 (docs/spec/filesystem.md#open-errors の対応表)。表に無いコードは全て STOP とする。
 internal static class DeletionOpenErrors
@@ -186,6 +189,16 @@ internal sealed class DeleteRun
         var entries = _request.Entries;
         var results = new List<DeleteEntryResult>();
         var directories = 0;
+
+        // RAR: 処理対象のディレクトリは、次の前進がそのヘッダーの照合を終えるまで数えずに保留する (docs/spec/rar.md#session)。
+        var pending = new Queue<ValidatedZipEntry>();
+
+        void CountDirectory()
+        {
+            directories++;
+            _request.OnDirectoryCount?.Invoke(directories);
+        }
+
         for (var i = 0; i < entries.Count; i++)
         {
             _request.Progress?.Invoke(i + 1, entries.Count);
@@ -194,22 +207,61 @@ internal sealed class DeleteRun
             if (entry.IsDirectory)
             {
                 // ディレクトリは削除しない (docs/SPEC.md#scope)。結果行を出さず、件数だけを要約に出す。
-                directories++;
-                _request.OnDirectoryCount?.Invoke(directories);
+                if (_request.Session is null)
+                {
+                    CountDirectory();
+                }
+                else
+                {
+                    pending.Enqueue(entry);
+                }
+
                 continue;
             }
 
+            DeleteEntryResult result;
+            if (_request.Session?.Advance(entry.Entry.Index) is { } advance)
+            {
+                // 照合を終えた位置までの保留ディレクトリを DIRECTORY と数える。前進の失敗で照合に至らなかったものは未処理。
+                while (pending.TryPeek(out var directory) && directory.Entry.Index <= advance.LastVerifiedIndex)
+                {
+                    pending.Dequeue();
+                    CountDirectory();
+                }
+
+                result = advance.Succeeded ? ProcessFile(entry) : AdvanceFailed(entry, advance);
+            }
+            else
+            {
+                result = ProcessFile(entry);
+            }
+
             // ProcessFile がハンドルを閉じて戻った後に、宣言サイズだけを付けて通知する。
-            var result = ProcessFile(entry) with { Length = entry.Entry.Length };
+            result = result with { Length = entry.Entry.Length };
             results.Add(result);
             _request.OnResult?.Invoke(result);
             if (result.Status == DeleteStatus.Stopped)
             {
-                return new DeleteReport(results, directories, entries.Count - i - 1);
+                return new DeleteReport(results, directories, entries.Count - i - 1 + pending.Count);
             }
         }
 
+        // STOP せず到達した末尾の処理対象ディレクトリは、Prepare で確認済みの情報で再照合せずに数える (追加の前進をしない)。
+        while (pending.TryDequeue(out _))
+        {
+            CountDirectory();
+        }
+
         return new DeleteReport(results, directories, 0);
+    }
+
+    // 前進の失敗 (docs/spec/rar.md#session): 前進先の STOP。target の解決より前なので、削除用ハンドルを開いておらず削除された可能性は無い。
+    // step は付けない。説明には実際に失敗を検出した位置を含める (名前は表示時にエスケープされる)。
+    private DeleteEntryResult AdvanceFailed(ValidatedZipEntry entry, RarAdvanceResult advance)
+    {
+        var kind = advance.FailureKind!.Value;
+        return new(new ZipEntryRef(entry.Entry.Index, entry.Entry.FullName), _request.Root.ExpectedPath(entry.Components), DeleteStatus.Stopped, null,
+            $"{FatalKindText.Describe(kind, ArchiveFormat.Rar)} ({advance.Describe()})", Failure: new DeleteFailure(kind, null));
     }
 
     // 1エントリの処理。削除用ハンドルは using によって、STOP・例外を含むどの経路でもこの処理の中で閉じる。
@@ -323,7 +375,7 @@ internal sealed class DeleteRun
 
             // 6. 全バイト比較 (Strict のみ): 同じハンドルから読み、このエントリについて1回だけ比較する。Fast は読まない (docs/RATIONALE.md#fast)。
             IComparisonHandle reader = _hooks.DuringCompare is { } during ? new FirstReadHook(handle, () => during(reference, handle)) : handle;
-            var compared = _comparer.Verify(_request.Mode, _request.Contents, entry.Entry.Index, reader);
+            var compared = _comparer.Verify(_request.Mode, _request.Contents, _request.Session, entry.Entry.Index, reader);
             switch (compared.Verdict)
             {
                 case ContentVerdict.Fatal:

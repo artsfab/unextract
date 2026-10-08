@@ -236,6 +236,19 @@ internal static class MachineOutput
     {
         FatalKind.ArchiveOpenFailed => "ARCHIVE_OPEN_FAILED",
         FatalKind.ArchiveUnreadable => "ARCHIVE_UNREADABLE",
+        FatalKind.RarLibraryUnavailable => "RAR_LIBRARY_UNAVAILABLE",
+        FatalKind.ArchiveNotRar => "ARCHIVE_NOT_RAR",
+        FatalKind.ArchiveSolid => "ARCHIVE_SOLID",
+        FatalKind.ArchiveMultiVolume => "ARCHIVE_MULTI_VOLUME",
+        FatalKind.ArchiveEncrypted => "ARCHIVE_ENCRYPTED",
+        FatalKind.EntrySolid => "ENTRY_SOLID",
+        FatalKind.EntrySplit => "ENTRY_SPLIT",
+        FatalKind.EntryEncrypted => "ENTRY_ENCRYPTED",
+        FatalKind.EntryRedirection => "ENTRY_REDIRECTION",
+        FatalKind.EntryWithoutHash => "ENTRY_WITHOUT_HASH",
+        FatalKind.UnsupportedHostOs => "UNSUPPORTED_HOST_OS",
+        FatalKind.FileEntryNameEndsWithSeparator => "FILE_ENTRY_NAME_ENDS_WITH_SEPARATOR",
+        FatalKind.EntryDictionaryTooLarge => "ENTRY_DICTIONARY_TOO_LARGE",
         FatalKind.TooManyEntries => "TOO_MANY_ENTRIES",
         FatalKind.NameTooLong => "NAME_TOO_LONG",
         FatalKind.MetadataTooLarge => "METADATA_TOO_LARGE",
@@ -293,6 +306,7 @@ internal static class MachineOutput
         FatalKind.ContentTooShort => "CONTENT_TOO_SHORT",
         FatalKind.ContentCrcMismatch => "CONTENT_CRC_MISMATCH",
         FatalKind.TotalReadLengthTooLarge => "TOTAL_READ_LENGTH_TOO_LARGE",
+        FatalKind.ArchiveChanged => "ARCHIVE_CHANGED",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 

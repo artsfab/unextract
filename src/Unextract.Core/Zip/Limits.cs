@@ -25,6 +25,9 @@ public sealed record Limits
 
     public long MaxTotalDeclaredLength { get; init; } = 68_719_476_736;
 
+    // RAR のファイルエントリの辞書サイズ (バイト。docs/spec/rar.md#limits の暫定値)。
+    public long MaxRarDictionarySize { get; init; } = 1_073_741_824;
+
     // その実行の全バイト比較 (analyze・delete) で実際に読んだ量の累計。
     public long MaxTotalReadLength { get; init; } = 68_719_476_736;
 

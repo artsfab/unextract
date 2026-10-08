@@ -63,7 +63,7 @@ public partial class MainWindow : Window
         if (!Model.IsSettingsEditable) return;
         if (Model.Archives.Count == 0)
         {
-            MessageBox.Show(this, Model.HasSession ? "検索結果にArchiveがありません。" : "先にZIPを検索してください。", "Targetの一括追加",
+            MessageBox.Show(this, Model.HasSession ? "検索結果にArchiveがありません。" : "先にアーカイブを検索してください。", "Targetの一括追加",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }

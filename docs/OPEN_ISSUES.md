@@ -2,7 +2,7 @@
 
 役割: 現在の不確実性と限定付き観測の更新先。残課題・リリース判断、該当する安全性変更のときに読む。完了したら知識を担当正本へ反映し、行を閉じる。
 
-[手動](#manual-status) / [手順保留](#procedure-review) / [観測範囲](#observations) / [対象外](#out-of-scope) / [リリース・運用](#release-decisions)
+[手動](#manual-status) / [手順保留](#procedure-review) / [観測範囲](#observations) / [RAR](#rar) / [対象外](#out-of-scope) / [リリース・運用](#release-decisions)
 
 <a id="manual-status"></a>
 ## 手動確認の状態
@@ -21,7 +21,8 @@
 | M11 | 未実施・手順未確立 | マップを保持しファイルハンドルを閉じる別プロセスhelperを設計 | [M11](MANUAL_TESTS.md#m11) |
 | M12 (a) / M12 (b) | 両方未実施。製品と同じ構成ではない補助観測 | 祖先改名とread-only openを分けて実施 | [M12](MANUAL_TESTS.md#m12) |
 | L18 / M13 | 未実測・手順レビュー待ち。BOM拒否テストと端末保存形式は別 | 下表のfixture分離・続行条件を先に決める | [M13](MANUAL_TESTS.md#m13) |
-| M14 (GUI受入) | 2026-10-08 実施・合格 (自作fixtureで実施。シナリオの指定はM14の現記載より前)。基本の流れ、モニター間移動、エクスプローラーの起動、OSのフォルダー選択、フォーカス・Tab・スクロールの操作感、表示倍率100/150/200%で指摘なし。実データ・実GPUの性能と既存の安全性未確認事項は含まない | GUIの画面・配布を変えたときに影響する手順を再確認 | [M14](MANUAL_TESTS.md#m14) |
+| M14 (GUI受入) | 2026-10-08 実施・合格 (自作fixtureで実施。シナリオの指定はM14の現記載より前)。基本の流れ、モニター間移動、エクスプローラーの起動、OSのフォルダー選択、フォーカス・Tab・スクロールの操作感、表示倍率100/150/200%で指摘なし。実データ・実GPUの性能と既存の安全性未確認事項は含まない。その後のRAR対応 (検索の `.rar`・「アーカイブ」への文言の変更) と検索欄の最小幅の調整 (2026-10-09) の後は、STA描画の写真 (ScreenRenderTests) の確認と、UI E2E (`run-gui-ui-tests.ps1`、2026-10-09、32件すべて成功。RARのfixtureは含まない) だけで、RAR対応後のM14の再確認 (手順1〜3) は未実施。2026-10-09の判断で、RAR対応のMVPでは必須とせず、未実施のままリリースを阻害しない (合格とは扱わない) | RAR対応後の手順1〜3を実施する。GUIの画面・配布を変えたときも影響する手順を再確認 | [M14](MANUAL_TESTS.md#m14) |
+| M15 (UnRAR.dllの導入と実物のRAR) | 2026-10-09 手順1〜3を実施・合 (Windows 11 10.0.26300、publish版CLI (Release・win-x64、リポジトリ外)、WinRAR 7.23 試用版、Windows PowerShell 5.1、自作データ)。1: DLL無しのRARのanalyzeは「見つかりません」・読み込み元の絶対パス・必要な版・ZIPに影響しないことを示すFATALで終了コード1、同じexeのZIPのanalyzeは成功。2: READMEの手順 (rarlabから `unrardll-723.exe` を取得、7-Zipで `x64\UnRAR64.dll` だけを取り出し、`Get-FileHash` が `894B7D2D…9BCC`) で置くと全件MATCHED・DIRECTORY、同サイズで変えた `a.txt` はMODIFIED。3: deleteで一致した2件だけが消え、変えたファイルとフォルダーが残った (確認は `--yes`。対話の `[y/N]` はX28)。手順4 (GUIでのRAR) は未実施で、2026-10-09の判断でRAR対応のMVPでは必須とせず、リリースを阻害しない (合格とは扱わない。GUIのRARの経路はGui.TestsのIntegrationTestsが自動で通す)。手順5 (RAR4) はWinRAR 7.xがRAR4を作れず前提不成立。M14はRAR対応 (検索の `.rar`・文言の変更) の前の実施で、RARのGUI操作を含まない | 手順4を配布物のGUIで実施。手順5は旧版のWinRARがあれば実施 | [M15](MANUAL_TESTS.md#m15) |
 
 <a id="procedure-review"></a>
 ## 実施前の手順保留
@@ -54,6 +55,26 @@ S26/S34/S37/S38の実測は2026-10-03、Windows 11 10.0.26300、NTFS、SDK 10.0.
 | GUI: entries上限の実ZIP | 正常解析の候補がentries上限を超え得ることは契約値からの計算で、実ZIPでは再現していない。GUIの境界 (上限ちょうど許可・1バイト超過で未開始) は模擬で確認済み | 必要時に長い非ASCII名を多数持つ自作ZIPで再現 | [理由](RATIONALE.md#gui-entries-limit)、[仕様](spec/gui.md#delete-run) |
 | CI権限 | 旧CI実績はランナー管理者権限の有無を確認していない | 権限依存ケースはログの前提不成立と環境を別に報告 | [テスト原則](TESTING.md#principles) |
 
+<a id="rar"></a>
+## RAR対応
+
+RAR対応は[RAR仕様](spec/rar.md)の契約で製品コード (Core・Windows・CLI・GUIの検索と文言) を実装した。UnRAR.dllはリポジトリにも配布物にも含めず、利用者が置く ([版の固定](spec/rar.md#pinning)、[導入手順](../README.md#rar-dll))。採用版のDLLを使う自動試験は、テスト専用の生成器 (Stored) で作ったRARで行う ([TESTING](TESTING.md#rar))。WinRARの `Rar.exe` で作る実物のRAR (圧縮・BLAKE2・NTFSストリーム・実物のSolid・分割・SFX・暗号化・リンク) はローカル検証専用で、リポジトリに収録せずCIでも実行しない ([TESTING](TESTING.md#rar-real))。RAR4の実物は前提不成立 (RAR4を作れる旧版のWinRARが無い) で未確認。
+
+<a id="rar-observations"></a>
+### 未確認の範囲
+
+PoCの観測条件は[理由](RATIONALE.md#rar)にある。製品経路での確認と、PoCで扱っていない範囲を区別する。
+
+| 問題・影響 | 分かっている範囲 | 次の確認 | 根拠 |
+|---|---|---|---|
+| 実物のRARによる製品経路 | 生成器 (Stored) のRAR4・RAR5では、採用版のDLLで実NTFSのanalyze/delete (両モード)・publish版を含むexe・GUI経由の自動試験がある ([TESTING](TESTING.md#rar))。WinRARで作った実物はローカル検証 ([TESTING](TESTING.md#rar-real)) で確かめる。2026-10-09、`verify-real-rar.ps1` をpublish版のexe (Release・win-x64、リポジトリ外、隣に採用版のDLL) とRar.exe 7.23 (試用版) で実行し84項目すべて合格: RAR5の-m3・-m0・-m5 -htb (BLAKE2)・-rr5% -qo+ -ts+・-md1g の受理と変更の検出、Strictのdeleteの非削除 (同サイズの変更・余分なファイル・フォルダー)、Fastの同サイズ別内容の削除、日本語名の `--entries`、圧縮データの1バイト破損で `CONTENT_READ_FAILED` (CRC-32・BLAKE2とも。MATCHEDにならず、deleteはSTOPで残る)、`-os` のADSありで `SKIPPED_SPECIAL_FILE`・ADSなしでStrictの `CONTENT_TOO_LONG`/STOP・FastはSAME_SIZE、Solid・`-hp`・`-p`・分割の全4巻・SFX・`-oi1`・`-oh` が両操作・両モードで同じFATALでtarget不変。RAR4の実物は前提不成立 (WinRAR 7.xはRAR4を作れない) で、RAR4は生成器 (Stored) の自動試験だけ。Unix作成のRAR、`-ol` のsymlinkは未確認 | RAR4は旧版のWinRARがあれば作って確かめる。DLLの版や読み取り経路を変えたら再実行する | [理由](RATIONALE.md#rar)、[TESTING](TESTING.md#rar-real) |
+| 名前の変換の範囲 | `\`・`:` (Unix名) と `/` だけ確認。`<>"\|?*`、末尾のドット・空白、予約名、制御文字、RAR5の不正なUTF-8をDLLがそのまま返すか変換するかは未確認。そのまま返せば共通検査で拒否 (安全側)、変換するなら「WinRARの展開名と一致」の範囲を見直す | 自作RARで各文字をDLLで列挙し、WinRARの展開名と比べる | [名前](spec/rar.md#names) |
+| RAR4のUnicodeでない名前 | DLLが実行環境の設定で復号すると推定。どのコード ページ (ANSI/OEM) を使うか、コンソールのコード ページの変更 (CLIのUTF-8化) の影響、変換できないバイトの扱いは未確認 | CP932のバイト名のRAR4を、言語設定の異なる環境で列挙 | [名前](spec/rar.md#names)、[理由](RATIONALE.md#rar-names) |
+| 作成元OSの報告値 | WindowsとUnixの報告を確認。RAR4のMS-DOS・OS/2・Mac OSなどの作成元をDLLがどう報告するかは未確認 (ソースからはWindowsかUnixに丸めると推定) | 該当する実物で列挙 | [種別と属性](spec/rar.md#types) |
+| 実物のsymlink・junction | 作成権限が無く、WinRARの `-ol` の実物は未確認 (自作RAR5のredirとRAR4のUnix modeで確認) | 作成できる環境で実物を列挙 | [列挙](spec/rar.md#listing) |
+| 大きな辞書・大きなエントリ | 1 GiB超の辞書は自作ヘッダーの宣言値だけで確認した (WinRAR 7.23の `-md2g` は小さいデータでは辞書を4 MBに縮めて記録し、実物で1 GiB超の宣言を作れなかった。2026-10-09)。`UCM_LARGEDICT` の経路も自作ヘッダー (4 GiB超の宣言) でだけ到達 ([DLLの使い方](RATIONALE.md#rar-dll-usage))。4 GiB超のエントリ、GB級の多数ファイルは未確認 | 実物で辞書・サイズの報告と上限を確認 | [上限](spec/rar.md#limits) |
+| NTFSストリーム以外のservice header | `-os` のストリームが本体に続いて届くことは確認。ACL (`-ow`) などのデータも混ざるかは未確認 | `-ow` などで作った実物で内容経路を確認 | [限界](spec/rar.md#limitations) |
+
 <a id="out-of-scope"></a>
 ## 対象外との区別
 
@@ -65,5 +86,5 @@ S26/S34/S37/S38の実測は2026-10-03、Windows 11 10.0.26300、NTFS、SDK 10.0.
 | 問題・影響 | 分かっている範囲 | 次の確認・判断 | 根拠 |
 |---|---|---|---|
 | リリース番号 | 旧READMEに「新しいバージョン番号はリリース時に決める」と明示。現行の番号設定を文書再編で変更しない | リリース担当が番号・移行案内を決定 | `e618713:README.md`「実装状況」、[project](../src/Unextract.Cli/Unextract.Cli.csproj) |
-| GUIのCI検証 | CIはGUI関連プロジェクトを `dotnet build -c Release` でビルドし、`dotnet test --no-build` でGui.Testsまでを実行する。UI E2E (対話デスクトップが必要) とGUI配布スモークはCIに無い。`.github/**` は作業規則で編集しない | 追加する場合は担当者がランナーの対話デスクトップ・作業領域を確かめてworkflowを変更する | [README配布ビルド](../README.md#配布ビルド)、[workflow](../.github/workflows/ci.yml) |
+| GUIのCI検証 | CIはGUI関連プロジェクトを `dotnet build -c Release` でビルドし、`dotnet test --no-build` でGui.Testsまでを実行する。UI E2E (対話デスクトップが必要) とGUI配布スモークはCIに無い | 追加する場合は担当者がランナーの対話デスクトップ・作業領域を確かめてworkflowを変更する | [README配布ビルド](../README.md#配布ビルド)、[workflow](../.github/workflows/ci.yml) |
 | CIのNode.js注釈 | 2026-10-02の旧CI記録にNode.js 20廃止予定の注釈と対応見送りがある。現在のCIでの再現・対応要否は未確認 | 次のCI実行で注釈と依存actionsを確認し、必要なら別のCI変更として扱う | `606d89c:docs/PLAN_VALIDATION.md`「CI の初回実行」、[workflow](../.github/workflows/ci.yml) |

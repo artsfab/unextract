@@ -5,11 +5,12 @@ using Unextract.Core.Results;
 
 namespace Unextract.Core.Zip;
 
-public sealed record ZipOpenResult(ZipArchiveSource? Source, FatalError? Fatal);
+// アーカイブを開いた結果 (ZIP・RAR 共通)。
+public sealed record ZipOpenResult(IArchiveSource? Source, FatalError? Fatal);
 
 // ZipArchive のアダプタ。ZIP を FileShare.Read で開いて Dispose まで保持し (docs/SPEC.md#prepare のZIP保持)、
 // エントリ名を CP437 指定で復号する (docs/spec/zip.md#decoding)。ZIP 構造の独自解析はしない。
-public sealed class ZipArchiveSource : IZipContentProvider, IDisposable
+public sealed class ZipArchiveSource : IArchiveSource
 {
     // フラグなしの名前を UTF-8 として扱わせないため、必ず CP437 を渡す (docs/spec/zip.md#decoding、docs/RATIONALE.md#real-names)。
     private static readonly Encoding EntryNameEncoding =

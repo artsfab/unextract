@@ -64,6 +64,31 @@ public sealed class ArchiveSearchTests
         Assert.Contains(result.Diagnostics, d => d.Path == @"D:\root\bad.zip");
     }
 
+    // ZIP and RAR by extension only (case-insensitive; split volumes and unsupported RARs are listed too). Other extensions are ignored.
+    [Fact]
+    public async Task SearchFindsZipAndRarByExtensionOnly()
+    {
+        var fs = new FakeSearchFileSystem();
+        fs.Directories[@"D:\root"] = [@"D:\root\a.rar", @"D:\root\B.RAR", @"D:\root\c.part2.rar", @"D:\root\d.zip", @"D:\root\e.cbr",
+            @"D:\root\f.rar.txt", @"D:\root\g.7z", @"D:\root\h.Rar"];
+        var result = await new ArchiveSearch(fs).SearchAsync(@"D:\root", true);
+        Assert.Equal(new[] { @"D:\root\B.RAR", @"D:\root\a.rar", @"D:\root\c.part2.rar", @"D:\root\d.zip", @"D:\root\h.Rar" },
+            result.Archives.Select(f => f.Path));
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public async Task RealSearchDoesNotOpenRarContents()
+    {
+        string root = Fixture("rar-search");
+        string rar = Path.Combine(root, "x.RAR");
+        File.WriteAllText(rar, "not RAR contents; search does not inspect them");
+        using var locked = new FileStream(rar, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var result = await new ArchiveSearch().SearchAsync(root, false);
+        Assert.Equal(rar, Assert.Single(result.Archives).Path);
+        Assert.Equal(new FileInfo(rar).Length, result.Archives[0].Length);
+    }
+
     [Fact]
     public async Task DirectoryReplacedWithReparseBeforeDescentIsNotEnumerated()
     {

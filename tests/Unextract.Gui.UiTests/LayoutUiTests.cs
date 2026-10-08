@@ -279,7 +279,7 @@ public sealed class LayoutUiTests(ITestOutputHelper output) : UiTestBase
         ui.FocusMain();
         ui.Search();
         Assert.Contains("(1 件)", ui.TextOf("DiagnosticsToggle"));
-        Assert.Contains("ZIPが見つかりませんでした", ui.TextOf("NextStepText"));
+        Assert.Contains("アーカイブが見つかりませんでした", ui.TextOf("NextStepText"));
         ui.Toggle(ui.Get("DiagnosticsToggle"));
         Wait.Until(() => ui.Find("DiagnosticsList") is not null, "the notifications");
         ShotSizes(ui, "40-no-archive-with-notification");

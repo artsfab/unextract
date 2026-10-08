@@ -4,16 +4,16 @@
 
 ## 1. プロジェクト概要
 
-- unextract は、ZIP 内のファイルに対応する target 内のファイルだけを削除する Windows 11 用 CLI。モードは2つ ([モード契約](docs/SPEC.md#modes))。
-  - Strict (既定): ZIP の内容と全バイト一致したファイル (`MATCHED`) だけを削除する。全バイト一致が削除の根拠。
+- unextract は、アーカイブ (ZIP・RAR) 内のファイルに対応する target 内のファイルだけを削除する Windows 11 用 CLI。RAR は単一・非 Solid の RAR4/RAR5 だけで、UnRAR.dll で読む ([RAR仕様](docs/spec/rar.md))。モードは2つ ([モード契約](docs/SPEC.md#modes))。
+  - Strict (既定): アーカイブの内容と全バイト一致したファイル (`MATCHED`) だけを削除する。全バイト一致が削除の根拠。
   - Fast (`--fast` による明示的な opt-in): パスとサイズの一致 (`SAME_SIZE`) を削除候補とし、内容は読まない・比較しない。内容の一致は保証しない。
 - ファイルシステムの安全性 (パス検証、実名解決、reparse・hardlink・ADS、File ID・最終パスによる同一性、TOCTOU 対策、削除方式) は両モード共通。Fast を理由に弱めない。
-- 「その ZIP から展開された」という来歴は証明しない。不明・判定不能なら削除しない (両モード)。
-- 同梱の GUI (`unextract-gui.exe`、WPF) は ZIP 検索と複数 Target の順次実行を担うラッパー。CLI を子プロセスとして起動して機械可読出力を使い、一致判定・削除の安全性を実装しない ([GUI仕様](docs/spec/gui.md))。
+- 「そのアーカイブから展開された」という来歴は証明しない。不明・判定不能なら削除しない (両モード)。
+- 同梱の GUI (`unextract-gui.exe`、WPF) はアーカイブ検索と複数 Target の順次実行を担うラッパー。CLI を子プロセスとして起動して機械可読出力を使い、一致判定・削除の安全性を実装しない ([GUI仕様](docs/spec/gui.md))。
 
 ## 2. 文書の優先順位
 
-- 規範本文は [SPEC](docs/SPEC.md) と [CLI](docs/spec/cli.md)・[ZIP](docs/spec/zip.md)・[ファイル安全性](docs/spec/filesystem.md)・[機械可読出力](docs/spec/machine-output.md)、GUI を変えるときは [GUI](docs/spec/gui.md)。[文書入口](docs/README.md)から担当節とテストへ直行する。
+- 規範本文は [SPEC](docs/SPEC.md) と [CLI](docs/spec/cli.md)・[ZIP](docs/spec/zip.md)・[RAR](docs/spec/rar.md)・[ファイル安全性](docs/spec/filesystem.md)・[機械可読出力](docs/spec/machine-output.md)、GUI を変えるときは [GUI](docs/spec/gui.md)。[文書入口](docs/README.md)から担当節とテストへ直行する。
 - 実装の地図は [ARCHITECTURE](docs/ARCHITECTURE.md)、理由は [RATIONALE](docs/RATIONALE.md)、検証は [TESTING](docs/TESTING.md)、未確認・手動実施状態は [OPEN_ISSUES](docs/OPEN_ISSUES.md)。利用者向け要約はルートREADMEで、仕様の正本ではない。
 - 食い違いや不足を見つけたら明示された規定・決定を調べ、製品判断が必要な意味変更は行わず報告する。
 - 文書は担当正本を更新し、同じ規則を複製しない。文書の新設・分割・統合・廃止、責務変更、情報の配置・保存判断を行う場合は [文書メンテナンス原則](docs/DOCUMENTATION.md)を読む。通常の仕様反映・誤字・既存リンク修正だけなら毎回の通読は不要。
@@ -25,15 +25,16 @@
 - パスベースの削除・改名 API (`File.Delete`、`DeleteFile`、`Directory.Delete`、`RemoveDirectory`、`MoveFile*` など) を `src/` に書かない。
   - 唯一の例外: GUI が自分で一意な名前で新規作成した一時 `--entries` ファイルを、CLI プロセスの終了後 (起動失敗の場合はその判断後) に GUI が `File.Delete` で削除する1か所。target 内のファイル、利用者のファイル、ディレクトリ、それ以外の一時ファイルには使わず、Core・Windows・Cli には書かない。
 - 不明・判定不能は削除しない側 (FATAL または停止) に倒す。未知のエラーを推測で続行しない ([失敗の境界](docs/spec/filesystem.md#failure-boundary))。
-- 独自 ZIP パーサ、reflection、ntdll の未文書 API を使わない。ZIP の読み取りは `ZipArchive` のみ。
-- `Unextract.Core` は Win32 にも `Unextract.Windows` にも依存しない。
-- Fast は既存の `Unextract.Core`・`Unextract.Windows`・`Unextract.Cli` の中のモード分岐として実装する。Fast 用の層、専用の実装クラス・抽象化、追加の状態管理、Fast 用の Win32 API やハンドル構成を設けない ([実装配置](docs/ARCHITECTURE.md#shared-path))。
+- 独自の ZIP・RAR 構造パーサ、reflection、ntdll の未文書 API を使わない。ZIP の読み取りは `ZipArchive` のみ。RAR の読み取りは版と SHA-256 を固定した UnRAR.dll のみで、独自に読むのは RAR の先頭署名だけ ([形式の判定](docs/spec/rar.md#format))。
+- UnRAR.dll には `RAR_TEST` と `RAR_SKIP` だけを使い、`RAR_EXTRACT` と展開先の指定を使わない (DLL にディスクへ書かせない)。DLL は照合したファイルを固定の読み込み元から絶対パスでロードし、DLL の検索順序に頼らない。DLL を利用できなければ RAR の実行だけを Prepare の FATAL (削除0件) にし、ZIP の実行では DLL を読み込まない ([版の固定](docs/spec/rar.md#pinning))。
+- `Unextract.Core` は Win32 にも `Unextract.Windows` にも UnRAR.dll にも依存しない (UnRAR.dll の P/Invoke・照合・ロードは Core に置かない)。GUI は UnRAR.dll を読み込まない。
+- Fast は既存の `Unextract.Core`・`Unextract.Windows`・`Unextract.Cli` の中のモード分岐として実装する。Fast 用の層、専用の実装クラス・抽象化、追加の状態管理、Fast 用の Win32 API やハンドル構成を設けない ([実装配置](docs/ARCHITECTURE.md#shared-path))。RAR でも同じで、名前・構造・上限・内容検証とファイル安全性は ZIP と同じ経路を通し、RAR を理由に target 側の安全性を弱めない。
 
 ## 4. 開発規則
 
 - 警告ゼロ (`Directory.Build.props` の `TreatWarningsAsErrors`)。
 - `NoWarn`、`#pragma warning disable`、`TreatWarningsAsErrors` の解除をしない。
-- テストの Skip、期待値の緩和をしない。テストが失敗したら、まず実装を疑う。
+- テストの Skip、期待値の緩和をしない。テストが失敗したら、まず実装を疑う。UnRAR.dll が無い・照合できない環境で RAR のテストを前提不成立や成功にしない。
 - 不可視文字・双方向制御文字 (C0の改行・CR・タブを除く制御文字/DEL、C1制御、Unicode Cf、U+2028/U+2029。双方向制御のU+202A〜U+202E・U+2066〜U+2069などを含む) を `src/` `tests/` `docs/` `scripts/` `.github/` に実際の文字として入れない。必要なら `\u` エスケープで書く。
 
 ## 5. 作業規則
@@ -44,10 +45,12 @@
 - 削除してよいのは、テスト・検証が自作した一意な fixture と、承認を得た後始末だけ。
 - fixture は原則テストから削除せず、掃除は `scripts/clean-test-fixtures.ps1` で行う (既定は一覧のみ、`-Execute` で実行)。例外として X28 の PTY テストは、PTY / process tree の終了・Dispose 完了後に自分が作った GUID 付き fixture だけを自動 cleanup する。cleanup failure は黙殺せず、元の失敗情報・terminal output を保持する。
 - `Remove-Item -Recurse` を使わない。
+- UnRAR.dll をリポジトリ・製品の配布物に入れない (利用者が置く。[版の固定](docs/spec/rar.md#pinning))。WinRAR で作る RAR の実物はローカル検証専用で、リポジトリに収録せず CI でも実行しない。WinRAR (試用期間内を含め、そのライセンス条件の範囲内) で自作データから作り、第三者の RAR は使わない ([実物のRAR](docs/TESTING.md#rar-real))。
 
 ## 6. よく使うコマンド
 
 ```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\get-unrar-dll.ps1
 dotnet build unextract.sln
 dotnet test unextract.sln
 dotnet test tests/Unextract.E2E.Tests
@@ -55,10 +58,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-e2e-tests.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-smoke-tests.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-ui-tests.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\clean-test-fixtures.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-real-rar.ps1 -Exe <DLLを隣に置いたリポジトリ外のexe>
 ```
 
 - `run-gui-ui-tests.ps1` (GUI の UI E2E) は通常の `dotnet test unextract.sln` に含まれない。ロックされていない対話デスクトップが必要で、実行中は人がマウスとキーボードに触れない。リモートデスクトップの最小化、サービスセッション、他の UI テストとの同時実行では行わない ([GUI検証](docs/TESTING.md#gui))。GUI の配布処理を変えたときも再実行する。
 
+- `get-unrar-dll.ps1` は RAR のテストが使う採用版の UnRAR.dll をリポジトリ外に用意する (一度だけ。DLL が無いと RAR のテストは失敗する)。
 - `dotnet run` は使わない。ビルド済みの exe を呼ぶ。
 - `dotnet publish` の出力先はリポジトリの外にする (`README.md` の「配布ビルド」)。
 - CI の構成とオプションは `.github/workflows/ci.yml` を参照する。

@@ -1,5 +1,6 @@
 using Unextract.Core.Analysis;
 using Unextract.Core.Entries;
+using Unextract.Core.Rar;
 using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Zip;
@@ -10,6 +11,7 @@ namespace Unextract.Core.Commands;
 public sealed record TargetLocationPolicyResult(TargetLocationPolicy? Policy, FatalError? Error);
 
 // analyze と delete に共通の実行環境。OpenArchive と Contents はテストでの差し替え用 (既定は ZipArchiveSource.Open とその内容)。
+// OpenRarArchive は RAR (docs/spec/rar.md#format) を開く関数で、CLI が UnRAR.dll の読み込み元を決めて渡す (Core は DLL に依存しない)。
 // Progress は (n, total) で各エントリの処理の前に呼ばれる。Output は標準出力、ErrorOutput は標準エラー出力 (docs/spec/cli.md#streams)。
 // Notifications を設定した経路は人間向け出力と Progress を使わず、同期通知と構造化 outcome を返す。
 public sealed record CommandContext(
@@ -21,7 +23,8 @@ public sealed record CommandContext(
     Action<int, int>? Progress = null,
     Func<string, ZipOpenResult>? OpenArchive = null,
     Func<IZipContentProvider, IZipContentProvider>? Contents = null,
-    CommandNotifications? Notifications = null);
+    CommandNotifications? Notifications = null,
+    Func<string, Limits, ZipOpenResult>? OpenRarArchive = null);
 
 public enum PrepareStage
 {
@@ -32,6 +35,9 @@ public enum PrepareStage
     ZipValidation,
     ArchiveIdentity,
     EntriesMatch,
+
+    // Strict の RAR の内容読み取り用の open (手順10)。
+    ContentSession,
 }
 
 // Prepare の失敗。Message は「入力エラー: 」「FATAL: 」を付けた標準エラー出力の1行。
@@ -39,15 +45,20 @@ public enum PrepareStage
 public sealed record PrepareFailure(PrepareStage Stage, string Message, FatalError? Fatal = null, string? TargetFinalPath = null, int? TotalEntries = null, EntriesError? EntriesError = null)
 {
     // FatalError は target の入力エラーにも使うため、原因型や表示文字列から区分を推測しない。
-    public bool IsFatal => Stage is PrepareStage.Archive or PrepareStage.ZipValidation or PrepareStage.ArchiveIdentity;
+    public bool IsFatal => Stage is PrepareStage.Archive or PrepareStage.ZipValidation or PrepareStage.ArchiveIdentity or PrepareStage.ContentSession;
 }
 
-// Prepare を終えた状態 (docs/SPEC.md#prepare)。実行全体で保持するハンドルは ZIP と target ルートの2つだけ。Dispose で両方を閉じる。
+// Prepare を終えた状態 (docs/SPEC.md#prepare)。実行全体で保持するハンドルは ZIP と target ルートの2つだけ (Strict の RAR では
+// 内容読み取りのセッションを加える)。Session は Prepared が唯一所有し、Analyzer・Deleter は借用する。
+// Dispose はセッション → target ルート → アーカイブの順に閉じる (前の close が例外を投げても後の close を行う)。
 // Targets は処理対象 (analyze は全エントリ、delete は全エントリまたは --entries で選んだエントリ。ZIP の順)。
-internal sealed class Prepared(ZipArchiveSource source, TargetRoot root, IReadOnlyList<ValidatedZipEntry> entries, IReadOnlyList<ValidatedZipEntry> targets, VolumeFileId archiveIdentity)
+internal sealed class Prepared(IArchiveSource source, TargetRoot root, IReadOnlyList<ValidatedZipEntry> entries, IReadOnlyList<ValidatedZipEntry> targets, VolumeFileId archiveIdentity,
+    IRarReadSession? session = null)
     : IDisposable
 {
-    public ZipArchiveSource Source { get; } = source;
+    public IRarReadSession? Session { get; } = session;
+
+    public IArchiveSource Source { get; } = source;
 
     public TargetRoot Root { get; } = root;
 
@@ -66,26 +77,57 @@ internal sealed class Prepared(ZipArchiveSource source, TargetRoot root, IReadOn
     {
         try
         {
-            Root.Dispose();
+            Session?.Dispose();
         }
         finally
         {
-            Source.Dispose();
+            try
+            {
+                Root.Dispose();
+            }
+            finally
+            {
+                Source.Dispose();
+            }
         }
+    }
+
+    // 要求の組立て時の確認 (docs/spec/rar.md#session)。Strict の RAR ならセッションあり、ZIP と Fast ならセッションなし。崩れていたら製品の誤配線。
+    public IRarReadSession? SessionFor(RunMode mode)
+    {
+        var expected = mode == RunMode.Strict && Source is IRarArchiveSource;
+        if (expected != (Session is not null))
+        {
+            throw new InvalidOperationException("アーカイブの形式・モードと内容読み取りのセッションの組み合わせが不正です。");
+        }
+
+        return Session;
     }
 }
 
-// Prepare (docs/SPEC.md#prepare の手順2〜9。手順1 の引数検査と必要なログ作成は CLI)。どの段階の失敗でも target のエントリ (target ルート以外の列挙、
+// Prepare (docs/SPEC.md#prepare の手順2〜10。手順1 の引数検査と必要なログ作成は CLI)。どの段階の失敗でも target のエントリ (target ルート以外の列挙、
 // 比較用・削除用ハンドルのオープン) には触れず、削除は0件である (docs/SPEC.md#zero-deletions、docs/RATIONALE.md#current-state)。
 internal static class Preparation
 {
-    public static (Prepared? Prepared, PrepareFailure? Failure) Run(string archivePath, string targetPath, string? entriesPath, CommandContext context)
+    public static (Prepared? Prepared, PrepareFailure? Failure) Run(string archivePath, string targetPath, string? entriesPath, RunMode mode, CommandContext context)
     {
-        // 手順2: ZIP を FileShare.Read で開いて実行終了まで保持する。
-        var opened = (context.OpenArchive ?? ZipArchiveSource.Open)(archivePath);
+        // 手順2: アーカイブを FileShare.Read で開いて実行終了まで保持する。形式は拡張子だけで決める (docs/spec/rar.md#format)。
+        // RAR は署名・DLL・一覧用の open・ボリュームのフラグ・列挙 (列挙中の上限を含む) をこの関数の中で行う。
+        var format = ArchiveFormats.FromPath(archivePath);
+        var opened = format == ArchiveFormat.Rar
+            ? (context.OpenRarArchive ?? throw new InvalidOperationException("RAR を開く関数が設定されていません。"))(archivePath, context.Limits)
+            : (context.OpenArchive ?? ZipArchiveSource.Open)(archivePath);
         if (opened.Source is not { } source)
         {
-            return Fail(PrepareStage.Archive, $"FATAL: {opened.Fatal!.Describe()}", opened.Fatal);
+            var openError = opened.Fatal! with { Format = format };
+            return Fail(PrepareStage.Archive, $"FATAL: {openError.Describe()}", openError);
+        }
+
+        var rar = source as IRarArchiveSource;
+        if ((format == ArchiveFormat.Rar) != (rar is not null))
+        {
+            source.Dispose();
+            throw new InvalidOperationException("アーカイブの形式と開いたソースが一致しません。");
         }
 
         var keep = false;
@@ -120,10 +162,18 @@ internal static class Preparation
             try
             {
                 // 手順6: ZIP の全エントリの事前検証。--entries の有無に関係なく全エントリに行う。target に触れない。
+                // RAR は RAR 固有の受理規則の後に、ZIP と共通の名前・構造・上限の検査を行う (docs/spec/rar.md#listing)。
                 var total = source.EntryCount;
-                var prevalidation = ZipPrevalidator.Validate(source.Entries, context.Limits);
-                if (prevalidation.Fatal is { } fatal)
+                if (rar is not null && RarPrevalidator.Validate(rar.Archive, source.Entries, context.Limits) is { } rarError)
                 {
+                    var rarFatal = rarError with { Format = format };
+                    return Fail(PrepareStage.ZipValidation, $"FATAL: {rarFatal.Describe()}", rarFatal, root.FinalPath, total);
+                }
+
+                var prevalidation = ZipPrevalidator.Validate(source.Entries, context.Limits);
+                if (prevalidation.Fatal is { } prevalidationError)
+                {
+                    var fatal = prevalidationError with { Format = format };
                     return Fail(PrepareStage.ZipValidation, $"FATAL: {fatal.Describe()}", fatal, root.FinalPath, total);
                 }
 
@@ -131,7 +181,7 @@ internal static class Preparation
                 var identity = context.Probe.GetFileIdentity(archivePath);
                 if (!identity.Succeeded)
                 {
-                    var identityError = new FatalError(FatalKind.ArchiveIdentityFailed, Detail: identity.Describe(), Win32Error: identity.Error);
+                    var identityError = new FatalError(FatalKind.ArchiveIdentityFailed, Detail: identity.Describe(), Win32Error: identity.Error, Format: format);
                     return Fail(PrepareStage.ArchiveIdentity, $"FATAL: {identityError.Describe()}", identityError, root.FinalPath, total);
                 }
 
@@ -139,7 +189,7 @@ internal static class Preparation
                 var targets = prevalidation.Entries;
                 if (entries is not null)
                 {
-                    var matched = EntriesList.Match(entries.Lines!, prevalidation.Entries);
+                    var matched = EntriesList.Match(entries.Lines!, prevalidation.Entries, format);
                     if (matched.Error is { } matchError)
                     {
                         return Fail(PrepareStage.EntriesMatch, $"入力エラー: {matchError.Describe()}", total: total, entriesError: matchError);
@@ -148,9 +198,23 @@ internal static class Preparation
                     targets = matched.Selected!;
                 }
 
+                // 手順10: Strict の RAR だけ、内容読み取り用に開いて保持する。open だけでヘッダーは読まない (docs/spec/rar.md#session)。
+                IRarReadSession? session = null;
+                if (rar is not null && mode == RunMode.Strict)
+                {
+                    var sessionOpened = rar.OpenSession();
+                    if (sessionOpened.Session is not { } opened10)
+                    {
+                        var sessionError = (sessionOpened.Fatal ?? throw new InvalidOperationException("セッションを開けない原因がありません。")) with { Format = format };
+                        return Fail(PrepareStage.ContentSession, $"FATAL: {sessionError.Describe()}", sessionError, root.FinalPath, total);
+                    }
+
+                    session = opened10;
+                }
+
                 keepRoot = true;
                 keep = true;
-                return (new Prepared(source, root, prevalidation.Entries, targets, identity.Value) { EntriesSelected = entries is not null }, null);
+                return (new Prepared(source, root, prevalidation.Entries, targets, identity.Value, session) { EntriesSelected = entries is not null }, null);
             }
             finally
             {

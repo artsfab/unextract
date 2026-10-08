@@ -15,7 +15,7 @@ internal sealed partial class MainViewModel
 {
     public const string FastWarning =
         "Fastは内容の一致を確認しません。同じパス・同じサイズの変更されたファイルも削除候補になり、" +
-        "ZIPから正常に展開できることも確認しません。";
+        "アーカイブから正常に展開できることも確認しません。";
 
     private CliMode _mode = CliMode.Strict;
     private bool _analyzing;
@@ -99,7 +99,7 @@ internal sealed partial class MainViewModel
         if (!IsJobRunning) return;
         var progress = _runner.Progress;
         SetEntryProgress(progress.Run is null
-            ? "準備中（CLI起動・ZIP/Targetの検証中）"
+            ? "準備中（CLI起動・アーカイブ/Targetの検証中）"
             : $"{(_deleting ? "処理中" : "確認中")} {progress.ReceivedEntries:N0} / {progress.Run.Selected:N0} エントリ");
     }
 

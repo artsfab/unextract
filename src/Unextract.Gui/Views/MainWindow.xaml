@@ -233,7 +233,7 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="分類" FontWeight="SemiBold" />
                                     <TextBlock Grid.Column="1" Text="サイズ (bytes)" FontWeight="SemiBold" TextAlignment="Right" Margin="0,0,12,0" />
-                                    <TextBlock Grid.Column="2" Text="ZIP内のパス" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="2" Text="アーカイブ内のパス" FontWeight="SemiBold" />
                                 </Grid>
                             </Border>
                             <ListBox Grid.Row="2" AutomationProperties.AutomationId="ResultList" AutomationProperties.Name="解析結果のエントリ"
@@ -266,7 +266,7 @@
                             </ListBox>
                         </Grid>
                         <TextBlock Grid.Row="5" Margin="0,12,0,0" Style="{StaticResource Subtle}"
-                                   Text="解析が正常に完了すると、ここにZIPの全エントリと分類が表示されます。"
+                                   Text="解析が正常に完了すると、ここにアーカイブの全エントリと分類が表示されます。"
                                    Visibility="{Binding HasSuccessfulAnalysis, Converter={StaticResource CollapsedWhen}}" />
                     </Grid>
                 </ScrollViewer>
@@ -296,14 +296,14 @@
             <Grid IsEnabled="{Binding IsSettingsEditable}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" MinWidth="160" />
+                    <ColumnDefinition Width="*" MinWidth="140" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="ZIPを探すディレクトリ" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,10,0" />
+                <TextBlock Text="アーカイブを探すディレクトリ" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,10,0" />
                 <TextBox x:Name="SearchDirectoryBox" Grid.Column="1" Text="{Binding SearchDirectory, UpdateSourceTrigger=PropertyChanged}"
-                         AutomationProperties.Name="ZIPを探すディレクトリ" Margin="0,0,8,0" KeyDown="SearchBoxKeyDown" />
+                         AutomationProperties.Name="アーカイブを探すディレクトリ" Margin="0,0,8,0" KeyDown="SearchBoxKeyDown" />
                 <Button x:Name="SearchButton" Grid.Column="2" Content="検索" Click="SearchClicked" Style="{StaticResource PrimaryButton}" MinWidth="64" />
                 <Button x:Name="ChooseFolderButton" Grid.Column="3" Content="フォルダーを選択..." Click="ChooseFolderClicked" />
                 <CheckBox x:Name="RecursiveCheckBox" Grid.Column="4" Content="サブディレクトリも検索" IsChecked="{Binding Recursive}" Margin="4,0,0,0" />
@@ -327,7 +327,7 @@
                 </StackPanel>
                 <TextBlock x:Name="ModeDescriptionText" Style="{StaticResource Subtle}" VerticalAlignment="Center" Margin="16,0,0,0" FontSize="12"
                            TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
-                           Text="ZIPの内容と全バイト一致したファイルだけを削除候補にします。"
+                           Text="アーカイブの内容と全バイト一致したファイルだけを削除候補にします。"
                            Visibility="{Binding IsStrict, Converter={StaticResource VisibleWhen}}" />
             </DockPanel>
         </Border>
@@ -385,7 +385,7 @@
                          VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling"
                          PreviewKeyDown="WorkListKeyDown" SelectionChanged="WorkListSelectionChanged" />
                 <TextBlock Grid.Row="2" Margin="14" Style="{StaticResource Subtle}" IsHitTestVisible="False"
-                           Text="検索すると、見つかったZIP（Archive）と、それぞれに追加したTargetがここに並びます。"
+                           Text="検索すると、見つかったアーカイブ（Archive）と、それぞれに追加したTargetがここに並びます。"
                            Visibility="{Binding HasSession, Converter={StaticResource CollapsedWhen}}" />
             </Grid>
             <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="Transparent" Focusable="False" ShowsPreview="False" />

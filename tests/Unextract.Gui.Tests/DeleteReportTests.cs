@@ -128,7 +128,7 @@ public sealed class DeleteReportTests
         Assert.Equal(0, report.UnknownRemaining);
         Assert.True(report.LogConfirmed);
         Assert.Contains($"不明（削除された可能性あり）: #{unknown} ", report.Detail, StringComparison.Ordinal);
-        Assert.Contains("解析時のZIPの順による推定です", report.Detail, StringComparison.Ordinal);
+        Assert.Contains("解析時のアーカイブの順による推定です", report.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public sealed class DeleteReportTests
             Line(Result("completed", 0, deleted: 4, notSelected: 7));
         report = Create(Approved, Finish(done, 0));
         Assert.True(report.Succeeded);
-        Assert.Contains("解析後にZIPが変更された可能性があります", report.Detail, StringComparison.Ordinal);
+        Assert.Contains("解析後にアーカイブが変更された可能性があります", report.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -224,7 +224,7 @@ public sealed class DeleteReportTests
         Assert.Equal(1, report.Unprocessed);
         Assert.Contains("削除された可能性あり: file7", report.Detail, StringComparison.Ordinal);
         Assert.Contains("CLIが報告した上記の対象です", report.Detail, StringComparison.Ordinal);
-        Assert.Contains("未処理の件数は解析時のZIPの順による推定です", report.Detail, StringComparison.Ordinal);
+        Assert.Contains("未処理の件数は解析時のアーカイブの順による推定です", report.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("#5", report.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("不明（削除された可能性あり）: #", report.Detail, StringComparison.Ordinal);
     }

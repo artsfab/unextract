@@ -4,42 +4,46 @@
 
 [対象](#scope) / [Prepare](#prepare) / [実行](#execution) / [削除0件](#zero-deletions) / [異常](#failure-stages) / [モード](#modes)
 
-規範本文は本書と[CLI](spec/cli.md)、[ZIP](spec/zip.md)、[ファイル安全性](spec/filesystem.md)、[機械可読出力](spec/machine-output.md)の5本文と、GUIを変更するときだけ読む[GUI](spec/gui.md)である。担当領域の条件・例外・文言は各領域が定める。READMEは利用者向け要約、ARCHITECTUREは実装案内、RATIONALEは理由、TESTINGは検証方法であり仕様を追加しない。矛盾時は明示された決定・詳細規定を調べ、未決の意味変更は[未解決一覧](OPEN_ISSUES.md)へ出す。
+規範本文は本書と[CLI](spec/cli.md)、[ZIP](spec/zip.md)、[RAR](spec/rar.md)、[ファイル安全性](spec/filesystem.md)、[機械可読出力](spec/machine-output.md)の6本文と、GUIを変更するときだけ読む[GUI](spec/gui.md)である。担当領域の条件・例外・文言は各領域が定める。READMEは利用者向け要約、ARCHITECTUREは実装案内、RATIONALEは理由、TESTINGは検証方法であり仕様を追加しない。矛盾時は明示された決定・詳細規定を調べ、未決の意味変更は[未解決一覧](OPEN_ISSUES.md)へ出す。
+
+<a id="archive-terms"></a>
+**アーカイブの読み替え**: 入力のアーカイブは ZIP または RAR である ([対象](#scope))。規範本文で形式に依存しない意味で書かれた「ZIP」(ZIP、ZIP エントリ、FullName、ZIP の順、ZIP 自身、ZIP の内容・展開ストリームなど) は、RAR の実行では処理中の RAR に読み替える。RAR のエントリ名 (FullName)・順・内容の読み取りは[RAR](spec/rar.md)が定める。[ZIP](spec/zip.md)の名前の復号、特殊エントリ、CRC の取得元、`ZipArchive` に委ねる範囲は ZIP 固有であり、RAR では[RAR](spec/rar.md)の対応する規定による。利用者向けの文言の読み替えは[CLI](spec/cli.md#archive-wording)による。
 
 <a id="scope"></a>
 ## 目的と対象
 
 特に断らない限り Strict の仕様である。Fast の保証・非保証は[モード契約](#modes)による。
 
-Windows 11 の CLI。単一の ZIP と、利用者が明示した既存の NTFS ディレクトリ `target` を受け取り、ZIP 内の通常ファイルと現在の target 内の通常ファイルを対応付ける。操作は2つある。
+Windows 11 の CLI。単一のアーカイブ (ZIP、または [RAR](spec/rar.md#scope) の対象範囲の RAR) と、利用者が明示した既存の NTFS ディレクトリ `target` を受け取り、ZIP 内の通常ファイルと現在の target 内の通常ファイルを対応付ける。操作は2つある。
 
 - `analyze`: ZIP 全体を検査し、全エントリを target 側で分類して表示する。**完全な非破壊操作**であり、削除用ハンドルを開かず、何も削除しない。
 - `delete`: 処理対象のエントリを ZIP の順に1件ずつ、**その時点の target の状態で**検証し、条件を満たしたファイルをその場で削除する。Strict では、**削除に使う同じハンドルから読んで全バイト一致を確認したファイルだけ**を削除する。`analyze` の結果は削除の根拠にしない。
 
 「その ZIP から展開された」という来歴は証明しない。利用者が追加・変更したファイルを誤って削除しないことを最優先とし、不明・判定不能なら削除しない。
 
-**削除安全性の根拠は、`ZipArchive` から実際に読み出した内容と target の全バイト一致である。** CRC-32 は偶発的な破損・切り詰め・記録と実データの食い違いを検出する補助検査であり、削除の根拠でも、敵対的に作られた ZIP への防御でもない ([CRC](spec/zip.md#crc))。
+**削除安全性の根拠は、`ZipArchive` (RAR では UnRAR.dll) から実際に読み出した内容と target の全バイト一致である。** CRC-32 (RAR では BLAKE2 も) は偶発的な破損・切り詰め・記録と実データの食い違いを検出する補助検査であり、削除の根拠でも、敵対的に作られたアーカイブへの防御でもない ([CRC](spec/zip.md#crc)、[RARの内容検証](spec/rar.md#verification))。
 
 ZIP にない target 内のファイルは表示・集計・分類・削除しない (完全に無視する)。実名を確認するために target 内のディレクトリの項目を走査することはあるが ([実名確認](spec/filesystem.md#real-names))、走査した名前は ZIP エントリの成分名との照合にだけ使い、照合しなかった名前は保持も出力もしない。ディレクトリは、ZIP に明示されていても、ファイル削除後に空になっても削除しない。target と ZIP 自身も削除しない。クラウド placeholder やクラウド同期の意味論は対象外とし、安全に通常ファイルと認定できない対象は削除しない。
 
-同梱のGUI (`unextract-gui.exe`) は、ZIPの検索と複数Targetの管理・順次実行を担うラッパーで、このCLIを子プロセスとして起動し[機械可読出力](spec/machine-output.md)を使う。一致判定・削除の安全性はCLIだけが判断し、GUIの契約は[GUI](spec/gui.md)が定める。
+同梱のGUI (`unextract-gui.exe`) は、アーカイブ (ZIP・RAR) の検索と複数Targetの管理・順次実行を担うラッパーで、このCLIを子プロセスとして起動し[機械可読出力](spec/machine-output.md)を使う。一致判定・削除の安全性はCLIだけが判断し、GUIの契約は[GUI](spec/gui.md)が定める。
 
-実装は .NET 10 (LTS) と `System.IO.Compression.ZipArchive`、Windows の文書化された Win32 API (kernel32 と `winioctl.h` の FSCTL) を使う。独自の ZIP 構造パーサは作らない。
+実装は .NET 10 (LTS) と `System.IO.Compression.ZipArchive`、版を固定した UnRAR.dll ([RAR](spec/rar.md#library))、Windows の文書化された Win32 API (kernel32 と `winioctl.h` の FSCTL) を使う。独自の ZIP・RAR 構造パーサは作らない (RAR の先頭署名の確認だけは例外。[形式の判定](spec/rar.md#format))。UnRAR.dll は RAR の実行でだけ読み込む。
 
 <a id="prepare"></a>
 ## Prepare
 
 1. 引数を検査する ([引数と終了状態](spec/cli.md#arguments))。(`--log` を指定した場合) 続けてログファイルを新規作成し、実行終了まで保持する ([実行ログ](spec/machine-output.md#log))。失敗は入力エラー。
-2. ZIP を `FileShare.Read` (他者の書き込み・削除・改名を拒否) で開いて**実行終了まで保持**する。`ZipArchive` で読み取り専用で開く (CP437 を指定。[名前の復号](spec/zip.md#decoding))。ZIP64、Data Descriptor (DD)、SFX は独自の形式判定を設けず、`ZipArchive` の読み取り結果に委ねる ([内容検証](spec/zip.md#content))。
+2. アーカイブを `FileShare.Read` (他者の書き込み・削除・改名を拒否) で開いて**実行終了まで保持**する。ZIP は `ZipArchive` で読み取り専用で開く (CP437 を指定。[名前の復号](spec/zip.md#decoding))。ZIP64、Data Descriptor (DD)、SFX は独自の形式判定を設けず、`ZipArchive` の読み取り結果に委ねる ([内容検証](spec/zip.md#content))。RAR は、先頭の署名を確かめ ([形式の判定](spec/rar.md#format))、UnRAR.dll を照合してロードし ([版の固定](spec/rar.md#pinning))、保持中のハンドルの最終パスを DLL に渡して一覧用に開き、全エントリを列挙する ([列挙](spec/rar.md#listing))。開いた RAR がボリューム (分割の巻) なら、列挙の前にこの手順の FATAL (`ARCHIVE_MULTI_VOLUME`) とする。RAR のエントリ総数・名前長・メタデータ総量の上限は列挙中に検査し、超過はこの手順の FATAL とする ([RAR上限](spec/rar.md#limits))。これらは手順3〜5の入力エラーより先に報告される。
 3. (`delete` で `--entries` を指定した場合) entries ファイルを読み、[entries](spec/cli.md#entries) の形式の検査を行う。読み終えたら閉じ、以後は参照しない。
 4. 拒否対象の既知フォルダーを取得し、[最終パスへ解決](spec/filesystem.md#target-root)する。失敗は入力エラー。
 5. [targetルートの確認と保持](spec/filesystem.md#target-root)を行う。確認用ハンドルと保持用ハンドルの同一性、ディレクトリ・NTFS・最終パス・拒否位置を検証し、実行終了まで保持する。判定不能は入力エラー。
-6. **ZIP の全エントリ**の名前、種類、重複・衝突、resource limits ([ZIP上限](spec/zip.md#limits)) を検査する ([ZIP名と構造](spec/zip.md#names))。`--entries` の有無に関係なく全エントリに行う。この段階は target に触れず、target の状態に依存しない。1件でも不正または判定不能なら FATAL。
+6. **ZIP の全エントリ**の名前、種類、重複・衝突、resource limits ([ZIP上限](spec/zip.md#limits)) を検査する ([ZIP名と構造](spec/zip.md#names))。RAR の全エントリは DLL が列挙したエントリで、RAR 固有の受理範囲 (Solid・前後の巻へ続くエントリ・暗号化・リンク・作成元 OS・辞書サイズなど) もここで検査する ([RARの列挙](spec/rar.md#listing))。RAR のボリュームのフラグと、エントリ総数・名前長・メタデータ総量は手順2で検査済みである (ZIP はこれらの上限もこの手順で検査する)。`--entries` の有無に関係なく全エントリに行う。この段階は target に触れず、target の状態に依存しない。1件でも不正または判定不能なら FATAL。
 7. ZIP 自身の個体 ([特殊ファイルと属性](spec/filesystem.md#special-files)) のボリュームシリアルと File ID を、ZIP のパスを `FILE_READ_ATTRIBUTES` のみで reparse をたどるハンドルで開いて得る (ZIP は保持済みで改名・削除されないため、実体の ID になる)。失敗は FATAL。
 8. (`--entries` を指定した場合) entries の各行を手順6を通過したエントリと照合する ([entries](spec/cli.md#entries))。
 9. 処理対象を決める: `analyze` は全エントリ。`delete` は全エントリ、または `--entries` で選んだエントリ (ZIP の順)。
+10. (Strict の RAR の場合) DLL でアーカイブを内容読み取り用に開き、実行終了まで保持する。ここで行うのは読み取りセッションの準備 (open) だけで、内容の読み取り・展開・全バイト検証はエントリの処理で行う ([RARの読む範囲と順序](spec/rar.md#session))。失敗は FATAL。
 
-実行全体で保持するハンドルは ZIP と target ルートの2つだけである (`--log` を指定した場合はログファイルを加えた3つ)。
+実行全体で保持するハンドルはアーカイブと target ルートの2つだけである (`--log` を指定した場合はログファイルを加えた3つ)。Strict の RAR では、これに加えて手順10の DLL の読み取りセッション (DLL が自分で開いたアーカイブ) を保持する。
 
 <a id="execution"></a>
 ## エントリの処理
@@ -60,15 +64,16 @@ Prepareのどの段階の入力エラー・FATALでも、確認での中止で�
 <a id="prepare-failures"></a>
 ### PrepareのFATAL・入力エラー
 
-- ZIP を開けない・`ZipArchive` が読めない。target の入力エラー ([引数と終了状態](spec/cli.md#arguments))。entries の入力エラー ([entries](spec/cli.md#entries))。
+- ZIP を開けない・`ZipArchive` が読めない。RAR の DLL が利用できない (`RAR_LIBRARY_UNAVAILABLE`。[版の固定](spec/rar.md#pinning))・署名が無い・署名を読めない・DLL が開けない・列挙が失敗する、Strict の RAR を内容読み取り用に開けない ([RAR](spec/rar.md))。target の入力エラー ([引数と終了状態](spec/cli.md#arguments))。entries の入力エラー ([entries](spec/cli.md#entries))。
 - 危険な ZIP パス、Windows 不正名、U+FFFD を含む名前、重複・case 衝突、ZIP 内部の file/dir 構造衝突、ZIP の特殊エントリ ([ZIP名と構造](spec/zip.md#names))。
-- 宣言側の resource limits の超過 ([ZIP上限](spec/zip.md#limits))。
+- RAR の非対応の形式・エントリ (Solid、分割、暗号化、SFX、リンク・参照、種別・属性・作成元 OS の違反) ([RARの対象範囲](spec/rar.md#scope)、[種別と属性](spec/rar.md#types))。
+- 宣言側の resource limits の超過 ([ZIP上限](spec/zip.md#limits)、RAR の辞書サイズを含む [RAR上限](spec/rar.md#limits))。
 - ZIP 自身の個体の取得失敗 ([Prepare](#prepare) の手順7)。
 
 <a id="analyze-failures"></a>
 ### analyzeのエントリ処理中のFATAL
 
-- 内容比較候補の [内容検証基準](spec/zip.md#verification) の 1〜5 の違反: 暗号化、`Open()`・読み取り中の例外 (破損・未対応圧縮方式を含む)、実測バイト数が `Length` を超過または不足、CRC-32 不一致。実測展開量の合計の超過。
+- 内容比較候補の [内容検証基準](spec/zip.md#verification) の 1〜5 の違反: 暗号化、`Open()`・読み取り中の例外 (破損・未対応圧縮方式を含む)、実測バイト数が `Length` を超過または不足、CRC-32 不一致。実測展開量の合計の超過。RAR では [RARの内容検証](spec/rar.md#verification) の違反と、内容読み取りのセッションの前進の失敗 (ヘッダーが Prepare の列挙と異なる・足りない、ヘッダーの読み取りや `RAR_SKIP` の失敗。処理対象外・ディレクトリの通過中に検出しても、次に処理するエントリの FATAL・STOP とする。[読む範囲と順序](spec/rar.md#session))。
 - target 側で存在・種類・属性・特殊性を判定する API の失敗 ([実名確認](spec/filesystem.md#real-names) の実名確認の列挙・列挙用ハンドルの検証の失敗を含む)、存在確認後のオープン失敗 (**他プロセスによる共有違反を含む**)、列挙で見つけた項目と開いたハンドルの File ID の不一致、比較中の target 読み取り失敗、最終パスの不一致 ([target分類](spec/filesystem.md#classification)、[特殊ファイルと属性](spec/filesystem.md#special-files))。
 
 <a id="delete-failures"></a>
@@ -96,4 +101,4 @@ Fastは、内容の一致、正常な展開、暗号化・破損・未対応方�
 | サイズ一致・ZIP内容検証異常 | analyzeはFATAL、deleteはSTOP | SAME_SIZE / deleteで削除 |
 | サイズ不一致 | MODIFIED | MODIFIED |
 
-ZIPにないtargetファイルは両モードで無視する。警告の全文と位置は[CLI](spec/cli.md#warning)、内容検証は[ZIP](spec/zip.md#verification)、削除順序は[FS](spec/filesystem.md#delete-flow)が定める。
+ZIPにないtargetファイルは両モードで無視する。警告の全文と位置は[CLI](spec/cli.md#warning)、内容検証は[ZIP](spec/zip.md#verification)と[RAR](spec/rar.md#verification)、削除順序は[FS](spec/filesystem.md#delete-flow)が定める。RAR の Fast は宣言側の受理範囲 (暗号化・辞書サイズ) と切り詰めの扱いで ZIP の Fast と差があり、[RARのFast](spec/rar.md#fast)が定める。

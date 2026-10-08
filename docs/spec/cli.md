@@ -8,15 +8,16 @@
 ## 引数と終了状態
 
 ```text
-unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]
-unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
+unextract analyze <archive> --target <dir> [--fast] [--jsonl]
+unextract delete  <archive> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
 ```
 
-- 第1引数はサブコマンドで、`analyze` または `delete` (小文字の完全一致) だけを受け付ける。サブコマンドが無い (旧形式 `unextract <archive.zip> --target <dir>` を含む)、または不明なサブコマンドは入力エラーとし、削除処理を開始せず、両サブコマンドの使い方を表示する。
+- `<archive>` は ZIP または RAR のアーカイブ1つ ([対象](../SPEC.md#scope))。拡張子が `.rar` (大小文字を区別しない) なら RAR、それ以外は ZIP として扱う ([RARの形式の判定](rar.md#format))。
+- 第1引数はサブコマンドで、`analyze` または `delete` (小文字の完全一致) だけを受け付ける。サブコマンドが無い (旧形式 `unextract <archive> --target <dir>` を含む)、または不明なサブコマンドは入力エラーとし、削除処理を開始せず、両サブコマンドの使い方を表示する。
 - `--dry-run` は廃止した。どの位置にあっても入力エラーとし、削除処理を開始せず、結果の確認には `analyze` を使うよう案内する。互換動作 (別名) は設けない。
 - `analyze` が受け付けるオプションは `--target`、`--fast`、`--jsonl` だけ、`delete` は `--target`、`--fast`、`--entries`、`--yes`/`-y`、`--jsonl`、`--log` だけである。それ以外 (`analyze` に `--entries`・`--yes`・`-y`・`--log` を指定した場合を含む) は入力エラーとする。
 - `--jsonl` は機械可読出力を選ぶ ([機械可読出力](machine-output.md))。機械モードの `delete` では `--yes`/`-y` が必須で、`--log <file>` (実行ログ) は機械モードの `delete` だけで受け付ける ([起動](machine-output.md#invocation))。`--jsonl` なしの実行には本書の規定がそのまま適用される。
-- `--target`、`--entries`、`--log` はオプション名と値を別々の引数で渡す形だけとし、`--target=dir` の形、値が無い・空、値が `-` で始まる、同じオプションの重複 (`--yes` と `-y` の併用を含む)、ZIP の指定が無い・複数は、いずれも入力エラーとする。
+- `--target`、`--entries`、`--log` はオプション名と値を別々の引数で渡す形だけとし、`--target=dir` の形、値が無い・空、値が `-` で始まる、同じオプションの重複 (`--yes` と `-y` の併用を含む)、アーカイブの指定が無い・複数は、いずれも入力エラーとする。
 - `--target` は必須。既存ディレクトリ・NTFS・拒否位置・reparse・最終パスの検証は[FSのtargetルート](filesystem.md#target-root)による。
 - `--fast` を指定すると、その実行全体が Fast モードになる ([モード契約](../SPEC.md#modes))。指定しなければ Strict である。
 - `--entries <file>` は `delete` の処理対象を、ファイルに列挙した ZIP エントリに限定する ([entries](#entries))。安全性の判断を変えず、処理範囲を狭めるだけである。指定しなければ、全エントリが処理対象になる。
@@ -34,7 +35,7 @@ unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] [--ye
 
 entries ファイルは、`delete` が処理を試みてよい ZIP エントリの集合を指定するだけのファイルである。File ID、日時、ハッシュ、分類結果などは持たず、`analyze` の時点で安全だったことを証明するものではない。
 
-- 1行に1つ、ZIP エントリの FullName (`ZipArchive` が [名前の復号](zip.md#decoding) の規則で復号した名前そのもの) を書く。Windows のパスとして解釈しない。
+- 1行に1つ、ZIP エントリの FullName (`ZipArchive` が [名前の復号](zip.md#decoding) の規則で復号した名前そのもの。RAR では [RARの名前](rar.md#names) の FullName で、区切りは `\`) を書く。Windows のパスとして解釈しない。
 - 文字コードは UTF-8。不正なバイト列は入力エラー。先頭の UTF-8 BOM (EF BB BF) は1個だけ許して除く。UTF-16 / UTF-32 の BOM で始まるファイルは入力エラーとし、UTF-16 と判定できる場合は UTF-8 が必要であることが分かるメッセージにする。
 - 改行は LF と CRLF を受け付け、混在してもよい。各行末の CR を1個だけ除く。それ以外の位置の CR は入力エラー (CR はエントリ名に現れない)。最終行の末尾の改行は任意で、最後の改行の後の空文字列は行として数えない。
 - 空行は入力エラー。行が1つも無いファイル (空ファイル、BOM だけのファイル) も入力エラー。
@@ -95,7 +96,7 @@ Prepare が全て成功した後、最初の target エントリの処理を始�
 
 - 見出し行 `Status                Entry -> Target` の後に結果行。
 - 完走: `合計: N エントリ (MATCHED a、MODIFIED b、MISSING c、SKIPPED_SPECIAL_FILE d、DIRECTORY e)` (Fast は `SAME_SIZE` を先頭に)。続けて `analyze は削除しません。削除は unextract delete で行います (delete は実行時の状態を改めて検証します)。`
-- FATAL: stdout に `判定済み: N エントリ (...)`、`FATAL: 1 エントリ (#n)`、`未判定: M エントリ`。ZIP 事前検証の FATAL では結果行と見出しを出さず `判定済み: 0 エントリ` と `未判定: M エントリ`。stderr に `FATAL: エントリ #n "<名前>": <原因> (<詳細>)` と `解析を中止しました。analyze は削除を行いません (削除0件)。`
+- FATAL: stdout に `判定済み: N エントリ (...)`、`FATAL: 1 エントリ (#n)`、`未判定: M エントリ`。ZIP 事前検証の FATAL では結果行と見出しを出さず `判定済み: 0 エントリ` と `未判定: M エントリ`。アーカイブを開く・列挙する段階 (Prepare の手順2) の FATAL (RAR のボリューム (`ARCHIVE_MULTI_VOLUME`。[RARの列挙](rar.md#listing)) と列挙中の上限超過 ([RAR上限](rar.md#limits)) を含む) では、ヘッダー・見出し・件数を出さない。stderr に `FATAL: エントリ #n "<名前>": <原因> (<詳細>)` と `解析を中止しました。analyze は削除を行いません (削除0件)。`
 
 <a id="delete-output"></a>
 ### deleteの表示
@@ -119,7 +120,7 @@ Prepare が全て成功した後、最初の target エントリの処理を始�
   ```
 
   中止: `中止しました。削除0件。` 非対話で `--yes` なし: `標準入力が対話的でなく --yes も無いため、確認できません。` の後に `中止しました。削除0件。`。
-- 要約: `要約: 削除済み a、MODIFIED b、MISSING c、SKIPPED_SPECIAL_FILE d、DIRECTORY e、DELETE_FAILED f、処理対象外 h、未処理 g`。処理対象外は `--entries` で選択されなかった ZIP エントリの件数、未処理は STOP 後に処理しなかった選択対象の件数。対象外の target は解決しない。
+- 要約: `要約: 削除済み a、MODIFIED b、MISSING c、SKIPPED_SPECIAL_FILE d、DIRECTORY e、DELETE_FAILED f、処理対象外 h、未処理 g`。処理対象外は `--entries` で選択されなかった ZIP エントリの件数、未処理は STOP により処理を完結しなかった選択対象 (STOP の対象を除く) の件数で、ZIP では STOP の対象より後ろの選択対象である (RAR で STOP の対象より前に未処理が生じる場合は [RARの読む範囲と順序](rar.md#session))。対象外の target は解決しない。
 - STOP した場合 (stdout): `途中で停止しました。それまでに削除した a 件は元に戻りません。<Entry> は削除していません。未処理の g 件には触れていません。` (成立確認の失敗などでは「削除していません」を「削除された可能性があります」にする)。stderr: `停止: エントリ #n "<名前>": <理由>[ (削除された可能性あり)]` と `以後の処理を停止しました (削除済み a、DELETE_FAILED f、未処理 g)。`
 - STOP なしで `DELETE_FAILED` がある場合 (stderr): `DELETE_FAILED が f 件あるため、エラーとして終了します (削除済み a)。`
 - Prepare の失敗: stderr に `入力エラー: ...` または `FATAL: ...` と `削除開始前に中止しました。削除0件。`
@@ -140,6 +141,9 @@ Prepare が全て成功した後、最初の target エントリの処理を始�
 <a id="warning"></a>
 ## ヘッダー・凡例・Fast警告
 
+<a id="archive-wording"></a>
+**形式名の読み替え**: 本書の利用者向けの文言で、処理中のアーカイブを指す「ZIP」(Fast警告の「ZIP から」、SkipReason の `(ZIP 自身)`、entries の「ZIP に一致するエントリがありません」など) は、RAR の実行では「RAR」と表示する。引数エラーでも、入力パスから [形式の判定](rar.md#format) に従って RAR と確定できる場合に限り、そのアーカイブを指す「ZIP」を「RAR」に読み替える。形式が未確定 (アーカイブの未指定・空・複数指定など) なら既存の文言を維持する。引数の受理条件・エラーの優先順位と ZIP の実行の文言は変えない。状態名・コード・機械可読出力の値 (同じ説明を使うメッセージを除く) は形式によって変えない。
+
 ```text
 Archive: <ZIP のパス (指定されたまま、表示用エスケープ)>
 Target:  <target の最終パス (\\?\ を除く)>
@@ -154,15 +158,16 @@ Fast の実行では、次の警告を (1) `analyze` の結果表示のヘッダ
 ```
 
 <a id="input-errors"></a>
-## 入力エラーの案内
+## 入力エラー・FATALの案内
 
 - 使い方:
 
   ```text
-  使い方: unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]
-          unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
+  使い方: unextract analyze <archive> --target <dir> [--fast] [--jsonl]
+          unextract delete <archive> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
   ```
 
-- サブコマンドなし・旧形式: `入力エラー: サブコマンド (analyze または delete) を指定してください。旧形式 (unextract <archive.zip> --target <dir>) は廃止しました。` + 使い方。
+- サブコマンドなし・旧形式: `入力エラー: サブコマンド (analyze または delete) を指定してください。旧形式 (unextract <archive> --target <dir>) は廃止しました。` + 使い方。
 - `--dry-run`: `入力エラー: --dry-run は廃止しました。削除せずに結果を確認するには unextract analyze を使ってください。` + 使い方。
 - entries: `入力エラー: --entries の <n> 行目: <理由>` (例: 「ZIP に一致するエントリがありません ("Bin/a.dll")。大小文字だけが違うエントリ "bin/a.dll" があります」「UTF-8 として読めません」「UTF-16 で保存されています。UTF-8 で保存してください」「空行です」「3 行目と同じです」「ディレクトリエントリは指定できません」)。
+- RAR の DLL が利用できない ([版の固定](rar.md#pinning)、Prepare の FATAL): FATAL の原因を `UnRAR.dll を使用できないため、RAR を処理できません (<理由>)。<読み込み元の絶対パス> に UnRAR.dll 7.23 (x64) の UnRAR64.dll を置いてください。ZIP の処理には影響しません。` とする。<理由> は `見つかりません`、`版が一致しません (SHA-256)`、`読み込めません (<Win32 の説明>)`、`版が一致しません (RARGetDllVersion=<値>)` のいずれか。続く行は他の Prepare の FATAL と同じ (`削除開始前に中止しました。削除0件。` など)。

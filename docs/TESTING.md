@@ -2,7 +2,7 @@
 
 役割: 検証原則、変更別のテストコード案内、重要回帰・再現上の知識と受入条件。テスト変更・実行時に該当節を読む。
 
-[原則・安全](#principles) / [系列索引](#test-series) / [GUI](#gui) / [フック](#hooks) / [回帰](#regressions) / [再現](#reproduction) / [E2E](#e2e) / [受入](#acceptance)
+[原則・安全](#principles) / [系列索引](#test-series) / [GUI](#gui) / [フック](#hooks) / [回帰](#regressions) / [再現](#reproduction) / [RAR](#rar) / [E2E](#e2e) / [受入](#acceptance)
 
 <a id="principles"></a>
 ## 共通の原則・安全装置
@@ -39,6 +39,10 @@ Coreは副作用・API失敗を注入した判定、Winは実NTFS/Win32、CLIは
 |---|---|---|
 | Prepare・削除0件 | P | [CommandTests](../tests/Unextract.Core.Tests/CommandTests.cs)、[InputIntegrationTests](../tests/Unextract.Windows.Tests/Integration/InputIntegrationTests.cs) |
 | ZIP内容・CRC | C | [ContentVerificationTests](../tests/Unextract.Core.Tests/ContentVerificationTests.cs)、[Win分類](../tests/Unextract.Windows.Tests/Integration/ClassificationIntegrationTests.cs) |
+| 内容検証器のチャンクの契約 | C16 | [ContentVerifierTests](../tests/Unextract.Core.Tests/ContentVerifierTests.cs) は読み方 (ZIPのpull・RARの押し込み) と独立に、64 KiB超・4 MiB・1バイトずつ・宣言サイズをまたぐチャンク、targetの短いread、空、中止後の呼び出し、実測累計を同じ判定にする |
+| RAR (Core) | U01〜U03、U10〜U22 | [ArchiveFormatTests](../tests/Unextract.Core.Tests/ArchiveFormatTests.cs)、[EntryBudgetTests](../tests/Unextract.Core.Tests/EntryBudgetTests.cs)、[RarLibraryTextTests](../tests/Unextract.Core.Tests/RarLibraryTextTests.cs)、[RarCommandTests](../tests/Unextract.Core.Tests/RarCommandTests.cs)。DLLの代わりに台本で動く偽のソース・セッション ([FakeRar](../tests/Unextract.Core.Tests/Fakes/FakeRar.cs)) で、Prepareの手順2/6/10、受理規則の全コード、前進とdeleteの保留ディレクトリ、押し込み型の内容検証、形式名、閉じる順と誤配線を確かめる |
+| RAR (Windows・CLI) | U30〜U50、J11 | [RarSourceTests](../tests/Unextract.Windows.Tests/Rar/RarSourceTests.cs) は製品のソース・セッション・コールバックを台本で動く偽のDLL ([FakeUnrarApi](../tests/Unextract.Windows.Tests/Rar/FakeUnrarApi.cs)) で動かす (署名、`RAR_OM_LIST_INCSPLIT`と最終パス、ボリューム、列挙中の上限、ヘッダーの各項目の照合 (種類がCRC-32以外の `FileCRC` は照合しない。BLAKE2は `Hash` を照合し、CRC-32の期待値を内容検証に渡さない)、SKIPの回数、チャンク・中止・例外の再送出、closeの失敗、`RAR_SKIP`/`RAR_TEST`以外を使わないことの静的検査)。[UnrarLibraryTests](../tests/Unextract.Windows.Tests/Rar/UnrarLibraryTests.cs) はDLLを使わずに作れる原因 (不在・SHA-256不一致・非PEのロード失敗)。[RarCliTests](../tests/Unextract.Cli.Tests/RarCliTests.cs)・[RarMachineRecordTests](../tests/Unextract.Cli.Tests/RarMachineRecordTests.cs) はCLIの組立て、DLLのFATALの人間向け・機械出力、ZIPの実行がRARを開く関数を呼ばないこと |
+| RAR (採用版のDLL) | U51〜U54、U60〜U68、U70〜U73 | 採用版のDLL ([DLLの用意](#rar)) と生成器のRARで製品の経路を通す。[RealUnrarTests](../tests/Unextract.Windows.Tests/Rar/RealUnrarTests.cs) は成功時の版・版とSHA-256の不一致、RAR5/RAR4の一覧 (Unix名の `\`・`:` の変換を含む)、セッションの往復 (5 MiB超・空のエントリ)、中止後のclose、コールバックの例外の再送出、DLLのCRC不一致。[RarIntegrationTests](../tests/Unextract.Windows.Tests/Integration/RarIntegrationTests.cs) は実NTFSで、生成器で作れる受理・拒否を両操作・両モードで、analyzeの非破壊とdelete (MODIFIED・MISSING・ADS・ディレクトリの通過)、target内のRAR自身、`--entries` の選択外の通過、Strictの内容検証のSTOPとFastの削除、非候補の破損を読まないこと、切り詰めと1ビット破壊の全位置、DLLが何も書かないこと (先頭がハッシュの無いディレクトリのRARで、両モードのanalyzeとdeleteの成功と分類も確かめる)。[RarE2ETests](../tests/Unextract.E2E.Tests/RarE2ETests.cs) はexe (publish版を含む) で、DLLを置かない配置でのRARのFATAL (削除0件、target・entries不変) と同じexeのZIPの成功、build・publish出力にDLLが無いこと、DLLを置いた配置のanalyze、JSONLの `name` → entries → deleteとログのバイト一致、作業ディレクトリへの無書き込み。GUIの経路は[GUI](#gui)のIntegrationTests |
 | 名前・種別・構造・runtime形式 | Z | [EntryPathTests](../tests/Unextract.Core.Tests/EntryPathTests.cs)、[EntryTypeTests](../tests/Unextract.Core.Tests/EntryTypeTests.cs)、[StructureTests](../tests/Unextract.Core.Tests/StructureTests.cs)、[ZipArchiveSourceTests](../tests/Unextract.Core.Tests/ZipArchiveSourceTests.cs) |
 | 上限 | R | [LimitsTests](../tests/Unextract.Core.Tests/LimitsTests.cs)、[Win入力](../tests/Unextract.Windows.Tests/Integration/InputIntegrationTests.cs) |
 | target・属性・実名 | T | [ClassificationTests](../tests/Unextract.Core.Tests/ClassificationTests.cs)、[FileAttributeRulesTests](../tests/Unextract.Core.Tests/FileAttributeRulesTests.cs)、[Win分類](../tests/Unextract.Windows.Tests/Integration/ClassificationIntegrationTests.cs)、[TargetRootTests](../tests/Unextract.Core.Tests/TargetRootTests.cs) |
@@ -73,7 +77,7 @@ A05はanalyzeへの--yes/-y/--entries/--dry-run拒否をK系と同じ条件で�
 
 契約は[GUI仕様](spec/gui.md)、配置は[ARCHITECTURE](ARCHITECTURE.md#gui)。画面を変えたときの確認は[下の節](#gui-review)、人間の受入は[M14](MANUAL_TESTS.md#m14)。
 
-[Gui.Tests](../tests/Unextract.Gui.Tests/DeploymentTests.cs)は、通常buildの同梱CLIが入力エラーだけの呼び出しで起動できること、GUIのdepsにCore/Windows/Cliがないこと、固定配置以外のexeへフォールバックしないことを確認する。CLI欠落時の説明表示はSTA上でWPFの実ツリーを作って検証する。fixtureは既存方針どおり保存する。
+[Gui.Tests](../tests/Unextract.Gui.Tests/DeploymentTests.cs)は、通常buildの同梱CLIが入力エラーだけの呼び出しで起動できること、GUIのdepsにCore/Windows/Cliがないこと、固定配置以外のexeへフォールバックしないこと、GUIの出力 (`cli\` を含む) とGUIのdepsにUnRAR.dllが無いこと (同梱しない) を確認する。CLI欠落時の説明表示はSTA上でWPFの実ツリーを作って検証する。fixtureは既存方針どおり保存する。
 
 [JsonlReceiverTests](../tests/Unextract.Gui.Tests/JsonlReceiverTests.cs)は、byte分割・複数行同時受信、生のUnicode名・64bit length、LF未終端断片、未知フィールド・診断コードの受理と、不正な版・型・順序・必要項目・completed件数の拒否を確認する。正常解析時に省略される未判定件数と、途中終了時の必要項目を区別する。deleteのindex欠番とSTOPPED、internal_errorの不確実性を保持する。
 
@@ -91,7 +95,7 @@ A05はanalyzeへの--yes/-y/--entries/--dry-run拒否をK系と同じ条件で�
 
 [DeleteReportTests](../tests/Unextract.Gui.Tests/DeleteReportTests.cs)は、受信できた範囲からの削除結果の表示を確認する。正常終了の削除成功件数と64bitを含むDELETED length合計、`DELETE_FAILED`のみの終了1、STOP (停止理由・possibly_deleted・表示変換)、`run`なしの削除0件、`run`のみ・先頭/中間/最後のentryでの途絶、index欠番を数値+1で扱わないこと、次の候補が無い場合に不明対象を作らないこと、`internal_error`の`deletion_started`の真偽による違い、解析後のZIPの並べ替え・エントリ数変化では1件を特定せず未受信の承認候補を結果不明とし、CLIがentry_nameで報告した対象だけを名指しすること、変化が見えない場合もCLIの報告を解析時順の推定より優先すること、承認していないentry_nameの結果不明、entry_nameの無い`result.error.possibly_deleted`の表示、非互換版・読めない行・重複index・stdout読取失敗・実終了未確認・承認範囲外の出力 (selected不一致・承認外の名前) の原因別の「結果不明」、runを受信していない場合のログ未確認、実終了コードとresultの食い違い、run.targetの差の表示のみを模擬出力で確認する。[DeletionPreparationTests](../tests/Unextract.Gui.Tests/DeletionPreparationTests.cs)は、これらのVM反映 (delete実行済み・スナップショット消費・後続の未実行・ログパス表示と作成未確認の明示・自動再試行や再解析をしないこと) を確認する。[AnalysisViewTests](../tests/Unextract.Gui.Tests/AnalysisViewTests.cs)は、実行中のdeleteへ閉じる要求を2回出してもKillも終了もせず、待機文言を出し、現在のTarget完了後に後続を始めず閉じることと、解析中の終了要求がキャンセルを経て閉じることを実ウィンドウで確認する。GUIクラッシュ・OS強制終了・電源断後の挙動は保証対象外で、テストしない。
 
-[IntegrationTests](../tests/Unextract.Gui.Tests/IntegrationTests.cs)は、同梱の実CLIと自作GUID fixtureで、Fastの削除 (同サイズで内容が違うファイルは削除され、サイズが違うファイルは残る。内容の一致は保証しない)、解析後に変更されたファイルをStrictが残して残りだけ削除すること、同一Archiveの2 Targetが登録順で連番ログ (`-001`・`-002`、共通の開始時刻) を残すこと、親子Targetが重複して指す同じファイルの2回目をエラーにしないことを確認する。いずれも一時entriesは残らない。fixtureは保存し、テストからは削除しない。
+[IntegrationTests](../tests/Unextract.Gui.Tests/IntegrationTests.cs)は、同梱の実CLIと自作GUID fixtureで、Fastの削除 (同サイズで内容が違うファイルは削除され、サイズが違うファイルは残る。内容の一致は保証しない)、解析後に変更されたファイルをStrictが残して残りだけ削除すること、同一Archiveの2 Targetが登録順で連番ログ (`-001`・`-002`、共通の開始時刻) を残すこと、親子Targetが重複して指す同じファイルの2回目をエラーにしないこと、RAR (生成器) をGUIの経路で解析・削除できること (同梱CLIの複製の隣に採用版のDLLを置いた自作の配置) と、DLLの無い同梱CLIではRARの解析が失敗し、CLIの説明 (置き場所と対処) が失敗の詳細になることを確認する。いずれも一時entriesは残らない。fixtureは保存し、テストからは削除しない。
 
 [PerformanceTests](../tests/Unextract.Gui.Tests/PerformanceTests.cs)は、ZIPのエントリ数上限 (100,000件、[ZIP](spec/zip.md)) の模擬結果を使い、JSONL受信 (4 KiB単位)、10 Target分の採用・保持メモリ・絞り込み・削除計画の作成、STA上のWPFでの詳細の繰返し切替・スクロール・絞り込みの応答を測る。[LargeSessionPerformanceTests](../tests/Unextract.Gui.Tests/LargeSessionPerformanceTests.cs)は、10,000 Archive×3 Targetの作業一覧 (一括追加、初回表示、絞り込み、すべて選択/解除、個別とArchive単位の選択、詳細の切替、スクロール、モード変更)、解析の進捗を受信している間の詳細切替・絞り込み、自作fixtureの10,000 ZIPの再帰検索を測り、プロセスメモリを出力する。通常の選択・詳細切替・絞り込みは1秒以内を目標として判定し、検索・受信などは緩い上限とする。実測値はテスト出力へ書く (この環境の値であり、実データの性能保証や対応件数の上限ではない。メモリ値は同じテストホストで並行するテストを含む)。描画 (Opacity 0のウィンドウ) とレイアウトは測るが、実GPUでの描画・操作の体感は[手動確認](MANUAL_TESTS.md)の対象。削除は行わない。
 
@@ -202,6 +206,25 @@ J系列 ([機械可読出力](spec/machine-output.md)) は引数・診断・clos
 - Fast body非読取はCoreのRecordingContentProvider、ThrowOnRead、呼び出し記録でGetContent/Open/target readを直接確認する。CRC計算専用フックはないので、body非読取・CRC期待値非参照からの間接確認と区別する。Winの結果だけをbody/CRCの直接観測と呼ばない。
 - 実測ではOS、SDK/runtime、NTFS、同一/別プロセス、フック位置、モード、実施できなかった前提を短く記録する。Coreで模擬できてもWinで再現不能なら未確認に残す。
 
+<a id="rar"></a>
+## RARの検証で引き継ぐ知識
+
+RARの系列は[上表](#test-series)のC16とU。偽のソース・セッション・DLLによる試験は、実物のDLLによる試験を置き換えない。採用版のDLLを使う自動試験 (CIを含む) は生成器のRARで行う。WinRARで作った実物のRAR (圧縮・BLAKE2の実値・NTFSストリーム・実物のSolid・分割・SFX・暗号化・リンク) はローカル検証 ([下記](#rar-real)) で確かめ、自動試験には含めない。RAR4の実物は前提不成立 (RAR4を作れる旧版のWinRARが無い) で未確認 ([OPEN_ISSUES](OPEN_ISSUES.md#rar))。契約は[RAR仕様](spec/rar.md)、観測と判断は[理由](RATIONALE.md#rar)にある。
+
+- 既存の原則 (analyzeの非破壊、Prepare失敗の削除0件、同じハンドル、モード違いの再利用、Skip・期待値緩和の禁止) をRARにもそのまま適用する。RARのPrepareの拒否 ([列挙](spec/rar.md#listing)) は両操作・両モードで同じFATAL・削除0件になることを確認する。ZIPの既存の系列はRAR対応の後も期待値を変えずに通す。
+- UnRAR.dllが無い・照合できない環境でRARのテストを前提不成立や成功にしない (E2Eのexeと同じく失敗とする)。DLLが無くてもZIPの実行が影響を受けないこと (DLLを探さない) は別に確認する。
+- DLLの用意: UnRAR.dllはリポジトリに置かない ([版の固定](spec/rar.md#pinning))。開発機・CIでは [get-unrar-dll.ps1](../scripts/get-unrar-dll.ps1) が rarlab の `unrardll-723.exe` を取得し (取得済みなら `-InstallerPath`)、外側と `x64\UnRAR64.dll` のSHA-256を照合して、リポジトリ外 (既定 `%LOCALAPPDATA%\unextract-dev\unrar-7.23\`) に置く。展開は7-ZipかWinRARの `UnRAR.exe` で行い、自己展開exeは実行しない。テストは環境変数 `UNEXTRACT_TEST_UNRAR_DLL` (DLLの絶対パス)、未設定なら既定の場所から読み ([UnrarTestDll](../tests/Unextract.Core.Tests/Fixtures/UnrarTestDll.cs))、版の照合は製品のローダーが行う。製品はこの環境変数を読まない。in-processの試験はテスト用のローダーにそのパスを渡す。exeの試験 (E2E・GUI) は、テスト対象のexeのフォルダーの直下のファイルをfixtureへ複製して隣にDLLを置く (利用者が置いた状態の再現)。元のbuild・publish出力にはDLLを置かず、DLLの無い配置として使う。
+- 採用版のDLLを同じテストプロセスでロードするテストクラスは、xUnitのコレクション [UnrarDllCollection](../tests/Unextract.Windows.Tests/Rar/UnrarDllCollection.cs) に入れて直列に実行する。DLLのエラーの状態はプロセスで1つで、並列のハンドルの間で結果が漏れる ([理由](RATIONALE.md#rar-dll-usage))。製品の使い方 (1プロセスで同時に1つのハンドル) を再現するもので、判定を緩めるものではない。exeを子プロセスで起動する試験 (E2E・GUI) は対象外。
+- 製品がDLLに `RAR_EXTRACT` と展開先を渡さないこと、作業ディレクトリとtargetにDLLが書き込まないことを試験で固定する。
+- fixture: 異常系 (password checkの無い暗号化、作成元OS・属性、Unix名の `\`・`:`、redir、ハッシュ不一致、サイズ不明、辞書サイズの宣言、Solid・分割のフラグ、RAR4のUnicode名) とStoredの正常系は、テスト専用生成器 ([RarWriter](../tests/Unextract.Core.Tests/Fixtures/RarWriter.cs)。`ZipPatcher` と同じ位置づけで製品パーサを兼ねない) でテスト中に作る。生成器は圧縮・BLAKE2の実値・NTFSストリームを作れず、実物の試験を置き換えない。
+- <a id="rar-real"></a>WinRARで作った実物のRAR (2026-10-09の方針): **ローカル検証専用**とし、リポジトリに収録せず、CIでも実行しない。再配布条件の確認は検証の前提にしない。WinRAR (試用期間内を含め、そのライセンス条件の範囲内) の `Rar.exe` で、自作データから検証のたびに作る。第三者のRARや実在のデータは使わない。
+  - 手順: [verify-real-rar.ps1](../scripts/verify-real-rar.ps1) に、検証するexe (隣に採用版の `UnRAR64.dll` を置いたもの。publish版ならリポジトリ外の出力) を渡す。リポジトリ外の新しい作業フォルダー (既定は `%TEMP%` の下) に元データ・RAR・targetを作り、`--jsonl` で確かめる。作業フォルダーは掃除しない (削除はunextractが自作のtargetに対して行うものだけ)。終了コード0で全項目合格。
+  - 範囲: RAR5の圧縮 (-m3/-m5)・Stored・BLAKE2 (-htb)・`-rr`/`-qo`/`-ts`・`-md1g` の受理 (Strictの全件MATCHED、FastのSAME_SIZE、1ビットの変更がMODIFIED)、Strictのdeleteが一致したファイルだけを消すこと (同サイズの変更・余分なファイル・フォルダーは残る)、Fastが同サイズの別内容を消すこと、日本語名の `--entries`、圧縮データの破損がMATCHEDにならず (CRC-32・BLAKE2) Strictで FATAL/STOP になること、`-os` (targetがADSを持てば `SKIPPED_SPECIAL_FILE`、持たなければStrictの `CONTENT_TOO_LONG`)、Solid・ヘッダー暗号化・ファイル暗号化・分割の全巻・SFX (`.rar` に改名)・`-oi`・`-oh` が両操作・両モードで同じFATALになりtargetに触れないこと。
+  - 範囲外: RAR4の実物 (WinRAR 7.xは作れない。旧版が要る)、Unix作成のRAR、1 GiB超の辞書の実物 (WinRARはデータより大きい辞書を縮めて記録する)、`-ol` のsymlink (作成権限が要る)。
+  - 実施する時: DLLの版、RARの読み取り・内容検証・受理規則、`verify-real-rar.ps1` を変えたとき。結果 (日付・WinRARの版・exe) は[OPEN_ISSUES](OPEN_ISSUES.md#rar-observations)に記録する。
+- 誤解しやすい点: NTFSストリーム付き (`-os`) は、targetがADSを持てば `SKIPPED_SPECIAL_FILE`、持たなければStrictでFATAL/STOPになる (両方を作る)。分割は第1巻・途中の巻・最終巻のすべてでopen直後の `ARCHIVE_MULTI_VOLUME` (手順2) になり、`ENTRY_SPLIT` (手順6) は非分割アーカイブ内の分割フラグ (前・後の両方。生成器で作る) で確かめる。切り詰めは位置によって拒否・エントリの減少・全件のままに分かれるので、全位置を試す。非候補の破損 (1件目) を読まずに後続がMATCHEDになることを確かめる。判定が `RAR_TEST` の成功後に確定すること (データ一致でもDLLのハッシュ不一致ならFATAL/STOP) を確かめる。
+- DLLの版を変えるとき (採用版・SHA-256の変更は[版の固定](spec/rar.md#pinning)の変更): 新しい版で、採用版のDLLを使う自動試験 (U51〜U54・U60〜U68・U70〜U73。生成器のRARでの受理・拒否、Unix名の変換、切り詰めと1ビット破壊の全位置を含む) と[実物のRAR](#rar-real)のローカル検証を実行する。加えて、それらが扱わない観測 ([DLLの使い方](RATIONALE.md#rar-dll-usage)の各項目 (最終パスでのopen、照合中のロード、中止後の挙動、チャンクの長さ、`UCM_LARGEDICT`、構造体の配置、単一ファイルpublishの配置)、WinRAR製の実物の全位置の切り詰め、名前の変換とWinRARの展開名の一致) を確かめ直す。当時の観測用PoCは残していないので、確かめ直すときは観測の内容と条件 ([理由](RATIONALE.md#rar)) をもとに、リポジトリ外・solution外の使い捨てのコードで行う (DLLは絶対パスでロードし、`RAR_TEST`・`RAR_SKIP` だけを使う)。切り詰めは、WinRARの `-m0` で自作データから作ったRAR5を全位置で切り詰め、拒否・エントリの減少・全件のままの内訳と例外が無いことを見る。名前の変換は、生成器でUnix名の `\`・`:` を持つRARを作り、DLLの列挙名とWinRARの `UnRAR.exe x` の展開名を比べる。fixtureは自作データだけで作り、第三者のRAR (SharpCompressのテスト用アーカイブなど) は使わない (RAR4は生成器か、旧版のWinRARで作る)。
+
 <a id="e2e"></a>
 ## E2E・PTY・実行案内
 
@@ -224,6 +247,7 @@ PTYは同一端末にstdout/stderrが流れるため、所属はCore/CLIで別�
 - DELETE_FAILEDで非削除続行、未知エラーSTOP、親ID/最終パス/事前判定が働く。STOP前の削除は戻らず後続は未処理。指示後STOPは削除された可能性を保持する。
 - 共通安全性をFastでも確認し、同サイズ異内容の削除を仕様どおりと判定する。非読取と実測量非計上も確認する。
 - 機械可読出力の完了境界 (`run`前は削除0件、書けなければ先へ進まない)、機械モードの`--yes`必須、`--jsonl`なしの不変性、実行ログとstdoutの一致を確認する。
+- RARでも同じ受入条件を両操作・両モードで確認し、RAR固有の拒否 (Solid・分割・暗号化・SFX・リンク・辞書サイズ)、DLLが利用できないときのRARだけのFATAL (4つの原因ごとの説明と削除0件、target・entriesに触れないこと) とZIPへの無影響、Prepareの内容読み取り用openがデータを読まないこと、`RAR_EXTRACT` 不使用を確認する ([RAR](#rar))。
 - 未確認・前提不成立・手順未確立・対象外を区別し、ファイルsymlink/placeholderを成立とみなさない。READMEの要約を契約・限界と同期する。
 
 文書・コメントだけの変更では破壊を伴う実測や全製品テストを新規実行する必要はない。

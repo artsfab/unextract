@@ -29,7 +29,7 @@ public partial class DeletionConfirmWindow : Window
         }
         FastPanel.Visibility = fast && any ? Visibility.Visible : Visibility.Collapsed;
         FastText.Text = MainViewModel.FastWarning;
-        ModeText.Text = fast ? "Fast（パスとサイズのみ。内容は比較しません）" : "Strict（ZIPの内容と全バイト一致したファイルだけ）";
+        ModeText.Text = fast ? "Fast（パスとサイズのみ。内容は比較しません）" : "Strict（アーカイブの内容と全バイト一致したファイルだけ）";
         TargetCountText.Text = $"{plan.Items.Count:N0} 件（一覧の順に1件ずつ実行します）";
         FileCountText.Text = string.Create(CultureInfo.CurrentCulture,
             $"{plan.TotalCandidates:N0} ファイル（解析時点の最大件数）。実行時にCLIが再検証するため、解析後に変化したファイルなど、削除されないファイルがあり得ます。");

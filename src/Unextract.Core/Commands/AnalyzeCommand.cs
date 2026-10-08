@@ -1,6 +1,7 @@
 using Unextract.Core.Analysis;
 using Unextract.Core.Display;
 using Unextract.Core.Results;
+using Unextract.Core.Zip;
 
 namespace Unextract.Core.Commands;
 
@@ -22,8 +23,9 @@ public static class AnalyzeCommand
         var output = context.Output;
         var error = context.ErrorOutput;
         var notifications = context.Notifications;
+        var format = ArchiveFormats.FromPath(request.ArchivePath);
 
-        var (prepared, failure) = Preparation.Run(request.ArchivePath, request.TargetPath, entriesPath: null, context);
+        var (prepared, failure) = Preparation.Run(request.ArchivePath, request.TargetPath, entriesPath: null, request.Mode, context);
         if (prepared is null)
         {
             AnalysisResult? analysis = null;
@@ -34,7 +36,7 @@ public static class AnalyzeCommand
                 if (notifications is null)
                 {
                     WriteLines(output, ReportText.Header(request.ArchivePath, targetFinalPath, request.Mode));
-                    WriteLines(output, AnalyzeOutput.Format(analysis, request.Mode));
+                    WriteLines(output, AnalyzeOutput.Format(analysis, request.Mode, format));
                 }
             }
 
@@ -68,11 +70,12 @@ public static class AnalyzeCommand
                 context.Limits,
                 notifications is null ? context.Progress : null,
                 request.Mode,
-                notifications?.OnAnalysisResult));
+                notifications?.OnAnalysisResult,
+                prepared.SessionFor(request.Mode)));
 
             if (notifications is null)
             {
-                WriteLines(output, AnalyzeOutput.Format(result, request.Mode));
+                WriteLines(output, AnalyzeOutput.Format(result, request.Mode, format));
                 WriteLines(error, AnalyzeOutput.FormatFatal(result));
                 request.AfterResults?.Invoke();
             }

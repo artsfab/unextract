@@ -16,8 +16,8 @@
 ## 起動
 
 ```text
-unextract analyze <archive.zip> --target <dir> [--fast] --jsonl
-unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] --yes|-y --jsonl [--log <file>]
+unextract analyze <archive> --target <dir> [--fast] --jsonl
+unextract delete  <archive> --target <dir> [--fast] [--entries <file>] --yes|-y --jsonl [--log <file>]
 ```
 
 - `--jsonl` は値を取らないフラグで、両操作で受け付ける。位置は自由で、重複は入力エラー ([引数](cli.md#arguments) の規則と同じ)。
@@ -64,9 +64,9 @@ unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] --yes
 
 `entry` のフィールド:
 
-- `index`: 1始まりの Central Directory の順の番号で、全エントリで通し。人間向け表示の `#n` と同じ。
-- `name`: FullName ([出力先と符号化](#destinations))。
-- `length`: ZIP の宣言展開サイズ。ディレクトリは 0。`MATCHED`・`SAME_SIZE`・`DELETED` では target の `EndOfFile` と一致することが分類の条件なので、対象の論理サイズに等しい。
+- `index`: 1始まりのアーカイブの順の番号で、全エントリで通し。ZIP は Central Directory の順、RAR は DLL が列挙した順 ([RARの列挙](rar.md#listing))。人間向け表示の `#n` と同じ。
+- `name`: FullName ([出力先と符号化](#destinations))。RAR の FullName は [RARの名前](rar.md#names) による。
+- `length`: アーカイブの宣言展開サイズ (RAR は DLL が報告する展開サイズ)。ディレクトリは 0。`MATCHED`・`SAME_SIZE`・`DELETED` では target の `EndOfFile` と一致することが分類の条件なので、対象の論理サイズに等しい。
 - `status`: 既存の状態名だけを使う。`analyze` は `MATCHED`、`SAME_SIZE`、`MODIFIED`、`MISSING`、`SKIPPED_SPECIAL_FILE`、`DIRECTORY`。`delete` は `DELETED`、`MODIFIED`、`MISSING`、`SKIPPED_SPECIAL_FILE`、`DELETE_FAILED`、`STOPPED`。
 - `skip_reason` (`SKIPPED_SPECIAL_FILE` のとき): [特殊ファイルと属性](filesystem.md#special-files) の理由に対応する `PARENT_REPARSE`、`DIRECTORY`、`REPARSE`、`HARDLINK`、`ADS`、`ARCHIVE_ITSELF`、`ATTRIBUTES`。
 - `reason` (`DELETE_FAILED` と `STOPPED` のとき): `step`、`code`、`win32_error` (ある場合)、`message` を持つオブジェクト ([コード](#codes))。
@@ -84,7 +84,7 @@ unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] --yes
 |---|---|---|
 | `completed` | 処理対象を最後まで処理した | `analyze` は 0。`delete` は `DELETE_FAILED` が0件なら 0、1件以上なら 1 |
 | `input_error` | 人間向けの出力が「入力エラー」になるもの (引数、entries、拒否位置、target、ログの作成、機械モードで `--yes` がない場合) | 1 |
-| `fatal` | 人間向けの出力が「FATAL」になるもの (ZIP を開けない、ZIP の事前検証、ZIP 自身の個体、`analyze` のエントリ処理中) | 1 |
+| `fatal` | 人間向けの出力が「FATAL」になるもの (アーカイブを開けない、RAR の DLL が利用できない、アーカイブの事前検証、アーカイブ自身の個体、`analyze` のエントリ処理中) | 1 |
 | `stopped` | `delete` の逐次処理中の STOP | 1 |
 | `internal_error` | 想定外の例外、出力先への書き込みの失敗 | 1 |
 
@@ -121,17 +121,19 @@ unextract delete  <archive.zip> --target <dir> [--fast] [--entries <file>] --yes
 | 引数 | `USAGE` (細分化しない。機械モードで `--yes` がない場合を含む) | [引数](cli.md#arguments)、[起動](#invocation) |
 | 実行ログ | `LOG_ALREADY_EXISTS`、`LOG_CREATE_FAILED` | [実行ログ](#log) |
 | entries | `ENTRIES_UNREADABLE`、`ENTRIES_TOO_LARGE`、`ENTRIES_UTF16`、`ENTRIES_UTF32`、`ENTRIES_TOO_MANY_LINES`、`ENTRIES_CR_IN_LINE`、`ENTRIES_EMPTY_LINE`、`ENTRIES_LINE_TOO_LONG`、`ENTRIES_INVALID_UTF8`、`ENTRIES_DUPLICATE_LINE`、`ENTRIES_NO_LINES`、`ENTRIES_NO_MATCH`、`ENTRIES_DIRECTORY` | [entries](cli.md#entries) |
-| ZIP を開けない | `ARCHIVE_OPEN_FAILED`、`ARCHIVE_UNREADABLE` | [ZIP](zip.md)、[Prepare の失敗](../SPEC.md#prepare-failures) |
+| アーカイブを開けない | `ARCHIVE_OPEN_FAILED`、`ARCHIVE_UNREADABLE` | [ZIP](zip.md)、[RARの形式の判定](rar.md#format)、[RARの列挙](rar.md#listing)、[Prepare の失敗](../SPEC.md#prepare-failures) |
+| RAR の DLL と形式 | `RAR_LIBRARY_UNAVAILABLE`、`ARCHIVE_NOT_RAR`、`ARCHIVE_SOLID`、`ARCHIVE_MULTI_VOLUME`、`ARCHIVE_ENCRYPTED` | [版の固定](rar.md#pinning)、[形式の判定](rar.md#format)、[RARの対象範囲](rar.md#scope) |
+| RAR のエントリ | `ENTRY_SOLID`、`ENTRY_SPLIT`、`ENTRY_ENCRYPTED`、`ENTRY_REDIRECTION`、`ENTRY_WITHOUT_HASH`、`UNSUPPORTED_HOST_OS`、`FILE_ENTRY_NAME_ENDS_WITH_SEPARATOR`、`ENTRY_DICTIONARY_TOO_LARGE` (属性・mode の違反は下の「ZIP の構造・種別」のコードを使う) | [RARの列挙](rar.md#listing)、[RARの名前](rar.md#names)、[種別と属性](rar.md#types)、[RAR上限](rar.md#limits) |
 | 上限 | `TOO_MANY_ENTRIES`、`NAME_TOO_LONG`、`METADATA_TOO_LARGE`、`PATH_TOO_DEEP`、`ENTRY_TOO_LARGE`、`TOTAL_DECLARED_LENGTH_TOO_LARGE`、`INVALID_DECLARED_LENGTH`、`TOTAL_READ_LENGTH_TOO_LARGE` | [ZIP上限](zip.md#limits) |
 | 名前とパス | `NAME_CONTAINS_REPLACEMENT_CHARACTER`、`ROOTED_PATH`、`DRIVE_SPECIFIER`、`COLON`、`CONTROL_CHARACTER`、`INVALID_CHARACTER`、`EMPTY_COMPONENT`、`DOT_COMPONENT`、`DOT_DOT_COMPONENT`、`TRAILING_DOT_OR_SPACE`、`RESERVED_NAME` | [ZIP名と構造](zip.md#names) |
 | ZIP の構造・種別 | `DUPLICATE_ENTRY`、`CASE_INSENSITIVE_COLLISION`、`FILE_DIRECTORY_CONFLICT`、`FILE_USED_AS_PARENT`、`FILE_ENTRY_WITH_DIRECTORY_TYPE`、`DIRECTORY_ENTRY_WITH_FILE_TYPE`、`UNSUPPORTED_ENTRY_TYPE`、`DOS_DIRECTORY_ATTRIBUTE_ON_FILE_ENTRY`、`DOS_REPARSE_POINT_ATTRIBUTE`、`DIRECTORY_ENTRY_WITH_DATA` | [ZIP名と構造](zip.md#names) |
 | target | `TARGET_NOT_FOUND`、`TARGET_CHECK_FAILED`、`TARGET_IS_REPARSE_POINT`、`TARGET_CHANGED_DURING_CHECK`、`TARGET_NOT_DIRECTORY`、`TARGET_NOT_NTFS`、`TARGET_IS_UNC_PATH`、`TARGET_IS_DRIVE_ROOT`、`TARGET_UNSUPPORTED_PATH_FORM`、`TARGET_IS_PROTECTED_LOCATION`、`PROTECTED_LOCATION_UNRESOLVED` | [targetルート](filesystem.md#target-root) |
 | ZIP 自身と target 側の判定不能 | `ARCHIVE_IDENTITY_FAILED`、`ENUMERATION_OPEN_FAILED`、`ENUMERATION_HANDLE_MISMATCH`、`ENUMERATION_FAILED`、`UNEXPECTED_TARGET_TYPE`、`COMPARISON_OPEN_FAILED`、`COMPARISON_FILE_ID_MISMATCH`、`FINAL_PATH_MISMATCH`、`PARENT_FILE_ID_MISMATCH`、`TARGET_DELETE_PENDING`、`TARGET_INFO_FAILED`、`TARGET_READ_FAILED` | [解決順序](filesystem.md#resolution)、[特殊ファイルと属性](filesystem.md#special-files)、[analyzeのFATAL](../SPEC.md#analyze-failures) |
-| 内容検証 | `CONTENT_ENCRYPTED`、`CONTENT_READ_FAILED`、`CONTENT_TOO_LONG`、`CONTENT_TOO_SHORT`、`CONTENT_CRC_MISMATCH` | [内容検証基準](zip.md#verification) |
+| 内容検証 | `CONTENT_ENCRYPTED`、`CONTENT_READ_FAILED`、`CONTENT_TOO_LONG`、`CONTENT_TOO_SHORT`、`CONTENT_CRC_MISMATCH`、`ARCHIVE_CHANGED` (RAR の内容読み取りのヘッダーが Prepare と異なる・足りない)。RAR の内容読み取りでヘッダーの読み取りや `RAR_SKIP` が失敗した場合は、エントリの処理中でも `ARCHIVE_UNREADABLE` (いずれも [セッションの前進](rar.md#session) の失敗で、`entry_index`・`entry_name` は次に処理するエントリ、検出位置は `message`)。RAR で DLL が `RAR_TEST` の失敗を返した場合 (BLAKE2 の不一致を含む) は `CONTENT_READ_FAILED` | [内容検証基準](zip.md#verification)、[RARの内容検証](rar.md#verification) |
 | delete 固有 | `DELETE_OPEN_REFUSED` (`DELETE_FAILED` の理由。`win32_error` は 32 または 5)、`OPEN_FAILED`、`IDENTITY_CHECK_FAILED`、`IDENTITY_CHECK_MISMATCH`、`FINAL_CHECK_MISMATCH`、`DISPOSITION_FAILED`、`DELETION_UNCONFIRMED` | [失敗の境界](filesystem.md#failure-boundary)、[削除用openのエラー](filesystem.md#open-errors) |
 | 内部 | `UNEXPECTED_EXCEPTION`、`OUTPUT_FAILED` | [出力先と符号化](#destinations)、[出力先と進捗](cli.md#streams) |
 
-- `delete` の STOP には、上表の target 側・内容検証のコードも使う (`analyze` の FATAL と同じ原因)。
+- `delete` の STOP には、上表の target 側・内容検証のコードと、RAR のセッションの前進の失敗の `ARCHIVE_UNREADABLE` も使う (`analyze` の FATAL と同じ原因)。
 - `IDENTITY_CHECK_FAILED` の `win32_error` は識別確認自体の値とし、元のopenの32/5は `message` に残す。最終確認の情報取得失敗は `step=final_check`・`code=TARGET_INFO_FAILED` と元の `win32_error`、値の不一致は `FINAL_CHECK_MISMATCH` とし `win32_error` を付けない。
 - コードは追加してよい。利用側は未知のコードを一般的なエラーとして扱う。
 - 利用側が状態の分岐に使ってよいのは、`type`、`status`、`outcome`、`exit_code`、`possibly_deleted`、`deletion_started` だけである。`stage`、`step`、`code`、`skip_reason` は表示と診断に使い、`message` は表示だけに使う。

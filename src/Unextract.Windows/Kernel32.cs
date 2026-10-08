@@ -67,6 +67,19 @@ internal static unsafe partial class Kernel32
         uint* fileSystemFlags,
         char* fileSystemNameBuffer,
         uint fileSystemNameSize);
+
+    // UnRAR.dll の読み込み (docs/spec/rar.md#pinning) だけに使う。絶対パスと検索範囲を限るフラグで呼び、DLL の検索順序に頼らない。FreeLibrary はしない。
+    [LibraryImport(Library, EntryPoint = "LoadLibraryExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial nint LoadLibraryEx(string fileName, nint file, uint flags);
+
+    [LibraryImport(Library, SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint GetProcAddress(nint module, string procName);
+}
+
+internal static class LoadLibraryFlags
+{
+    // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32: 依存の探索を DLL のフォルダーと System32 に限る。
+    public const uint SearchDllLoadDirAndSystem32 = 0x00000100 | 0x00000800;
 }
 
 // FILE_INFO_BY_HANDLE_CLASS (minwinbase.h) のうち使うもの。

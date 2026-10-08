@@ -7,6 +7,7 @@ using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Tests.Fixtures;
 using Unextract.Core.Zip;
+using Unextract.Windows.Rar;
 
 namespace Unextract.Windows.Tests.Integration;
 
@@ -120,8 +121,16 @@ internal static class RealRun
             () => new TargetLocationPolicyResult(locations.Policy, locations.Error),
             limits ?? Limits.Default,
             output,
-            error);
+            error,
+            OpenRarArchive: OpenRar);
     }
+
+    // RAR を開く関数 (CLI の RarArchives.Open と同じ RarArchiveSource.Open)。製品は実行中の exe のフォルダーの DLL を読むが、
+    // テストホストの exe のフォルダーには置かないので、採用版の DLL (UnrarTestDll) をテスト用のローダーで読む。
+    // ZIP の実行では呼ばれない (DLL が無くても ZIP のテストは影響を受けない)。
+    private static readonly Lazy<UnrarLibrary> RarLibrary = new(() => new UnrarLibrary(UnrarTestDll.Location));
+
+    public static ZipOpenResult OpenRar(string path, Limits limits) => RarArchiveSource.Open(path, limits, () => RarLibrary.Value.Load());
 
     // ZIP を path に書く (FileMode.CreateNew: 既存のファイルを上書きしない)。
     public static string WriteZip(string path, byte[] zip)

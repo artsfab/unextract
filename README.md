@@ -2,7 +2,7 @@
 
 本書は利用者向け要約です。仕様の正本は [SPECと担当仕様](docs/SPEC.md)、変更別の入口は [docs/README](docs/README.md)です。
 
-ZIP 内のファイルと照合して、target 内の対応するファイルだけを削除する Windows 11 用の CLI です。既定の Strict モードでは、**削除する直前に、ZIP 内のファイルと全バイト一致すると検証できたファイルだけ**を削除します。`--fast` を指定した Fast モードでは、**パスとサイズだけで判定し、内容は確認しません** (下記「Fast モード」)。多数の ZIP をまとめて扱う GUI も同梱しています (下記「GUI」)。
+ZIP 内のファイルと照合して、target 内の対応するファイルだけを削除する Windows 11 用の CLI です。既定の Strict モードでは、**削除する直前に、ZIP 内のファイルと全バイト一致すると検証できたファイルだけ**を削除します。`--fast` を指定した Fast モードでは、**パスとサイズだけで判定し、内容は確認しません** (下記「Fast モード」)。RAR (単一・非 Solid の RAR4/RAR5) も同じ契約で扱えます (下記「RAR アーカイブ」。別途 UnRAR.dll の導入が必要)。多数のアーカイブをまとめて扱う GUI も同梱しています (下記「GUI」)。
 
 > **注意: `unextract delete` はファイルを実際に削除します。ごみ箱を使わない完全削除で、unextract に復旧手段はありません。** 必ず先に `unextract analyze` で結果を確認してください。
 
@@ -214,6 +214,33 @@ Fast は、誤判定のリスクを利用者が受け入れたうえで、ZIP �
 - **警告**: `--jsonl`なしのFast実行では、パスとサイズだけで判定しており、内容の一致と ZIP からの正常な展開は確認していないことを示す警告を、`analyze` の結果の先頭、`delete` の先頭、`delete` の `[y/N]` の直前に表示します (`--yes` では確認が無いため、`delete` の先頭だけ)。Strict では表示しません。
 - **性能**: Fast は ZIP の展開と target のファイルの読み取りを行わないため、内容の I/O はかかりません。
 
+## RAR アーカイブ
+
+ファイル名の拡張子が `.rar` の入力は RAR として扱い、ZIP と同じ `analyze`・`delete`、Strict・Fast、`--entries`、`--jsonl`・`--log` を使えます (本書の「ZIP」を「アーカイブ」と読み替えてください)。正本は [RAR仕様](docs/spec/rar.md) です。
+
+- **対象**: 単一ファイルで非 Solid の RAR4・RAR5 だけです。Solid、分割 (ボリューム)、暗号化 (ファイル・ヘッダー)、自己解凍形式 (SFX)、リンク・参照 (symlink・junction・hardlink・ファイルの参照コピー) を含む RAR は、**何も削除せずに中止**します (Fast でも同じ)。`.cbr` など `.rar` 以外の拡張子の RAR は扱いません。
+- **名前**: RAR 内の名前は、UnRAR.dll が Windows 用に変換した名前 (区切りは `\`。Unix で作られた名前の `\` と `:` は `_`) で照合します。WinRAR で展開したフォルダーと一致し、7-Zip など他のツールで展開した名前とは一致しないことがあります (その場合は `MISSING` で削除しません)。
+- **既知の限界**: 末尾が切り詰められた RAR は、エントリの少ない正常な RAR に見えることがあります (列挙できた範囲だけを処理します)。NTFS ストリームを保存した RAR は、Strict でそのエントリが FATAL・STOP になることがあります。RAR の解析は unextract のプロセス内の UnRAR.dll (ネイティブコード) が行います。詳細は [既知の限界](docs/spec/rar.md#limitations) を参照してください。
+
+<a id="rar-dll"></a>
+### UnRAR.dll の導入 (RAR を扱う場合だけ)
+
+RAR の読み取りには rarlab 公式の UnRAR.dll 7.23 の x64 版 (`UnRAR64.dll`) が必要です。**unextract には同梱していません。** 利用者が入手して、`unextract.exe` と同じフォルダー (GUI の配布物では `cli\unextract.exe` と同じ `cli\` フォルダー) に置いてください。ZIP だけを扱う場合は不要です。
+
+1. rarlab の [RAR extras](https://www.rarlab.com/rar_add.htm) にある UnRAR.dll 7.23 の `unrardll-723.exe` (`https://www.rarlab.com/rar/unrardll-723.exe`) を入手します。ライセンスは同梱の `license.txt` を確認してください。
+2. `unrardll-723.exe` は自己解凍形式の書庫です。WinRAR や 7-Zip で開き、中の `x64\UnRAR64.dll` だけを取り出します (実行して展開先を選んでもかまいません)。
+3. 取り出した `UnRAR64.dll` の SHA-256 が次の値であることを確かめます。
+
+   ```powershell
+   Get-FileHash .\UnRAR64.dll -Algorithm SHA256
+   # 894B7D2DB8D6363EB12F30C7B89F48EAB9E71963B8B438675BDD64C12DD59BCC
+   ```
+
+4. `UnRAR64.dll` を `unextract.exe` と同じフォルダーに置きます。名前は変えません。
+
+- unextract は、そのフォルダーの `UnRAR64.dll` だけを読み込みます (PATH や作業ディレクトリは探しません。場所を変える引数・環境変数・設定もありません)。読み込む前に SHA-256 と版を確かめ、**7.23 の x64 版以外 (新しい版を含む) は使いません。**
+- DLL が無い、SHA-256 や版が一致しない、読み込めない場合は、RAR の実行だけが何も削除せずに中止し (終了コード 1)、原因と置くべき場所を表示します。ZIP の処理には影響しません。
+
 ## 中止・停止する条件
 
 ### 1件も削除せずに終了する場合 (終了コード 1)
@@ -283,7 +310,7 @@ FATAL のときは、判定済みのエントリの結果、原因のエント�
 
 大量の ZIP を保管しているフォルダーをまとめて整理するための GUI です。GUI 自身は一致判定や削除の安全性を判断せず、同梱の `cli\unextract.exe` を1件ずつ実行して、その結果を表示します。仕様の正本は [GUI仕様](docs/spec/gui.md) です。
 
-- **検索**: 選んだフォルダー (既定でサブフォルダーも) から ZIP を探します。各 ZIP (Archive) に、展開先のフォルダー (Target) を1つ以上追加します。Target は「Archiveと同じフォルダー」「Archive名のフォルダー」またはカスタム (固定パス、または `{{archive.dir}}`・`{{archive.name}}` を含むテンプレート) で指定でき、検索した全 Archive へ一括で追加することもできます。
+- **検索**: 選んだフォルダー (既定でサブフォルダーも) から ZIP と RAR (拡張子 `.zip`・`.rar`) を探します。各アーカイブ (Archive) に、展開先のフォルダー (Target) を1つ以上追加します。Target は「Archiveと同じフォルダー」「Archive名のフォルダー」またはカスタム (固定パス、または `{{archive.dir}}`・`{{archive.name}}` を含むテンプレート) で指定でき、検索した全 Archive へ一括で追加することもできます。
 - **画面**: 左が Archive とその Target の一覧 (状態と削除候補の要約つき)、右が一覧で選んだ項目の詳細 (解析結果の全エントリ、削除結果、操作できない理由) です。詳細を見ても、チェック (一括操作の対象) は変わりません。
 - **解析**: Target 単位、Archive 配下の未解析、選択中の未解析を1件ずつ順に実行します (キャンセル可)。結果は分類・パスで絞り込め、削除候補の論理サイズの合計を表示します (実際に空く容量とは一致しないことがあります)。
 - **モード**: Strict (初期値) と Fast (内容を比較しない旨の警告つき) です。解析結果があるときに変えると、確認のうえ全結果を破棄します。
@@ -302,6 +329,12 @@ FATAL のときは、判定済みのエントリの結果、原因のエント�
 ```text
 dotnet build -c Release
 dotnet test -c Release --no-build --logger "console;verbosity=detailed"
+```
+
+- RAR のテストは採用版の UnRAR.dll を使います。DLL はリポジトリに含めないので、テストの前に次でリポジトリ外 (既定 `%LOCALAPPDATA%\unextract-dev\unrar-7.23\`) に用意します (rarlab から取得し、SHA-256 を照合します。7-Zip か WinRAR の `UnRAR.exe` で展開します)。別の場所に置いた場合は環境変数 `UNEXTRACT_TEST_UNRAR_DLL` に DLL の絶対パスを設定します。DLL が無いと RAR のテストは失敗します (ZIP のテストには影響しません)。詳細は [TESTING](docs/TESTING.md#rar)。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\get-unrar-dll.ps1
 ```
 
 - `tests/Unextract.Windows.Tests` は実 NTFS 上で、テストが作った fixture の中のファイルを実際に削除します。fixture は `tests/<プロジェクト>/bin/<構成>/<TFM>/fixtures/` に作られ、**テストからは削除しません** (下記の掃除手順を使います)。ACL を変えるテストは終了時に元に戻します。
@@ -327,7 +360,7 @@ Ctrl+C、進捗表示、コードページやフォント・折り返し・視�
 
 通常buildのGUIの起動先は `src/Unextract.Gui/bin/<構成>/net10.0-windows/unextract-gui.exe` です (同じフォルダーの `cli\` に CLI がコピーされます)。
 
-GUIとCLIの一括配布は、新規のリポジトリ外ディレクトリを指定します。GUIはwin-x64の自己完結型フォルダー配布で、`unextract-gui.exe` と `cli\unextract.exe` (CLIは単独publishと同じ単一ファイルの自己完結型) だけで起動できます。CLIの相対位置は通常buildの出力 (`bin/<構成>/net10.0-windows/cli/`) と同じです。フォルダー全体を配布してください。インストーラーと自動更新はありません。`cli\unextract.exe` が無い、または出力が非互換のときも、GUIは起動し、解析・削除を開始できない理由と実行ログの確認先を画面に示します。テスト専用の偽CLI・FlaUIなどは配布物に入りません (`publish-gui.ps1` が検査します)。
+GUIとCLIの一括配布は、新規のリポジトリ外ディレクトリを指定します。GUIはwin-x64の自己完結型フォルダー配布で、`unextract-gui.exe` と `cli\unextract.exe` (CLIは単独publishと同じ単一ファイルの自己完結型) だけで起動できます。CLIの相対位置は通常buildの出力 (`bin/<構成>/net10.0-windows/cli/`) と同じです。フォルダー全体を配布してください。インストーラーと自動更新はありません。`cli\unextract.exe` が無い、または出力が非互換のときも、GUIは起動し、解析・削除を開始できない理由と実行ログの確認先を画面に示します。テスト専用の偽CLI・FlaUIなどとUnRAR.dllは配布物に入りません (`publish-gui.ps1` が検査します)。RARを扱う利用者は `cli\UnRAR64.dll` を自分で置きます (上記「UnRAR.dll の導入」)。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish-gui.ps1 -OutputDirectory <リポジトリ外の新規出力先>
@@ -369,7 +402,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\clean-test-fixtures.
 
 ### CI
 
-`.github/workflows/ci.yml` は push と pull request で、`windows-latest` 上で Release のビルド (警告ゼロ) とテストを行います。続けて、単一ファイルの exe を `dotnet publish` で作り、その exe を `UNEXTRACT_E2E_EXE` に指定して E2E テストを実行します。
+`.github/workflows/ci.yml` は push と pull request で、`windows-latest` 上で Release のビルド (警告ゼロ) とテストを行います。続けて、単一ファイルの exe を `dotnet publish` で作り、その exe を `UNEXTRACT_E2E_EXE` に指定して E2E テストを実行します。RAR のテストに必要な UnRAR.dll は、ビルドの前に `scripts\get-unrar-dll.ps1` で rarlab から取得・照合してリポジトリ外 (`runner.temp`) に置き、`UNEXTRACT_TEST_UNRAR_DLL` で Test と E2E に渡します。取得・照合に失敗すると CI は失敗します (RAR のテストを成功扱いにしません)。
 
 ## ライセンス
 

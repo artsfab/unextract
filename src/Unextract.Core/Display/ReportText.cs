@@ -1,4 +1,5 @@
 using Unextract.Core.Analysis;
+using Unextract.Core.Zip;
 
 namespace Unextract.Core.Display;
 
@@ -8,6 +9,10 @@ public static class ReportText
     // Fast の警告 (docs/spec/cli.md#warning、docs/spec/cli.md#warning、docs/RATIONALE.md#fast)。analyze・delete のヘッダーの先頭行と、delete の [y/N] の直前で同じ文言を使う。
     public const string FastWarning =
         "警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、ZIP から正常に展開できることは確認していません。";
+
+    // RAR の実行の Fast の警告 (docs/spec/cli.md#archive-wording)。
+    public const string RarFastWarning =
+        "警告: --fast のため、パスとサイズだけで判定しています。内容が一致することと、RAR から正常に展開できることは確認していません。";
 
     public const string Legend =
         "凡例: Target は target 内の対応する場所です。MISSING の場合は実在しない期待位置を示します。Target は確認用で、--entries には Entry を書きます。";
@@ -21,6 +26,8 @@ public static class ReportText
     private const string DevicePrefix = @"\\?\";
     private const string UncDevicePrefix = @"\\?\UNC\";
 
+    public static string FastWarningFor(ArchiveFormat format) => format == ArchiveFormat.Rar ? RarFastWarning : FastWarning;
+
     public static string CheckingProgress(int current, int total) => $"Checking {current} / {total}";
 
     public static string ProcessingProgress(int current, int total) => $"Processing {current} / {total}";
@@ -29,10 +36,11 @@ public static class ReportText
     // targetFinalPath は保持用ハンドルの最終パス (\\?\ を除いて表示する)。
     public static IReadOnlyList<string> Header(string archivePath, string targetFinalPath, RunMode mode)
     {
+        // 警告の形式名は archivePath の形式による (docs/spec/cli.md#archive-wording)。
         var lines = new List<string>();
         if (mode == RunMode.Fast)
         {
-            lines.Add(FastWarning);
+            lines.Add(FastWarningFor(ArchiveFormats.FromPath(archivePath)));
         }
 
         lines.Add($"Archive: {SafeDisplay.EscapeForList(archivePath, out _)}");
@@ -54,8 +62,9 @@ public static class ReportText
     }
 
     // SKIPPED_SPECIAL_FILE の理由の表示 (docs/spec/cli.md#result-lines)。
-    public static string Describe(SkipReason reason) => reason switch
+    public static string Describe(SkipReason reason, ArchiveFormat format = ArchiveFormat.Zip) => reason switch
     {
+        SkipReason.ArchiveItself when format == ArchiveFormat.Rar => "RAR 自身",
         SkipReason.ParentReparsePoint => "親が reparse",
         SkipReason.Directory => "ディレクトリ",
         SkipReason.ReparsePoint => "reparse",
@@ -66,7 +75,7 @@ public static class ReportText
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null),
     };
 
-    public static string SkipSuffix(SkipReason? reason) => reason is { } r ? $" ({Describe(r)})" : string.Empty;
+    public static string SkipSuffix(SkipReason? reason, ArchiveFormat format = ArchiveFormat.Zip) => reason is { } r ? $" ({Describe(r, format)})" : string.Empty;
 
     // \\?\C:\... を C:\... に、\\?\UNC\server\share を \\server\share にする (表示用)。
     public static string WithoutDevicePrefix(string path)
