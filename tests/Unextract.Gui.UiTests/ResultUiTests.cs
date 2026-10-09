@@ -1,13 +1,15 @@
 using FlaUI.Core.AutomationElements;
+using Xunit.Abstractions;
+
 namespace Unextract.Gui.UiTests;
 
 // Failure and unknown results on the screen, reached with abnormal fake CLI outputs (not only by screenshots).
-public sealed class ResultUiTests : UiTestBase
+public sealed class ResultUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
-    [Fact]
+    [UiFact]
     public void AnAnalysisFailureShowsTheCliErrorAndKeepsTheTargetUnanalyzed()
     {
-        var ui = Start(kind: "result-analysis");
+        var ui = Start();
         string archive = Path.Combine(ui.Fixtures, "a.zip"), target = Path.Combine(ui.Fixtures, "out");
         Files.Zip(archive, ("f1.txt", "x"));
         Directory.CreateDirectory(target);
@@ -29,10 +31,10 @@ public sealed class ResultUiTests : UiTestBase
         Assert.StartsWith("3. ", ui.TextOf("NextStepText"));
     }
 
-    [Fact]
+    [UiFact]
     public void ADeleteErrorStopsTheBatchAndAnUnknownOutputIsShownAsUnknownWithTheLog()
     {
-        var ui = Start(kind: "result-delete");
+        var ui = Start();
         string[] names = ["a", "b", "c"];
         string Archive(string n) => Path.Combine(ui.Fixtures, n + ".zip");
         string Target(string n) => Path.Combine(ui.Fixtures, "out-" + n);
@@ -45,6 +47,8 @@ public sealed class ResultUiTests : UiTestBase
         }
         ui.FakeDelete(Archive("a"), Target("a"), "strict", 2, 1, [new(1, "f1.txt", "DELETE_FAILED", 1)], notSelected: 1);
         ui.FakeDeleteRaw(Archive("c"), Target("c"), [Jsonl.Run("delete", "strict", Archive("c"), Target("c"), 2, 1, true), "{\"v\":2,\"type\":\"entry\"}"], exitCode: 1);
+        // b's output stops after the first entry (no result record): an incomplete result.
+        ui.FakeDeleteRaw(Archive("b"), Target("b"), [Jsonl.Run("delete", "strict", Archive("b"), Target("b"), 2, 1, true), Jsonl.Entry(1, "f1.txt", "DELETED", 1)], exitCode: 1);
         ui.Search();
         ui.BulkAdd(@"{{archive.dir}}\out-{{archive.name}}");
         ui.AnalyzeSelected();
@@ -80,5 +84,14 @@ public sealed class ResultUiTests : UiTestBase
         Assert.Equal("削除実行済み", ui.TextOf("TargetRowStateText", ui.TargetRow(Target("c"))));
         Assert.Contains("直前の削除: 結果不明", ui.TextOf("TargetRowSummaryText", ui.TargetRow(Target("c"))));
         Assert.Contains("再解析が正常に完了するまで削除できません", ui.TextOf("TargetActionHintText", ui.Main));
+
+        // b's output stops after the first entry: the delete has run and its result is incomplete.
+        ui.SelectionMenu("ClearAllButton");
+        ui.Toggle(ui.TargetCheck(Target("b")));
+        confirm = ui.OpenDeleteConfirmation();
+        ui.Invoke("DeletionConfirmDeleteButton", confirm);
+        ui.WaitStatus("削除終了");
+        ui.WaitIdle();
+        Assert.StartsWith("削除実行済み: エラー終了（結果が不完全）", ui.StateOf(Target("b")));
     }
 }

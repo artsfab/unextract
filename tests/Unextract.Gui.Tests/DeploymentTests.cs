@@ -5,9 +5,13 @@ using System.Windows.Controls;
 using Unextract.Gui.Services;
 using Unextract.Gui.ViewModels;
 using Unextract.Gui.Views;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
+// The bundled CLI of a normal build starts for a call that is only an input error; the GUI deps contain no Core/Windows/Cli; the GUI
+// never falls back to an exe outside the fixed layout; neither the GUI output (including cli\) nor its deps contain UnRAR.dll (it is
+// not bundled). The explanation shown when the CLI is missing is checked on a real WPF tree on the STA.
 // Tests that create WPF windows run serially in one collection. When xUnit ran the classes that create MainWindow in
 // parallel, this test failed intermittently; with those classes in the "Wpf" collection the failure no longer
 // reproduced (Gui.Tests then passed 15 consecutive runs). It was seen only under parallel test execution, not in the
@@ -70,8 +74,7 @@ public sealed class DeploymentTests
     [Fact]
     public void MissingCliDoesNotUseAnExeBesideGuiAndIsExplainedInWpfView()
     {
-        string fixture = Path.Combine(AppContext.BaseDirectory, "fixtures", "gui-deployment-" + Guid.NewGuid().ToString("N"), "日本語 空白");
-        Directory.CreateDirectory(fixture);
+        string fixture = ArchiveSearchTests.Fixture();
         File.WriteAllText(Path.Combine(fixture, "unextract.exe"), "not the bundled CLI");
         var availability = new CliLocation(fixture).Check();
         Assert.False(availability.IsAvailable);

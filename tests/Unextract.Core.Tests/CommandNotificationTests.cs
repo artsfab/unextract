@@ -10,6 +10,10 @@ using static Unextract.Core.Tests.Fakes.PipelineHarness;
 namespace Unextract.Core.Tests;
 
 // J07: 同期通知は処理済みの事実を渡す。配送成功・失敗にかかわらず、そのハンドルは閉じている。
+// Prepare 通知→open→close→結果通知→次の open、通知例外の非継続・資源の終了、ZIP 順と FATAL 原因の非通知、DIRECTORY の累計・STOPPED・
+// 欠番の選択・配送前の処理済みの事実を両モードで確認する。空 ZIP/全 DIRECTORY、64bit の宣言 Length と追加 I/O なし、Prepared の終了処理の
+// 例外、通知経路で表示・進捗・確認入力を使わないことも確認する (docs/spec/machine-output.md#records、#result、#boundary)。
+// 人間向け出力の同じ順序 (結果行は close の後、次の open の前) は CommandTests が確かめる。
 public class CommandNotificationTests
 {
     [Theory]

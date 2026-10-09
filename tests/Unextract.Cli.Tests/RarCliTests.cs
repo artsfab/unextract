@@ -9,6 +9,7 @@ using Unextract.Core.Target;
 using Unextract.Core.Zip;
 using Unextract.Windows;
 using Unextract.Windows.Rar;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Cli.Tests;
 
@@ -16,8 +17,6 @@ namespace Unextract.Cli.Tests;
 public class RarCliTests
 {
     private const string Library = @"C:\app\UnRAR64.dll";
-
-    private static readonly string FixtureDirectory = Path.Combine(AppContext.BaseDirectory, "fixtures");
 
     private static readonly string Guide = $"。{Library} に UnRAR.dll 7.23 (x64) の UnRAR64.dll を置いてください。ZIP の処理には影響しません。";
 
@@ -115,12 +114,7 @@ public class RarCliTests
 
     private static string[] Lines(string text) => text.Split(System.Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
 
-    private static string NewDirectory([CallerMemberName] string name = "")
-    {
-        var path = Path.Combine(FixtureDirectory, $"{name}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(path);
-        return path;
-    }
+    private static string NewDirectory() => TestFixtures.Create();
 
     private sealed class NoPrompt : IConfirmationPrompt
     {

@@ -8,6 +8,11 @@ using Unextract.Core.Tests.Fakes;
 namespace Unextract.Cli.Tests;
 
 // J13: CLIから実処理器までの配送失敗・完了境界。削除は既存FakeFileSystemで模擬する。
+// 各 I/O の直前に偽 FS の呼び出し記録を取り込み、run 配送→処理→当該ファイルの close→log write/flush→stdout write/flush→次の open と、
+// Prepared 終了後の result を同じ時系列で確認する。両操作/両モードの run・先頭/途中/最終 entry・result に write/部分 write/flush 失敗を
+// 注入し、後続の非接触・失敗先の非再利用・未終端行、配送失敗対象を含む件数と DIRECTORY/選択外/後続0件の境界を確認する。STOPPED の配送
+// 失敗の possibly_deleted と開始の有無、両出力先/報告の失敗、Prepared close との例外の競合、終端 result と実終了コードの食い違い・ログ
+// close 失敗も確認する。実パイプの消失の観測は E2E の J19 が担う (docs/spec/machine-output.md#destinations、#result、#boundary)。
 public class MachineBoundaryTests
 {
     public static IEnumerable<object[]> ContinuingFailures()

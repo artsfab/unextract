@@ -36,4 +36,8 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Fixtures of each test are deleted after the test by the shared owner (docs/TESTING.md#fixtures). -->
+  <ItemGroup>
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\TestFixtures.cs" Link="Fixtures\TestFixtures.cs" />
+  </ItemGroup>
 </Project>

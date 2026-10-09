@@ -3,6 +3,9 @@ using System.Text.Json;
 
 namespace Unextract.Cli.Tests;
 
+// J08: ASCII/LF のシリアライズ (docs/spec/machine-output.md#destinations、#records)。run/entry/result の明示的なフィールド、null の
+// 省略、数値/bool、64bit Length、BOM/CR なし・LF 終端、日本語/CP437 相当の文字/補助平面/Cf/C1/区切り/引用符/バックスラッシュの
+// raw name の往復。Core の型からの対応は J11 (MachineRecordTests)。
 public class MachineOutputTests
 {
     [Theory]

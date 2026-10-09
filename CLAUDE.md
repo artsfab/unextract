@@ -43,13 +43,14 @@
 - `LICENSE` は MIT。内容は変更しない。
 - 実在のユーザーデータを target にしない。
 - 削除してよいのは、テスト・検証が自作した一意な fixture と、承認を得た後始末だけ。
-- fixture は原則テストから削除せず、掃除は `scripts/clean-test-fixtures.ps1` で行う (既定は一覧のみ、`-Execute` で実行)。例外として X28 の PTY テストは、PTY / process tree の終了・Dispose 完了後に自分が作った GUID 付き fixture だけを自動 cleanup する。cleanup failure は黙殺せず、元の失敗情報・terminal output を保持する。
+- テストが作った fixture は、共通の削除処理 (所有の確認、reparse point をたどらない) で、テストの終了後に成功・失敗を問わず削除する。`scripts/clean-test-fixtures.ps1` は、削除できなかった残りの回収に使う (既定は一覧のみ、`-Execute` で実行)。fixture は共通の補助 (`TestFixtures`) だけで作る ([fixture](docs/TESTING.md#fixtures))。
 - `Remove-Item -Recurse` を使わない。
 - UnRAR.dll をリポジトリ・製品の配布物に入れない (利用者が置く。[版の固定](docs/spec/rar.md#pinning))。WinRAR で作る RAR の実物はローカル検証専用で、リポジトリに収録せず CI でも実行しない。WinRAR (試用期間内を含め、そのライセンス条件の範囲内) で自作データから作り、第三者の RAR は使わない ([実物のRAR](docs/TESTING.md#rar-real))。
 
 ## 6. よく使うコマンド
 
 ```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\get-unrar-dll.ps1
 dotnet build unextract.sln
 dotnet test unextract.sln
@@ -61,7 +62,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\clean-test-fixtures.
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-real-rar.ps1 -Exe <DLLを隣に置いたリポジトリ外のexe>
 ```
 
-- `run-gui-ui-tests.ps1` (GUI の UI E2E) は通常の `dotnet test unextract.sln` に含まれない。ロックされていない対話デスクトップが必要で、実行中は人がマウスとキーボードに触れない。リモートデスクトップの最小化、サービスセッション、他の UI テストとの同時実行では行わない ([GUI検証](docs/TESTING.md#gui))。GUI の配布処理を変えたときも再実行する。
+- 引き渡しの合否は `verify.ps1` (標準の検証) の全段の1回の実行で判定する ([標準の検証](docs/TESTING.md#verify))。文書・コメントだけの変更の例外は同節に従う。段は Release ビルド、solution のテスト、publish 版 E2E、GUI スモーク、UI E2E で、選択・省略しない。ほかのコマンドは修正中の確認 (失敗したテストだけの再実行など) に使ってよい。
+- UI E2E を含むので、ロックされていない対話デスクトップが必要で、実行中は人がマウスとキーボードに触れない。リモートデスクトップの最小化、サービスセッション、他の UI テストとの同時実行では行わない。結果は `%TEMP%\unextract-verify\<checkout>\latest\summary.txt` を見る。`PASSED (not observed: N)` の未観測は成功と別に報告する。
 
 - `get-unrar-dll.ps1` は RAR のテストが使う採用版の UnRAR.dll をリポジトリ外に用意する (一度だけ。DLL が無いと RAR のテストは失敗する)。
 - `dotnet run` は使わない。ビルド済みの exe を呼ぶ。
@@ -70,14 +72,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-real-rar.ps1 
 
 ## 7. 注意点
 
-- ACL を変えるテスト (P03、S16、S34 など)。終了後に DENY が残っていないことを `icacls` で確認する。
+- ACL を変えるテスト (P03、S16、S34 など) は `AclChanges.Run` を使う。DENY の残存はテストの失敗として検出されるので、手動の `icacls` 確認は不要。
 - Git Bash は `/q` などの引数を別のパスに変換する。必要なら `MSYS_NO_PATHCONV=1` を付けるか PowerShell を使う。
 - 書き換えスクリプト (`py` など) の対象は、依頼で許可された範囲のファイルだけにする。
 - 前提不成立 (管理者権限などが必要な項目。テスト出力の `前提不成立: ...`) は、成功でも失敗でもなく別に報告する。
 - 未確認の事項 (ファイル symlink、クラウド placeholder、EFS) は成立と見なさず、非NTFS・USN機能のないFSは現行対象外とする ([観測の範囲](docs/OPEN_ISSUES.md#observations)・[受入条件](docs/TESTING.md#acceptance))。
 - publish 版 E2E / PTY は `scripts/run-e2e-tests.ps1` を使う。一時 Release / `win-x64` publish、`UNEXTRACT_E2E_EXE` の設定、E2E project 全体の実行、環境変数の復元、自作 temp publish の cleanup を一括で行う。検証用の temp publish を手作業で残さない。外部 exe や既存 `bin/` / `obj/` は削除しない。
 - E2E test 自身は publish しない。`UNEXTRACT_E2E_EXE` があればその exe を使い、未設定なら通常 build 出力を使う。通常の全体検証 (`dotnet test unextract.sln`) と publish 版の検証は役割が異なる。
-- 手動確認 (実端末の操作・進捗・コードページ・視認性) の手順は [MANUAL_TESTS](docs/MANUAL_TESTS.md)、実施状態は [OPEN_ISSUES](docs/OPEN_ISSUES.md#manual-status)。M08 の機能部分は E2E PTY (X28) で自動化済み。
+- 手動確認 (実端末での進捗・警告の見え方 (M05・M08)、GUI の受入 (M14)、UnRAR.dll の導入と実物の RAR (M15)) の手順は [MANUAL_TESTS](docs/MANUAL_TESTS.md)、実施状態は [OPEN_ISSUES](docs/OPEN_ISSUES.md#manual-status)。確認入力・コードページ・中断などの機能は E2E と E2E PTY (X28〜X32) で自動化済み。
 
 ## 8. 報告の作法
 

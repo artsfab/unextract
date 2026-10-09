@@ -2,15 +2,22 @@ using System.Diagnostics;
 using System.IO;
 using Unextract.Gui.Models;
 using Unextract.Gui.Services;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
+// Archive search on self-made fixtures: non-recursive and recursive, ZIP extensions, metadata, hidden/system ZIPs and directories,
+// and real junctions that are not entered. The search never reads the contents of a ZIP. Through the internal adapter it injects an
+// exception while listing, access denied, entries that vanish or fail metadata while walking, and a reparse swap before recursing;
+// the remaining places are still searched. The Target existence check is tested apart for a Target created later and for an
+// injected check failure. Avoiding paths by ordinary attribute checks is not a handle-safety guarantee under a hostile concurrent
+// change.
 public sealed class ArchiveSearchTests
 {
     [Fact]
     public async Task RealSearchIncludesHiddenSystemZipAndSkipsJunctionWithoutOpeningZipContents()
     {
-        string root = Fixture("search");
+        string root = Fixture();
         string child = Directory.CreateDirectory(Path.Combine(root, "子 dir")).FullName;
         string destination = Directory.CreateDirectory(Path.Combine(root, "destination")).FullName;
         string a = Path.Combine(root, "A.ZIP");
@@ -80,7 +87,7 @@ public sealed class ArchiveSearchTests
     [Fact]
     public async Task RealSearchDoesNotOpenRarContents()
     {
-        string root = Fixture("rar-search");
+        string root = Fixture();
         string rar = Path.Combine(root, "x.RAR");
         File.WriteAllText(rar, "not RAR contents; search does not inspect them");
         using var locked = new FileStream(rar, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
@@ -117,7 +124,7 @@ public sealed class ArchiveSearchTests
     [Fact]
     public async Task TargetObservationDistinguishesMissingFromDenialAndCanSeeLaterCreation()
     {
-        string root = Fixture("presence");
+        string root = Fixture();
         string later = Path.Combine(root, "later");
         var search = new ArchiveSearch();
         Assert.Equal(TargetPresence.Missing, (await search.ObserveTargetAsync(later)).Presence);
@@ -133,8 +140,8 @@ public sealed class ArchiveSearchTests
         Assert.Contains("denied", observation.Detail, StringComparison.Ordinal);
     }
 
-    internal static string Fixture(string kind) => Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory,
-        "fixtures", "gui-" + kind + "-" + Guid.NewGuid().ToString("N"), "日本語 空白")).FullName;
+    // A new fixture of the running test (TestFixtures, deleted after the test) with a Japanese name and a space in the path.
+    internal static string Fixture() => Directory.CreateDirectory(Path.Combine(TestFixtures.Create(), "日本語 空白")).FullName;
 
     private sealed class FakeSearchFileSystem : IArchiveSearchFileSystem
     {

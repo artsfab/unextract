@@ -1,16 +1,17 @@
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
+using Xunit.Abstractions;
 
 namespace Unextract.Gui.UiTests;
 
 // Viewing a row (the details pane) is not selecting it for the batch: browsing, filtering and removing the viewed
 // Target never change the check boxes.
-public sealed class SelectionUiTests : UiTestBase
+public sealed class SelectionUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
-    [Fact]
+    [UiFact]
     public void ViewingFilteringAndRemovingTheViewedTargetNeverChangeTheSelection()
     {
-        var ui = Start(kind: "selection");
+        var ui = Start();
         foreach (string name in new[] { "a.zip", "b.zip" }) Files.Zip(Path.Combine(ui.Fixtures, name), ("x.txt", "x"));
         string ta = Path.Combine(ui.Fixtures, "out-a"), tb = Path.Combine(ui.Fixtures, "out-b"), ta2 = Path.Combine(ui.Fixtures, "a2");
         ui.Search();

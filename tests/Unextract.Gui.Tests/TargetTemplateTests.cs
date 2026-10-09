@@ -2,6 +2,8 @@ using Unextract.Gui.Models;
 
 namespace Unextract.Gui.Tests;
 
+// Target templates: the known variables, the last extension, no expansion of environment variables and the like; empty names, bad
+// syntax, absolute path forms, Windows names and dot components; the separator of duplicate keys and drive roots.
 public sealed class TargetTemplateTests
 {
     [Theory]

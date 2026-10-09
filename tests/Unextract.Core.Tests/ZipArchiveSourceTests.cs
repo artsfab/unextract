@@ -187,10 +187,10 @@ public class ZipArchiveSourceTests
     [Fact]
     public void P03_MissingOrDirectoryPath_IsOpenFailure()
     {
-        var missing = Path.Combine(TestFiles.Directory, "does-not-exist.zip");
+        var missing = Path.Combine(TestFiles.NewDirectory(), "does-not-exist.zip");
 
         Assert.Equal(FatalKind.ArchiveOpenFailed, ZipArchiveSource.Open(missing).Fatal!.Kind);
-        Assert.Equal(FatalKind.ArchiveOpenFailed, ZipArchiveSource.Open(TestFiles.Directory).Fatal!.Kind);
+        Assert.Equal(FatalKind.ArchiveOpenFailed, ZipArchiveSource.Open(TestFiles.NewDirectory()).Fatal!.Kind);
         Assert.Equal(FatalKind.ArchiveOpenFailed, ZipArchiveSource.Open(string.Empty).Fatal!.Kind);
     }
 

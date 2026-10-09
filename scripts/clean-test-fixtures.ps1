@@ -3,11 +3,15 @@
     Lists (default) or removes the test fixtures left under tests/*/bin/*/*/fixtures.
 
 .DESCRIPTION
-    The tests never delete their own fixtures (docs/TESTING.md). This script is the manual
-    cleanup for developers. Without -Execute it only lists what it would do and changes nothing.
+    The tests delete their own fixtures after each test (docs/TESTING.md#fixtures). This script
+    collects what is left: fixtures whose deletion failed, and fixtures of a test host that ended
+    abnormally. Do not run it while tests are running. Without -Execute it only lists what it would
+    do and changes nothing.
 
     With -Execute it runs, in this order, and stops at the first failure:
-      1. In P03_* fixtures, removes the DENY ACEs of the current user's SID (icacls /remove:d).
+      1. In the fixtures of the tests that change ACLs (see $AclTestPrefixes), removes
+         the DENY ACEs of the current user's SID (icacls /remove:d). The reparse attribute of every item
+         is checked before its ACL is read or changed; reparse points (and their targets) are skipped.
       2. Removes every junction / directory link one by one with "rmdir" (no /s), and checks that
          the link is gone and that its target (if it existed) still exists.
       3. Removes each fixtures directory with "cmd /c rmdir /s /q", and checks that it is gone.
@@ -33,6 +37,8 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
 $ReparsePoint = [System.IO.FileAttributes]::ReparsePoint
+# Fixture name prefixes of the tests that add DENY ACEs (AclChanges and AclChangesTests in Unextract.Windows.Tests).
+$AclTestPrefixes = @('P03_', 'S16_', 'S34_', 'RestoredDeny', 'RemainingDeny', 'LeftDenyFailsTheCleanup')
 
 function Fail([string]$message) {
     throw "clean-test-fixtures: $message"
@@ -143,7 +149,8 @@ function Get-LinkTarget([string]$link) {
 $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $sidType = [System.Security.Principal.SecurityIdentifier]
 
-# Visit a P03_* fixture (itself and everything below it, without following links). With -Restore, the
+# Visit an ACL-test fixture (itself and everything below it, without following links). The reparse attribute is
+# checked first: a reparse point is neither read nor changed (icacls would act on its target). With -Restore, the
 # DENY ACEs of the current user are removed from each item before its children are enumerated (a DENY on a
 # directory can prevent listing it). Returns @{ Denies; Restored; Errors }.
 function Invoke-P03Walk([string]$p03, [switch]$Restore) {
@@ -154,6 +161,7 @@ function Invoke-P03Walk([string]$p03, [switch]$Restore) {
     $stack.Push($p03)
     while ($stack.Count -gt 0) {
         $path = [string]$stack.Pop()
+        if (([System.IO.File]::GetAttributes($path) -band $ReparsePoint) -ne 0) { continue }
         $count = Get-OwnDenyCount $path
         $denies += $count
         if ($Restore -and $count -gt 0) {
@@ -221,9 +229,11 @@ if ($fixtureRoots.Count -eq 0) {
 
 $p03Dirs = @()
 foreach ($root in $fixtureRoots) {
-    foreach ($child in ([System.IO.DirectoryInfo]::new($root)).EnumerateDirectories('P03_*')) {
-        if (Test-Reparse $child) { Fail "P03 fixture is a reparse point: $($child.FullName)" }
-        $p03Dirs += (Assert-UnderTests $child.FullName)
+    foreach ($prefix in $AclTestPrefixes) {
+        foreach ($child in ([System.IO.DirectoryInfo]::new($root)).EnumerateDirectories($prefix + '*')) {
+            if (Test-Reparse $child) { Fail "ACL-test fixture is a reparse point: $($child.FullName)" }
+            $p03Dirs += (Assert-UnderTests $child.FullName)
+        }
     }
 }
 
@@ -247,7 +257,7 @@ foreach ($root in $fixtureRoots) {
 }
 
 Write-Output ''
-Write-Output "P03 fixtures: $($p03Dirs.Count)"
+Write-Output "ACL-test fixtures: $($p03Dirs.Count)"
 foreach ($p03 in $p03Dirs) {
     $walk = Invoke-P03Walk $p03
     Write-Output "  $p03 (DENY ACEs of current user: $($walk.Denies))"
@@ -258,14 +268,14 @@ foreach ($p03 in $p03Dirs) {
 
 if (-not $Execute) {
     Write-Output ''
-    Write-Output "Would run: (1) icacls /remove:d on $($p03Dirs.Count) P03 fixture(s), (2) rmdir on $totalLinks link(s), (3) rmdir /s /q on $($fixtureRoots.Count) fixtures directory(ies)."
+    Write-Output "Would run: (1) icacls /remove:d on $($p03Dirs.Count) ACL-test fixture(s), (2) rmdir on $totalLinks link(s), (3) rmdir /s /q on $($fixtureRoots.Count) fixtures directory(ies)."
     Write-Output 'Nothing was changed.'
     exit 0
 }
 
 # --- (1) Remove own DENY ACEs in P03_* ---
 Write-Output ''
-Write-Output '(1) Removing DENY ACEs of the current user in P03 fixtures'
+Write-Output '(1) Removing DENY ACEs of the current user in ACL-test fixtures'
 foreach ($p03 in $p03Dirs) {
     $walk = Invoke-P03Walk $p03 -Restore
     foreach ($p in $walk.Restored) {

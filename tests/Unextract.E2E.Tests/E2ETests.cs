@@ -31,9 +31,9 @@ public class E2ETests
     ];
 
     // 全カテゴリーを含む fixture。ZIP にない target ファイル (unrelated.txt、docs\unrelated-in-docs.txt) も置く。
-    private static E2EFixture AllCategories([CallerMemberName] string testName = "")
+    private static E2EFixture AllCategories()
     {
-        var fixture = E2EFixture.Create(testName);
+        var fixture = E2EFixture.Create();
         fixture.WriteZip(ZipFixture.Create(
             new FixtureEntry("same1.txt", E2EFixture.Bytes("hello1")),
             new FixtureEntry("docs/"),
@@ -162,9 +162,9 @@ public class E2ETests
     }
 
     // 先頭に MATCHED 2件、3番目に Central Directory の CRC-32 だけを書き換えた bad.txt (target にサイズ一致のファイルあり)、後方に MATCHED 2件。
-    private static E2EFixture CrcMismatch([CallerMemberName] string testName = "")
+    private static E2EFixture CrcMismatch()
     {
-        var fixture = E2EFixture.Create(testName);
+        var fixture = E2EFixture.Create();
         var zip = ZipFixture.Create(
             new FixtureEntry("a.txt", E2EFixture.Bytes("hello")),
             new FixtureEntry("b.txt", E2EFixture.Bytes("hello")),
@@ -232,20 +232,12 @@ public class E2ETests
         }
     }
 
-    // X20: 引数の不正 (旧形式、--dry-run、サブコマンドなし・不明、--target=dir、ZIP なし・2つ、重複、--entries の値なし、analyze --yes)
-    // → 終了 1。stderr に入力エラーと使い方 (旧形式・--dry-run は案内付き)。stdout は空。fixture 全体が不変。
+    // X20: 引数の不正の代表 (案内付きの旧形式、通常の入力エラーの ZIP 2つ、analyze --yes) → 終了 1。stderr に入力エラーと使い方。
+    // stdout は空。fixture 全体が不変。引数の誤りの種類でプロセス境界の経路は分かれない (Program の分岐は機械モードかどうかだけ) ので、
+    // 各種類の判定は Core の K02〜K04 と CLI の K02_K03_K04 が担う。
     [Theory]
     [InlineData("old-form")]
-    [InlineData("old-form-yes")]
-    [InlineData("dry-run")]
-    [InlineData("old-dry-run")]
-    [InlineData("no-subcommand")]
-    [InlineData("unknown-subcommand")]
-    [InlineData("target-equals")]
-    [InlineData("no-archive")]
     [InlineData("two-archives")]
-    [InlineData("duplicate-target")]
-    [InlineData("entries-no-value")]
     [InlineData("analyze-yes")]
     public void X20_ArgumentErrors(string kind)
     {
@@ -253,17 +245,8 @@ public class E2ETests
         var before = E2EFixture.Snapshot(fixture.Directory);
         string[] args = kind switch
         {
-            "old-form" => [fixture.ArchivePath, "--target", fixture.Target],
-            "old-form-yes" => [fixture.ArchivePath, "--target", fixture.Target, "--yes"],
-            "dry-run" => ["delete", fixture.ArchivePath, "--target", fixture.Target, "--dry-run"],
-            "old-dry-run" => [fixture.ArchivePath, "--target", fixture.Target, "--dry-run"],
-            "no-subcommand" => [],
-            "unknown-subcommand" => ["remove", fixture.ArchivePath, "--target", fixture.Target],
-            "target-equals" => ["delete", fixture.ArchivePath, $"--target={fixture.Target}", "--yes"],
-            "no-archive" => ["delete", "--target", fixture.Target, "--yes"],
+            "old-form" => [fixture.ArchivePath, "--target", fixture.Target, "--yes"],
             "two-archives" => ["delete", fixture.ArchivePath, fixture.ArchivePath, "--target", fixture.Target, "--yes"],
-            "duplicate-target" => ["delete", fixture.ArchivePath, "--target", fixture.Target, "--target", fixture.Target, "--yes"],
-            "entries-no-value" => ["delete", fixture.ArchivePath, "--target", fixture.Target, "--yes", "--entries"],
             "analyze-yes" => ["analyze", fixture.ArchivePath, "--target", fixture.Target, "--yes"],
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
@@ -274,18 +257,13 @@ public class E2ETests
         Assert.True(result.ExitCode == Error, result.ToString());
         Assert.Equal(string.Empty, result.StandardOutput);
         var lines = result.ErrorLines;
-        Assert.StartsWith("入力エラー: ", lines[0], StringComparison.Ordinal);
+        Assert.Equal(kind switch
+        {
+            "old-form" => "入力エラー: サブコマンド (analyze または delete) を指定してください。旧形式 (unextract <archive.zip> --target <dir>) は廃止しました。",
+            "two-archives" => "入力エラー: ZIP は1つだけ指定できます",
+            _ => "入力エラー: analyze では --yes を指定できません",
+        }, lines[0]);
         Assert.Equal(Usage, lines[1..]);
-        if (kind is "old-form" or "old-form-yes" or "no-subcommand" or "unknown-subcommand")
-        {
-            Assert.Contains("旧形式 (unextract <archive.zip> --target <dir>) は廃止しました", lines[0], StringComparison.Ordinal);
-        }
-
-        if (kind is "dry-run" or "old-dry-run")
-        {
-            Assert.Equal("入力エラー: --dry-run は廃止しました。削除せずに結果を確認するには unextract analyze を使ってください。", lines[0]);
-        }
-
         Assert.Equal(before, E2EFixture.Snapshot(fixture.Directory));
     }
 
@@ -380,7 +358,7 @@ public class E2ETests
     [InlineData("cp437")]
     public void X23_DisplayedEntriesCanBeUsedAsEntries(string kind)
     {
-        var fixture = E2EFixture.Create($"{nameof(X23_DisplayedEntriesCanBeUsedAsEntries)}-{kind}");
+        var fixture = E2EFixture.Create();
         if (kind == "utf8")
         {
             fixture.WriteZip(ZipFixture.Create(
@@ -454,7 +432,7 @@ public class E2ETests
     [InlineData(true)]
     public void X25_NothingToDelete(bool emptyZip)
     {
-        var fixture = E2EFixture.Create($"{nameof(X25_NothingToDelete)}-{(emptyZip ? "empty" : "modified")}");
+        var fixture = E2EFixture.Create();
         if (emptyZip)
         {
             fixture.WriteZip(ZipFixture.Create());

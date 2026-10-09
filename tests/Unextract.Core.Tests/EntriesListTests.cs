@@ -320,11 +320,11 @@ public class EntriesListTests
     [Fact]
     public void L17_UnreadableFile_IsInputError()
     {
-        var missing = EntriesList.Read(Path.Combine(Fixtures.TestFiles.Directory, $"missing-{Guid.NewGuid():N}.txt"), Limits.Default);
+        var missing = EntriesList.Read(Path.Combine(Fixtures.TestFiles.NewDirectory(), $"missing-{Guid.NewGuid():N}.txt"), Limits.Default);
         Assert.StartsWith("--entries: ファイルを読めません", Error(missing).Describe(), StringComparison.Ordinal);
         Assert.Equal(EntriesErrorKind.Unreadable, Error(missing).Kind);
 
-        var directory = EntriesList.Read(Fixtures.TestFiles.Directory, Limits.Default);
+        var directory = EntriesList.Read(Fixtures.TestFiles.NewDirectory(), Limits.Default);
         Assert.StartsWith("--entries: ファイルを読めません", Error(directory).Describe(), StringComparison.Ordinal);
         Assert.Equal(EntriesErrorKind.Unreadable, Error(directory).Kind);
     }

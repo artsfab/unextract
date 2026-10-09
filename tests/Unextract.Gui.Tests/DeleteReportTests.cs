@@ -5,6 +5,17 @@ using static Unextract.Gui.Tests.JsonlReceiverTests;
 
 namespace Unextract.Gui.Tests;
 
+// The delete result shown from what was received, on simulated output: the success count and DELETED length total (64-bit) of a
+// normal end; exit 1 with only DELETE_FAILED; STOP (reason, possibly_deleted, display conversion); no run means nothing deleted; an
+// end after run only, or after the first, a middle or the last entry; index gaps are not treated as number+1; no unknown item when
+// there is no next candidate; internal_error with deletion_started true or false; after the ZIP was reordered or its entry count
+// changed since the analysis, no single item is named and the unreceived approved candidates are unknown, naming only what the CLI
+// reported in entry_name; the CLI report wins over the order guessed from the analysis even when no change is visible; an
+// unapproved entry_name is unknown; result.error.possibly_deleted without entry_name; "result unknown" by cause (incompatible
+// version, unreadable line, duplicate index, stdout read failure, unconfirmed real exit, output outside the approved range
+// (selected mismatch, unapproved names)); log not confirmed when no run was received; the real exit code disagreeing with the
+// result; and a run.target difference that is only shown. A GUI crash, an OS kill or a power loss is outside the guarantee and is
+// not tested.
 public sealed class DeleteReportTests
 {
     private static readonly CliJob Delete = Job(CliOperation.Delete);

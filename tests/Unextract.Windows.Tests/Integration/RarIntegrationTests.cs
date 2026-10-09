@@ -29,9 +29,9 @@ public class RarIntegrationTests(ITestOutputHelper output)
     }
 
     // fixture: dir/archive.rar、dir/target/。target に置くファイル (null はディレクトリ) を files で与える。
-    private static Fixture Create(string name, byte[] rar, params (string Name, byte[]? Content)[] files)
+    private static Fixture Create(byte[] rar, params (string Name, byte[]? Content)[] files)
     {
-        var dir = CreateDirectory(name);
+        var dir = CreateDirectory();
         var target = Directory.CreateDirectory(System.IO.Path.Combine(dir, "target")).FullName;
         foreach (var (file, content) in files)
         {
@@ -117,7 +117,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
         var (rar, expected) = PrepareCase(id);
         foreach (var mode in new[] { RunMode.Strict, RunMode.Fast })
         {
-            var f = Create($"{nameof(U60_Prepare_AcceptOrReject)}-{id}-{mode}", rar, ("a.txt", A), ("b.txt", B));
+            var f = Create(rar, ("a.txt", A), ("b.txt", B));
             var before = Snapshot(f.Target);
 
             var analyzed = Analyze(f.Rar, f.Target, mode: mode);
@@ -157,8 +157,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
             File5("same.txt", A), File5("changed.txt", B), File5("short.txt", C), Dir5("d"), File5("d/deep.txt", C),
             File5("d/ads.txt", A), File5("missing.txt", A), Dir5("empty"),
         ]);
-        var f = Create(
-            $"{nameof(U61_AnalyzeThenDelete)}-{mode}", rar,
+        var f = Create(rar,
             ("same.txt", A), ("changed.txt", Bytes("bravo CONTENT")), ("short.txt", Bytes("x")), ("d/deep.txt", C), ("d/ads.txt", A), ("empty", null), ("unrelated.txt", A));
         File.WriteAllText(f.Path(@"d\ads.txt") + ":Zone.Identifier", "[ZoneTransfer]");
         var rarHash = Hash(f.Rar);
@@ -201,7 +200,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void U62_ArchiveItselfIsNotDeleted(RunMode mode)
     {
-        var dir = CreateDirectory($"{nameof(U62_ArchiveItselfIsNotDeleted)}-{mode}");
+        var dir = CreateDirectory();
         var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
         var rar = Path.Combine(target, "archive.rar");
         File.WriteAllBytes(rar, Rar5Writer.Build([File5("archive.rar", A), File5("later.txt", B)]));
@@ -228,7 +227,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
     public void U63_EntriesSelection_PassesUnselected(RunMode mode)
     {
         var rar = Rar5Writer.Build([File5("a.txt", A), Dir5("d"), File5("d/b.txt", B), File5("c.txt", C)]);
-        var f = Create($"{nameof(U63_EntriesSelection_PassesUnselected)}-{mode}", rar, ("a.txt", A), ("d/b.txt", B), ("c.txt", C));
+        var f = Create(rar, ("a.txt", A), ("d/b.txt", B), ("c.txt", C));
         var entries = Path.Combine(f.Dir, "entries.txt");
         File.WriteAllBytes(entries, Bytes("c.txt\n"));
 
@@ -253,7 +252,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
     public void U64_ContentFailure_StopsInStrict(RunMode mode)
     {
         var rar = Rar5Writer.Build([File5("a.txt", A), new Rar5File { Name = "b.txt", Data = B, Crc = 0xDEADBEEF }, File5("c.txt", C)]);
-        var f = Create($"{nameof(U64_ContentFailure_StopsInStrict)}-{mode}", rar, ("a.txt", A), ("b.txt", B), ("c.txt", C));
+        var f = Create(rar, ("a.txt", A), ("b.txt", B), ("c.txt", C));
 
         var analyzed = Analyze(f.Rar, f.Target, mode: mode);
         var r = Delete(f.Rar, f.Target, f.Guard, mode: mode);
@@ -285,7 +284,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
     public void U65_CorruptNonCandidate_IsNotRead()
     {
         var rar = Rar5Writer.Build([new Rar5File { Name = "bad.txt", Data = A, Crc = 1 }, File5("a.txt", A)]);
-        var f = Create(nameof(U65_CorruptNonCandidate_IsNotRead), rar, ("a.txt", A));
+        var f = Create(rar, ("a.txt", A));
 
         var analyzed = Analyze(f.Rar, f.Target);
         var r = Delete(f.Rar, f.Target, f.Guard);
@@ -305,7 +304,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
         var files = names.Select(n => File5(n, Bytes("0123456789"))).ToArray();
         var full = Rar5Writer.Build(files);
         var dataEnds = Enumerable.Range(1, files.Length).Select(i => Rar5Writer.Build(files.Take(i), writeEnd: false).Length).ToArray();
-        var dir = CreateDirectory(nameof(U66_Truncation_AllPositions));
+        var dir = CreateDirectory();
         var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
         foreach (var name in names)
         {
@@ -348,7 +347,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
         var data = Bytes("0123456789abcdef");
         var full = Rar5Writer.Build([File5("a.txt", data), File5("b.txt", data)]);
         var dataStarts = new[] { Rar5Writer.Build([File5("a.txt", data)], writeEnd: false).Length - data.Length, Rar5Writer.Build([File5("a.txt", data), File5("b.txt", data)], writeEnd: false).Length - data.Length };
-        var dir = CreateDirectory(nameof(U67_BitFlips_DoNotThrow_AndDataCorruptionIsNotMatched));
+        var dir = CreateDirectory();
         var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
         File.WriteAllBytes(Path.Combine(target, "a.txt"), data);
         File.WriteAllBytes(Path.Combine(target, "b.txt"), data);
@@ -383,7 +382,7 @@ public class RarIntegrationTests(ITestOutputHelper output)
     {
         var unique = $"u68-{Guid.NewGuid():N}";
         var rar = Rar5Writer.Build([Dir5(unique), File5($"{unique}/{unique}.txt", A), File5($"{unique}.bin", B)]);
-        var f = Create(nameof(U68_LibraryWritesNothing), rar, ($"{unique}.bin", B));
+        var f = Create(rar, ($"{unique}.bin", B));
         var archiveFolder = Snapshot(f.Dir);
 
         var strict = Analyze(f.Rar, f.Target);

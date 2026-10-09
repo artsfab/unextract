@@ -6,7 +6,7 @@ using Xunit.Abstractions;
 
 namespace Unextract.Gui.UiTests;
 
-public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase
+public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
     private static string Describe(AutomationElement? e) =>
         e is null ? "(none)" : $"{(e.AutomationId.Length > 0 ? e.AutomationId : "-")}|{e.ControlType}|{e.Name}";
@@ -43,10 +43,10 @@ public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase
 
     private static void Key(VirtualKeyShort key) => Keyboard.Type(key);
 
-    [Fact]
+    [UiFact]
     public void TabOrderOfTheSettingsAreaFollowsTheVisualOrderAndTheModeIsOneStop()
     {
-        var ui = Start(kind: "kbd-order");
+        var ui = Start();
         Focus(ui, "SearchDirectoryBox");
         var order = new List<string>();
         for (int i = 0; i < 7; i++)
@@ -68,10 +68,10 @@ public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase
         Assert.Equal(["BulkAddButton", "ArchiveFilterBox", "StrictRadio", "RecursiveCheckBox", "ChooseFolderButton", "SearchButton"], back);
     }
 
-    [Fact]
+    [UiFact]
     public void TheWholeFocusCycleReachesEveryAreaAndNeverStopsOnTheWindowItself()
     {
-        var ui = Start(kind: "kbd-cycle");
+        var ui = Start();
         string archive = Path.Combine(ui.Fixtures, "a.zip"), target = Path.Combine(ui.Fixtures, "out");
         Files.Zip(archive, ("f1.txt", "x"));
         Directory.CreateDirectory(target);
@@ -87,7 +87,7 @@ public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase
             types.Add(ui.FocusedElement()!.ControlType);
             if (FocusId(ui) == "SearchDirectoryBox") break;
         }
-        foreach (string step in cycle) output.WriteLine(step);
+        foreach (string step in cycle) Output.WriteLine(step);
         Assert.Equal("SearchDirectoryBox", FocusId(ui));
         Assert.DoesNotContain(ControlType.Window, types);
         Assert.DoesNotContain(ControlType.Pane, types);
@@ -101,10 +101,10 @@ public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase
         Assert.DoesNotContain(cycle, s => s.StartsWith("ArchiveCheckBox|", StringComparison.Ordinal) || s.StartsWith("TargetCheckBox|", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [UiFact]
     public void TheWholeFlowWorksWithTheKeyboardOnlyIncludingTheExplicitApproval()
     {
-        var ui = Start(kind: "kbd-flow");
+        var ui = Start();
         string archive = Path.Combine(ui.Fixtures, "日本語 a.zip"), target = Path.Combine(ui.Fixtures, "out");
         Files.Zip(archive, ("f1.txt", "x"), ("f2.txt", "y"));
         Directory.CreateDirectory(target);
@@ -187,10 +187,10 @@ public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase
         Assert.Contains("削除成功: 1 件", ui.Get("TargetAnalysisDetailText").AsTextBox().Text);
     }
 
-    [Fact]
+    [UiFact]
     public void ArrowKeysChangeTheModeLikeARadioGroupWithTheSameConfirmation()
     {
-        var ui = Start(kind: "kbd-mode");
+        var ui = Start();
         string archive = Path.Combine(ui.Fixtures, "a.zip"), target = Path.Combine(ui.Fixtures, "out");
         Files.Zip(archive, ("f.txt", "x"));
         Directory.CreateDirectory(target);
@@ -216,10 +216,10 @@ public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase
         Assert.StartsWith("解析済み (Strict)", ui.StateOf(target), StringComparison.Ordinal);
     }
 
-    [Fact]
+    [UiFact]
     public void TargetEditorRegistersWithEnterCancelsWithEscapeAndRefusesAnInvalidTemplate()
     {
-        var ui = Start(kind: "kbd-editor");
+        var ui = Start();
         string archive = Path.Combine(ui.Fixtures, "a.zip");
         Files.Zip(archive, ("f1.txt", "x"));
         ui.Search();

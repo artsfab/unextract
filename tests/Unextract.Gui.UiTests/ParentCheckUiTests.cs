@@ -1,12 +1,13 @@
 using FlaUI.Core.Definitions;
+using Xunit.Abstractions;
 
 namespace Unextract.Gui.UiTests;
 
-public sealed class ParentCheckUiTests : UiTestBase
+public sealed class ParentCheckUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
-    private GuiSession Prepare(string kind)
+    private GuiSession Prepare()
     {
-        var ui = Start(kind: kind);
+        var ui = Start();
         foreach (string name in new[] { "a.zip", "b.zip", "c.zip" }) Files.Zip(Path.Combine(ui.Fixtures, name), ("x.txt", "x"));
         ui.Search();
         // a: two Targets, b: one Target, c: none.
@@ -16,10 +17,10 @@ public sealed class ParentCheckUiTests : UiTestBase
         return ui;
     }
 
-    [Fact]
+    [UiFact]
     public void ParentCheckFollowsItsTargetsAndDrivesThemBack()
     {
-        var ui = Prepare("parent-check");
+        var ui = Prepare();
         string t1 = Path.Combine(ui.Fixtures, "ta1"), t2 = Path.Combine(ui.Fixtures, "ta2");
         var parent = ui.ArchiveCheck("a.zip");
         // Targets start selected.
@@ -49,10 +50,10 @@ public sealed class ParentCheckUiTests : UiTestBase
         Wait.Until(() => ui.ToggleOf(parent) != ToggleState.Indeterminate, "the parent to follow both Targets");
     }
 
-    [Fact]
+    [UiFact]
     public void ParentWithoutTargetsIsDisabledAndUnchecked()
     {
-        var ui = Prepare("parent-none");
+        var ui = Prepare();
         var parent = ui.ArchiveCheck("c.zip");
         Assert.False(parent.IsEnabled);
         Assert.Equal(ToggleState.Off, ui.ToggleOf(parent));
@@ -60,10 +61,10 @@ public sealed class ParentCheckUiTests : UiTestBase
         Assert.Equal("Targets: 0", ui.TextOf("ArchiveTargetCountText", ui.ArchiveRow("c.zip")));
     }
 
-    [Fact]
+    [UiFact]
     public void SelectingAndClearingVisibleArchivesNeverReachesHiddenOnes()
     {
-        var ui = Prepare("parent-visible");
+        var ui = Prepare();
         ui.SetText("ArchiveFilterBox", "a.zip");
         Wait.Until(() => ui.TextOf("ArchiveCountText").StartsWith("表示 1 / 検索 3", StringComparison.Ordinal), "the filter to apply");
         ui.SelectionMenu("ClearVisibleButton");

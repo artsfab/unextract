@@ -4,6 +4,9 @@ using Unextract.Gui.ViewModels;
 
 namespace Unextract.Gui.Tests;
 
+// The search session: the targets of a bulk add, per-item registration errors and skipped duplicates, the tri-state parent, filter
+// and viewing independent of selection, select all / select shown, editing settings and removing models, the discard confirmation
+// of a new search, the operation lock, re-evaluating existence, and the notice of a save failure.
 public sealed class SearchSessionTests
 {
     [Fact]

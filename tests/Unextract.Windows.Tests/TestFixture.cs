@@ -1,18 +1,13 @@
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Windows.Tests;
 
-// 実 NTFS 上の作業ディレクトリ。テストの出力先 (bin/.../fixtures/) の下に毎回ユニークな名前で作る。
-// 並列実行でも衝突しない。テストからは削除しない (作成したものは fixtures/ の下に残る)。
+// 実 NTFS 上の作業ディレクトリ。テストの出力先 (bin/.../fixtures/) の下に <テスト名>-<GUID> で作る (TestFixtures)。
+// 並列実行でも衝突しない。テストの終了後に、成功・失敗を問わず共通の削除処理が削除する。
 internal static class TestFixture
 {
-    public static string CreateDirectory([CallerMemberName] string testName = "")
-    {
-        var path = Path.Combine(AppContext.BaseDirectory, "fixtures", $"{testName}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(path);
-        return path;
-    }
+    public static string CreateDirectory() => TestFixtures.Create();
 
     public static string WriteFile(string directory, string name, string content)
     {

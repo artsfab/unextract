@@ -27,7 +27,7 @@ internal sealed record MachineProcessResult(int ExitCode, byte[] Output, string 
 }
 
 // stdin は開いたままにし、機械モードが EOF/確認入力を待たずに終了することも確認する。
-// 失敗時は自分が起動した process tree だけを止める。fixture は保存する。
+// 失敗時は自分が起動した process tree だけを止める。fixture はテストの終了後に共通の削除処理が削除する。
 internal sealed class MachineProcess : IDisposable
 {
     private readonly Process _process;

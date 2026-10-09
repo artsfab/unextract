@@ -7,6 +7,9 @@ using static Unextract.Core.Tests.Fakes.PipelineHarness;
 
 namespace Unextract.Core.Tests;
 
+// J06: delete 固有の診断 (docs/spec/machine-output.md#result、#codes)。識別確認自体の番号、resolve・hardlink 検査の失敗、指示失敗後の
+// 状態と不確実性、正常結果の診断の省略、通知と Stop の原因参照。SequentialDeleteTests の S13/S15〜S18/S22/S23/S25/S27〜S33 と例外の
+// テストは原因種別・段階・番号を、S05/S06 と CommandTests の O15 は同じハンドル・順序・表示を回帰する。
 public class DeleteDiagnosticTests
 {
     // J06: STOP の結果と終了原因は同じ診断を保持する。診断の追加で表示と後続の非接触を変えない。

@@ -10,6 +10,12 @@ using static Unextract.Gui.Tests.SearchViewTests;
 
 namespace Unextract.Gui.Tests;
 
+// The analysis view on a WPF tree on the STA: the result list in the details pane of the viewed Target (with a usable height in the
+// window, virtualized, not nested in another list), class and path filters and the filter state kept per Target, the Fast warning,
+// and progress and cancel shown only while analyzing, all without binding errors. On a real window it also checks closing: two close
+// requests during a delete neither kill nor exit, show the waiting text, and close after the current Target without starting the
+// next; a close request during an analysis closes after the cancellation. Response time and memory with many entries belong to the
+// performance measurements.
 // Tests that create WPF windows run serially in one collection. When xUnit ran the classes that create MainWindow in
 // parallel, a test (in DeploymentTests) failed intermittently; with those classes in the "Wpf" collection the failure
 // no longer reproduced (Gui.Tests then passed 15 consecutive runs). It was seen only under parallel test execution, not

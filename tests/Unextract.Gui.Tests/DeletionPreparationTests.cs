@@ -6,9 +6,34 @@ using Unextract.Gui.ViewModels;
 using static Unextract.Gui.Tests.AnalysisQueueTests;
 using static Unextract.Gui.Tests.JsonlReceiverTests;
 using static Unextract.Gui.Tests.SearchSessionTests;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
+// The delete plan and its execution, with a simulated runner unless noted.
+// - Plan: fixed targets (selected Targets with a normal analysis in the current mode, candidates only, independent of display
+//   filters; exclusions with reasons; no candidates, missing Targets and Targets already deleted are excluded). The confirmation
+//   shows the Target count, the maximum candidate count, the logical size, permanent deletion that cannot be undone, both
+//   non-guarantees of Fast, every Target to delete, the mark and count of selected Targets hidden by a filter, and every exclusion.
+//   Without approval no CLI, entries or log is touched; after approval a stale plan (re-analysis, mode change) is refused.
+// - Start: the mode, absolute paths, entries and log passed; raw FullNames in ZIP order; one start time and serial numbers per
+//   batch; only the owned entries are cleaned up after the process ends; a certain non-start or a preparation failure (log
+//   location, entries creation, not encodable as UTF-8) keeps the analysis and allows a re-run; an error exit after the start marks
+//   the delete as run and stops the rest; a cleanup failure does not change the result; an unconfirmed exit or an unknown start
+//   leaves the entries and marks the delete as run; only a synchronous refusal of the runner is "not started", and an unexpected
+//   exception while running is an unknown start (result unknown, entries left, the rest stopped); a close request neither kills
+//   nor starts the rest.
+// - Results: the last delete result survives re-analysis (success or failure) and mode changes and is replaced only by the next
+//   delete; not-run Targets, certain non-starts and preparation failures of the batch are shown as the state of the latest batch
+//   without replacing the last delete result or log path (cleanup notices attach to that state); consumed snapshots leave the
+//   session candidate total; entries of exactly the UTF-8 byte limit are allowed and one byte more starts nothing and stops the
+//   rest; DeleteReport is reflected in the view model (delete marked as run, snapshot consumed, later Targets not run, log path
+//   with an unconfirmed creation made explicit, no automatic retry or re-analysis).
+// - Real EntriesStore: UTF-8 without BOM, LF, raw case, separators and invisible characters, unique names, never deleting files it
+//   does not own, a deletion failure reported on a sharing denial, cleanup after a partial write. Real LogLocation: names from the
+//   start time and a serial number, a GUID-suffixed name when the name exists, no file created in advance, an unusable folder.
+// - Bundled real CLI on a self-made ZIP and target: a non-candidate that became identical after the analysis is not touched, only
+//   candidates are deleted, no temporary entries remain, and the log has the expected name (real deletion of the fixture).
 public sealed class DeletionPreparationTests
 {
     private static readonly (string, string, long)[] Analysis =
@@ -326,7 +351,7 @@ public sealed class DeletionPreparationTests
     [Fact]
     public void RealEntriesFileHasExactRawNamesUtf8WithoutBomAndLfAndOnlyOwnedFilesAreRemoved()
     {
-        string dir = ArchiveSearchTests.Fixture("entries-store");
+        string dir = ArchiveSearchTests.Fixture();
         var store = new EntriesStore(dir);
         string[] names = ["Case/File.TXT", "日本語/顔-\U0001F642.txt", "back\\slash", " leading and trailing ", "a\u200Bb"];
         var created = store.Create(names);
@@ -365,7 +390,7 @@ public sealed class DeletionPreparationTests
     [Fact]
     public void PartiallyWrittenEntriesFileIsOwnedForCleanupAndAnUnwritableDirectoryOwnsNothing()
     {
-        string dir = ArchiveSearchTests.Fixture("entries-store-failure");
+        string dir = ArchiveSearchTests.Fixture();
         var store = new EntriesStore(dir);
         var partial = store.Create(["ok", "bad\uD800name"]);
         Assert.NotNull(partial.Error);
@@ -384,7 +409,7 @@ public sealed class DeletionPreparationTests
     [Fact]
     public void LogNamesUseBatchStartAndNumberAliasExistingNamesAndNeverCreateTheFile()
     {
-        string dir = Path.Combine(ArchiveSearchTests.Fixture("logs"), "nested", "logs");
+        string dir = Path.Combine(ArchiveSearchTests.Fixture(), "nested", "logs");
         var logs = new LogLocation(dir);
         var start = new DateTime(2026, 10, 8, 3, 4, 5, DateTimeKind.Utc);
         var first = logs.Reserve(start, 1);
@@ -402,7 +427,7 @@ public sealed class DeletionPreparationTests
         Assert.False(File.Exists(alias.Path));
         Assert.Equal(Path.Combine(dir, "delete-20261008-030405-002.jsonl"), logs.Reserve(start.ToLocalTime(), 2).Path);
 
-        string blocker = Path.Combine(ArchiveSearchTests.Fixture("logs-blocked"), "file");
+        string blocker = Path.Combine(ArchiveSearchTests.Fixture(), "file");
         File.WriteAllText(blocker, "x");
         var blocked = new LogLocation(Path.Combine(blocker, "logs")).Reserve(start, 1);
         Assert.Null(blocked.Path);
@@ -513,7 +538,7 @@ public sealed class DeletionPreparationTests
     [Fact]
     public async Task BundledCliDeletesOnlyApprovedMatchedFilesFromRealEntriesAndWritesTheNamedLog()
     {
-        string fixture = ArchiveSearchTests.Fixture("delete-real");
+        string fixture = ArchiveSearchTests.Fixture();
         string archive = Path.Combine(fixture, "内容 空白.zip");
         string target = Path.Combine(fixture, "target dir");
         string logs = Path.Combine(fixture, "logs");

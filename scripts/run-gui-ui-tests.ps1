@@ -9,10 +9,15 @@
       2. copies it without cli\ and publishes the fake CLI (tests/Unextract.Gui.FakeCli) as cli\unextract.exe,
       3. passes both package paths through UNEXTRACT_UI_GUI_PACKAGE / UNEXTRACT_UI_FAKE_PACKAGE (restored afterwards),
       4. runs the UI tests and fails when no test was executed,
-      5. removes only the temporary directory it created.
+      5. removes only the temporary directory it created (the results are kept).
+    Results (ui.trx and per-test diagnostics) go to -ResultsDirectory when verify.ps1 passes it (verify.ps1 owns
+    that directory and its mutex), otherwise to %TEMP%\unextract-verify\<checkout id>\ui-debug-latest, which this
+    script empties under its named mutex (see test-results.ps1). The standard verification result is never overwritten.
+    -Shots also saves pictures of the OS message boxes that the STA render tests cannot draw (UNEXTRACT_GUI_SHOTS =
+    <results>\shots); ordinary runs take none (docs/TESTING.md#gui-review).
     Requirements: an unlocked interactive desktop. Do not touch the mouse or keyboard while it runs. Remote desktop
     sessions that are minimized, service sessions and running several UI test sessions at once are not supported.
-    The tests do not publish anything themselves. Fixtures made by the tests stay (see clean-test-fixtures.ps1).
+    The tests do not publish anything themselves.
     ASCII only for Windows PowerShell 5.1 compatibility.
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-ui-tests.ps1
@@ -20,7 +25,9 @@
 [CmdletBinding()]
 param(
     [string]$Filter,
-    [switch]$Detailed
+    [switch]$Detailed,
+    [string]$ResultsDirectory,
+    [switch]$Shots
 )
 
 Set-StrictMode -Version 3.0
@@ -33,13 +40,25 @@ $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimE
 $name = 'unextract-ui-tests-' + [Guid]::NewGuid().ToString('N')
 $workDirectory = [System.IO.Path]::GetFullPath((Join-Path $tempRoot $name))
 $createdDirectory = $null
-$variables = @('UNEXTRACT_UI_GUI_PACKAGE', 'UNEXTRACT_UI_FAKE_PACKAGE', 'UNEXTRACT_FAKE_CLI_SCENARIO', 'UNEXTRACT_GUI_TEST_DATA_ROOT')
+$variables = @('UNEXTRACT_UI_GUI_PACKAGE', 'UNEXTRACT_UI_FAKE_PACKAGE', 'UNEXTRACT_FAKE_CLI_SCENARIO', 'UNEXTRACT_GUI_TEST_DATA_ROOT', 'UNEXTRACT_UI_RESULTS', 'UNEXTRACT_GUI_SHOTS')
 $originals = @{}
 foreach ($variable in $variables) { $originals[$variable] = [Environment]::GetEnvironmentVariable($variable, 'Process') }
 $exitCode = 1
 $stage = 'setup'
+$resultsMutex = $null
+. (Join-Path $PSScriptRoot 'test-results.ps1')
 
 try {
+    if ($ResultsDirectory) {
+        $results = [System.IO.Path]::GetFullPath($ResultsDirectory)
+        if (-not [System.IO.Directory]::Exists($results)) { throw "Results directory does not exist: $results" }
+    }
+    else {
+        $results = Join-Path (Get-ResultsParent $repoRoot) 'ui-debug-latest'
+        $resultsMutex = Enter-ResultsDirectory $results
+    }
+    Write-Output "Results: $results"
+
     # New-Item fails if the directory already exists. Ownership starts only after successful creation.
     $createdDirectory = (New-Item -ItemType Directory -Path $workDirectory -ErrorAction Stop).FullName
     Write-Output "Temporary directory: $createdDirectory"
@@ -68,7 +87,8 @@ try {
     # The tests set these per GUI process; never inherit them from the caller.
     [Environment]::SetEnvironmentVariable('UNEXTRACT_FAKE_CLI_SCENARIO', $null, 'Process')
     [Environment]::SetEnvironmentVariable('UNEXTRACT_GUI_TEST_DATA_ROOT', $null, 'Process')
-    $results = Join-Path $createdDirectory 'results'
+    [Environment]::SetEnvironmentVariable('UNEXTRACT_UI_RESULTS', $results, 'Process')
+    [Environment]::SetEnvironmentVariable('UNEXTRACT_GUI_SHOTS', $(if ($Shots) { Join-Path $results 'shots' } else { $null }), 'Process')
     $arguments = @((Join-Path $repoRoot 'tests/Unextract.Gui.UiTests'), '-c', 'Release', '-p:UnextractUiTests=true',
                    '--results-directory', $results, '--logger', 'trx;LogFileName=ui.trx', '--logger', ('console;verbosity=' + $(if ($Detailed) { 'detailed' } else { 'normal' })))
     if ($Filter) { $arguments += @('--filter', $Filter) }
@@ -124,6 +144,7 @@ finally {
             if ($exitCode -eq 0) { $exitCode = 1 }
         }
     }
+    Exit-ResultsDirectory $resultsMutex
 }
 
 exit $exitCode

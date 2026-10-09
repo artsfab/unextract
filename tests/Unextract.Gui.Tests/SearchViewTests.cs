@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -9,9 +10,16 @@ using System.Windows.Threading;
 using Unextract.Gui.Models;
 using Unextract.Gui.ViewModels;
 using Unextract.Gui.Views;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
+// The search view on a WPF tree on the STA: the bindings of the work list (one virtualized list in which the Target rows follow
+// their Archive row; no list nested in a row), the tri-state parent, the select-shown operations, Space toggling the selection of a
+// row apart from arrow keys moving the view, and the Target editor (each preset and the format errors; a bulk add resolves every
+// Archive). Also the Tab order following the visual order (input, search, choose folder, subdirectories, mode (two radio buttons,
+// one stop), filter, bulk add, change selection), the automation IDs and the row and check box names that the UI E2E uses, and the
+// automation IDs of the dialogs.
 // Tests that create WPF windows run serially in one collection. When xUnit ran the classes that create MainWindow in
 // parallel, a test (in DeploymentTests) failed intermittently; with those classes in the "Wpf" collection the failure
 // no longer reproduced (Gui.Tests then passed 15 consecutive runs). It was seen only under parallel test execution, not
@@ -67,7 +75,7 @@ public sealed class SearchViewTests
             Assert.Equal(6, list.Items.Count);
             Assert.All(model.Archives[0].Targets, t => Assert.False(t.IsSelected));
             Assert.Empty(trace.Errors);
-            Render(window, Path.Combine(ArchiveSearchTests.Fixture("view"), "work-list.png"));
+            Render(window, "work-list");
         }
         finally
         {
@@ -303,16 +311,24 @@ public sealed class SearchViewTests
         target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
     }
 
-    // Own WPF tree, not the user's desktop. The picture is kept with the test fixture.
-    internal static void Render(Window window, string path)
+    // The directory for screen pictures (docs/TESTING.md#gui-review); unset in ordinary runs. An absolute path outside the fixtures.
+    internal const string ShotsVariable = "UNEXTRACT_GUI_SHOTS";
+
+    // Renders the window's client area from its own WPF tree (not the user's desktop) every time, so a rendering failure fails
+    // the test. The PNG is encoded and saved only when UNEXTRACT_GUI_SHOTS names a directory, as <name>.png in it.
+    internal static void Render(Window window, string name)
     {
         // The root of the window's template covers the whole client area at offset 0, with the window background.
         var root = Assert.IsAssignableFrom<FrameworkElement>(VisualTreeHelper.GetChild(window, 0));
         var bitmap = new RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth), (int)Math.Ceiling(root.ActualHeight), 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(root);
+        string? shots = Environment.GetEnvironmentVariable(ShotsVariable);
+        if (string.IsNullOrEmpty(shots)) return;
+        Assert.True(Path.IsPathFullyQualified(shots), $"{ShotsVariable} must be an absolute directory: {shots}");
+        Directory.CreateDirectory(shots);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        using var file = new FileStream(Path.Combine(shots, name + ".png"), FileMode.Create, FileAccess.Write, FileShare.None);
         encoder.Save(file);
     }
 
@@ -330,24 +346,36 @@ public sealed class SearchViewTests
             foreach (var descendant in Descendants<T>(child)) yield return descendant;
         }
     }
+    // Runs the action on a new STA thread with a dispatcher. The returned task completes only after the action (normally or
+    // with an exception, after its own finally blocks), the dispatcher shutdown and the end of the thread, so nothing of the
+    // test is still running when the fixtures are deleted. There is no local timeout: a hang is stopped for the whole test
+    // host by the blame hang timeout of gui.runsettings (VSTest), which leaves a dump and fails the run.
     internal static Task OnSta(Func<Task> action)
     {
-        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ExceptionDispatchInfo? failure = null;
         var thread = new Thread(() =>
         {
-            var dispatcher = Dispatcher.CurrentDispatcher;
-            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
-            dispatcher.InvokeAsync(async () =>
+            try
             {
-                try { await action(); done.TrySetResult(); }
-                catch (Exception e) { done.TrySetException(e); }
-                finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
-            });
-            Dispatcher.Run();
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+                dispatcher.InvokeAsync(async () =>
+                {
+                    try { await action(); }
+                    catch (Exception e) { failure = ExceptionDispatchInfo.Capture(e); }
+                    finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
+                });
+                Dispatcher.Run();
+            }
+            catch (Exception e) { failure ??= ExceptionDispatchInfo.Capture(e); }
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        return done.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        return Task.Factory.StartNew(() =>
+        {
+            thread.Join();
+            failure?.Throw();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
     internal sealed class BindingErrors : TraceListener
     {

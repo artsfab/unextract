@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Nodes;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.UiTests;
 
@@ -46,7 +47,7 @@ public sealed class FakeCliTests
     [Fact]
     public void FakeNormalOutputsHaveTheSameRecordsAsTheRealCli()
     {
-        string root = UiEnvironment.NewFixture("shape");
+        string root = TestFixtures.Create();
         string archive = Path.Combine(root, "日本語 a.zip");
         Files.Zip(archive, ("d/", ""), ("matched.txt", "abc"), ("same.txt", "abc"), ("size.txt", "abc"), ("missing.txt", "abc"));
         string target = Directory.CreateDirectory(Path.Combine(root, "target")).FullName;
@@ -82,7 +83,7 @@ public sealed class FakeCliTests
     [Fact]
     public void FakeWritesTheScenarioRecordsEntriesAndLogAndDoesNotTouchTheFiles()
     {
-        string root = UiEnvironment.NewFixture("fake");
+        string root = TestFixtures.Create();
         string target = Directory.CreateDirectory(Path.Combine(root, "target")).FullName;
         string guard = Path.Combine(target, "keep.txt");
         File.WriteAllText(guard, "keep");
@@ -124,7 +125,7 @@ public sealed class FakeCliTests
         Assert.Equal(3, none.ExitCode);
         Assert.Empty(none.Lines);
 
-        string root = UiEnvironment.NewFixture("fake-wait");
+        string root = TestFixtures.Create();
         var scenario = new Scenario(Path.Combine(root, "scenario"));
         string[] lines = FakeResults.Analysis("a.zip", "t", "strict", new Item(1, "a.txt", "MATCHED", 1));
         string release = scenario.Add("analyze", lines, wait: true, waitAfterLines: 2);

@@ -5,14 +5,16 @@ using Porta.Pty;
 
 namespace Unextract.E2E.Tests;
 
-// M08 / O07 専用。改行なしの prompt も検出し、UTF-8 の途中で分割された読み取りも復号する。
-// fixture の削除より先に dispose する。fixture の cleanup は呼び出し元の PTY テストが行う。
+// 実端末 (ConPTY) で exe・cmd を動かす (X28〜X31)。改行なしの prompt も検出し、UTF-8 の途中で分割された読み取りも復号する。
+// fixture の削除より先に dispose する。fixture はテストの終了後に共通の削除処理 (TestFixtures) が削除する。
 internal sealed class PtyProcess : IAsyncDisposable
 {
     private static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(10);
     private static readonly Regex Escape = new(
         @"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[ -/]*[@-~])",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+    private static readonly Regex Progress = new(
+        "\r*(?:Checking|Processing) [0-9]+ / [0-9]+[ \r]*", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     private readonly IPtyConnection _terminal;
     private readonly Process _process;
     private readonly StringBuilder _output = new();
@@ -43,6 +45,10 @@ internal sealed class PtyProcess : IAsyncDisposable
         }
     }
 
+    // 進捗 (stderr) は同じ端末に描かれ、ConPTY の差分の出力では結果行の前に (消去の空白・CR とともに) 残る。結果行を読む前に除く
+    // (見え方は手動の M05)。
+    public string OutputWithoutProgress => Progress.Replace(Output, "");
+
     public string Diagnostics
     {
         get
@@ -55,13 +61,64 @@ internal sealed class PtyProcess : IAsyncDisposable
         }
     }
 
-    public static async Task<PtyProcess> StartAsync(E2EFixture fixture, bool fast, CancellationToken token)
+    // 1つの PTY で起動から終了までを行う。本体の失敗には context と terminal output を付ける。PTY / process tree を終了させてから
+    // テストを終え (fixture はその後に共通の削除処理が削除する)、後始末だけが失敗した場合もテストを失敗させる。
+    public static async Task RunAsync(string context, Func<CancellationToken, Task<PtyProcess>> start, Func<PtyProcess, CancellationToken, Task> body)
+    {
+        using var timeout = new CancellationTokenSource(UnextractProcess.Timeout);
+        PtyProcess? terminal = null;
+        string? failure = null;
+        try
+        {
+            terminal = await start(timeout.Token);
+            await body(terminal, timeout.Token);
+        }
+        catch (Exception e)
+        {
+            failure = $"{e}\n{context}\n" + (terminal?.Diagnostics ?? "PTY 未起動。");
+        }
+        finally
+        {
+            try
+            {
+                if (terminal is not null)
+                {
+                    await terminal.DisposeAsync();
+                }
+            }
+            catch (Exception e)
+            {
+                // 本体の失敗を保持する。
+                failure += $"\nPTY 後始末失敗: {e}\n{context}\n{terminal?.Diagnostics}";
+            }
+        }
+
+        if (failure is not null)
+        {
+            Assert.Fail(failure);
+        }
+    }
+
+    // 対話の delete。実削除を伴い得るので、起動前に領域外ガードを確かめる。
+    public static Task<PtyProcess> StartDeleteAsync(E2EFixture fixture, bool fast, CancellationToken token)
+    {
+        fixture.CheckGuard();
+        return SpawnAsync(UnextractProcess.ExePath, fixture.Directory,
+            ["delete", fixture.ArchivePath, "--target", fixture.Target, .. fast ? new[] { "--fast" } : []], verbatim: false, token);
+    }
+
+    // cmd.exe /d /s /c "<command>" (コードページの切り替えなどを同じコンソールで続けて行う)。command は引用符を含めてそのまま渡す。
+    public static Task<PtyProcess> StartCmdAsync(string directory, string command, CancellationToken token) =>
+        SpawnAsync(Path.Combine(Environment.SystemDirectory, "cmd.exe"), directory, ["/d", "/s", "/c", $"\"{command}\""], verbatim: true, token);
+
+    private static async Task<PtyProcess> SpawnAsync(string app, string directory, string[] commandLine, bool verbatim, CancellationToken token)
     {
         var terminal = await PtyProvider.SpawnAsync(new PtyOptions
         {
-            App = UnextractProcess.ExePath,
-            Cwd = fixture.Directory,
-            CommandLine = ["delete", fixture.ArchivePath, "--target", fixture.Target, .. fast ? new[] { "--fast" } : []],
+            App = app,
+            Cwd = directory,
+            CommandLine = commandLine,
+            VerbatimCommandLine = verbatim,
             Cols = 240,
             Rows = 80,
         }, token);
@@ -99,10 +156,10 @@ internal sealed class PtyProcess : IAsyncDisposable
         }
     }
 
-    // このテストでは n のみ送る。実削除を伴う y は既存 E2E の領域外ガードなしで送らない。
-    public async Task SendNoAsync(CancellationToken token)
+    // 1行を入力して Enter を押す (空文字列は Enter だけ)。delete への y は StartDeleteAsync の領域外ガードの後に限る。
+    public async Task SendLineAsync(string text, CancellationToken token)
     {
-        await _terminal.WriterStream.WriteAsync("n\r"u8.ToArray(), token);
+        await _terminal.WriterStream.WriteAsync(Encoding.UTF8.GetBytes(text + "\r"), token);
         await _terminal.WriterStream.FlushAsync(token);
     }
 

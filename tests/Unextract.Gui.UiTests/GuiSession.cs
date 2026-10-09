@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Runtime.CompilerServices;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
@@ -16,24 +17,46 @@ internal static class Startup
     public static void Initialize() => UiEnvironment.RequirePerMonitorV2();
 }
 
-// Polls a condition until it holds, with a deadline; never a fixed sleep.
+// Polls a condition until it holds, with a deadline; never a fixed sleep. Waits longer than one second are written to the
+// test output with what was awaited; a timeout names the exception types (and counts) seen while polling.
 internal static class Wait
 {
     public static readonly TimeSpan Default = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Reported = TimeSpan.FromSeconds(1);
+
+    // The current test's output (UiTestBase); UI tests run one at a time.
+    public static Action<string>? Log { get; set; }
 
     public static T Until<T>(Func<T?> probe, string what, TimeSpan? limit = null) where T : class
     {
-        var deadline = DateTime.UtcNow + (limit ?? Default);
+        var started = DateTime.UtcNow;
+        var deadline = started + (limit ?? Default);
+        var seen = new Dictionary<string, int>();
         Exception? last = null;
         while (true)
         {
-            try { if (probe() is { } value) return value; last = null; }
+            try
+            {
+                if (probe() is { } value)
+                {
+                    var elapsed = DateTime.UtcNow - started;
+                    if (elapsed > Reported) Log?.Invoke($"wait {elapsed.TotalSeconds:F1} s: {what}");
+                    return value;
+                }
+                last = null;
+            }
             catch (Exception e)
             {
                 // UI Automation reports transient states (element gone, not ready) as various exception types: retry until the deadline.
                 last = e;
+                seen[e.GetType().Name] = seen.GetValueOrDefault(e.GetType().Name) + 1;
             }
-            if (DateTime.UtcNow > deadline) throw new TimeoutException($"Timed out waiting for: {what}" + (last is null ? "" : "\n" + last.Message));
+            if (DateTime.UtcNow > deadline)
+            {
+                string exceptions = seen.Count == 0 ? "" : "\nExceptions while waiting: " + string.Join(", ", seen.Select(p => $"{p.Key} x{p.Value}"));
+                throw new TimeoutException($"Timed out after {(DateTime.UtcNow - started).TotalSeconds:F1} s waiting for: {what}{exceptions}" +
+                    (last is null ? "" : "\nLast: " + last.Message));
+            }
             Thread.Sleep(30);
         }
     }
@@ -48,6 +71,7 @@ internal sealed class GuiSession : IDisposable
 {
     private readonly UIA3Automation _automation = new();
     private Window? _main;
+    private AutomationElement? _workList;
     private bool _disposed;
 
     public string Root { get; }
@@ -60,10 +84,11 @@ internal sealed class GuiSession : IDisposable
     public string LogsDirectory => Path.Combine(DataRoot, "logs");
     public ConditionFactory Conditions => _automation.ConditionFactory;
 
+    // root: a new fixture directory owned by the test (UiTestBase deletes it after the GUI has exited).
     // dataRootValue: null = the fixture's data directory; otherwise the raw environment value (for misconfiguration tests).
-    public GuiSession(bool fake, string kind, string? dataRootValue = null, bool setDataRoot = true)
+    public GuiSession(string root, bool fake, string? dataRootValue = null, bool setDataRoot = true)
     {
-        Root = UiEnvironment.NewFixture(kind);
+        Root = root;
         DataRoot = Directory.CreateDirectory(Path.Combine(Root, "data")).FullName;
         TempDirectory = Directory.CreateDirectory(Path.Combine(Root, "tmp")).FullName;
         Fixtures = Directory.CreateDirectory(Path.Combine(Root, "files")).FullName;
@@ -111,12 +136,16 @@ internal sealed class GuiSession : IDisposable
 
     public void Invoke(string id, AutomationElement? scope = null) => Get(id, scope).AsButton().Invoke();
 
-    // A row of a list. Rows of the virtualized work list outside the visible area are realized first (ItemContainer and
-    // VirtualizedItem patterns) and scrolled into view.
+    // The work list (one element for the window's lifetime).
+    public AutomationElement WorkList => _workList ??= Get("ArchiveList");
+
+    // A row of the work list, searched within the list only (not the whole window). Rows of the virtualized list outside the
+    // visible area are realized first (ItemContainer and VirtualizedItem patterns) and scrolled into view.
     public AutomationElement Row(string name) => Wait.Until(() =>
     {
-        var row = Main.FindFirstDescendant(Conditions.ByControlType(ControlType.ListItem).And(Conditions.ByName(name)));
-        if (row is null && Find("ArchiveList") is { } list && list.Patterns.ItemContainer.PatternOrDefault is { } container)
+        var list = WorkList;
+        var row = list.FindFirstDescendant(Conditions.ByControlType(ControlType.ListItem).And(Conditions.ByName(name)));
+        if (row is null && list.Patterns.ItemContainer.PatternOrDefault is { } container)
         {
             var item = container.FindItemByProperty(null, list.Automation.PropertyLibrary.Element.Name, name);
             if (item is not null)
@@ -174,68 +203,111 @@ internal sealed class GuiSession : IDisposable
 
     public bool HasExited => App.HasExited;
 
-    // Normal close only. Pending fake-CLI releases are created first so a blocked CLI can finish; if the GUI still does not
-    // exit, the process id is reported and the process is left alone.
+    // Normal close requests only, repeated every few seconds. Pending fake-CLI releases are created first so a blocked CLI
+    // can finish. Returns null when the GUI exited, otherwise the failure (with the process id).
+    public string? CloseNormally()
+    {
+        try
+        {
+            Scenario.ReleaseAll();
+            if (App.HasExited) return null;
+            string last = "";
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            var nextRequest = DateTime.MinValue;
+            while (!App.HasExited && DateTime.UtcNow < deadline)
+            {
+                if (DateTime.UtcNow >= nextRequest)
+                {
+                    nextRequest = DateTime.UtcNow.AddSeconds(3);
+                    try
+                    {
+                        foreach (var modal in Main.ModalWindows) modal.Close();
+                        Main.Patterns.Window.Pattern.Close();
+                    }
+                    catch (Exception e) { last = e.Message; }
+                }
+                Thread.Sleep(50);
+            }
+            return App.HasExited ? null : $"The GUI (process {App.ProcessId}) did not exit after normal close requests. Last error: {last}";
+        }
+        catch (Exception e)
+        {
+            return $"Closing the GUI (process {App.ProcessId}) failed: {e.Message}";
+        }
+    }
+
+    // Terminates the process tree this session started (never any other process) and waits for it. Returns null when the
+    // GUI is gone, otherwise why it could not be confirmed.
+    public string? Terminate()
+    {
+        try
+        {
+            using var process = Process.GetProcessById(App.ProcessId);
+            process.Kill(entireProcessTree: true);
+            return process.WaitForExit(TimeSpan.FromSeconds(15)) ? null : $"The GUI (process {App.ProcessId}) did not end after termination.";
+        }
+        catch (ArgumentException)
+        {
+            return null; // already gone
+        }
+        catch (Exception e)
+        {
+            return App.HasExited ? null : $"Terminating the GUI (process {App.ProcessId}) failed: {e.Message}";
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        string? failure = null;
-        try
-        {
-            Scenario.ReleaseAll();
-            if (!App.HasExited)
-            {
-                // Normal close requests only, repeated every few seconds; the process is never killed.
-                string last = "";
-                var deadline = DateTime.UtcNow.AddSeconds(30);
-                var nextRequest = DateTime.MinValue;
-                while (!App.HasExited && DateTime.UtcNow < deadline)
-                {
-                    if (DateTime.UtcNow >= nextRequest)
-                    {
-                        nextRequest = DateTime.UtcNow.AddSeconds(3);
-                        try
-                        {
-                            foreach (var modal in Main.ModalWindows) modal.Close();
-                            Main.Patterns.Window.Pattern.Close();
-                        }
-                        catch (Exception e) { last = e.Message; }
-                    }
-                    Thread.Sleep(50);
-                }
-                if (!App.HasExited) failure = $"The GUI (process {App.ProcessId}) did not exit after normal close requests; it was left running. Last error: {last}";
-            }
-        }
-        catch (Exception e)
-        {
-            failure = $"Cleanup of the GUI (process {App.ProcessId}) failed: {e.Message}";
-        }
         _automation.Dispose();
-        if (failure is not null) throw new InvalidOperationException(failure);
-    }
-}
-
-// Base of the UI test classes: one test instance per test, so sessions are closed (normally) after each test.
-[Collection("ui")]
-public abstract class UiTestBase : IDisposable
-{
-    private readonly List<GuiSession> _sessions = [];
-
-    internal GuiSession Start(bool fake = true, string kind = "ui", string? dataRootValue = null)
-    {
-        var session = new GuiSession(fake, kind, dataRootValue);
-        _sessions.Add(session);
-        return session;
     }
 
-    public void Dispose()
+    // Diagnostics: the UI Automation tree of every top-level window of the GUI process (names escaped like the GUI shows them).
+    public void WriteTree(string path)
     {
-        var failures = new List<Exception>();
-        foreach (var session in _sessions)
+        var text = new StringBuilder();
+        int count = 0;
+        foreach (var window in TopLevelWindows()) Dump(window, 0);
+        File.WriteAllText(path, text.ToString(), new UTF8Encoding(false));
+
+        void Dump(AutomationElement element, int depth)
         {
-            try { session.Dispose(); } catch (Exception e) { failures.Add(e); }
+            if (++count > 5000) return;
+            static string Read(Func<object?> read)
+            {
+                try { return Models.Escape(Convert.ToString(read(), System.Globalization.CultureInfo.InvariantCulture) ?? ""); }
+                catch (Exception e) { return $"<{e.GetType().Name}>"; }
+            }
+            string name = Read(() => element.Name);
+            if (name.Length > 300) name = name[..300] + "...";
+            text.Append(' ', depth * 2).Append(Read(() => element.ControlType)).Append(" id='").Append(Read(() => element.AutomationId))
+                .Append("' name='").Append(name).Append("' rect=").Append(Read(() => element.BoundingRectangle))
+                .Append(" enabled=").Append(Read(() => element.IsEnabled)).Append(" offscreen=").Append(Read(() => element.IsOffscreen)).Append('\n');
+            if (depth >= 40) return;
+            AutomationElement[] children;
+            try { children = element.FindAllChildren(); }
+            catch (Exception e) { text.Append(' ', depth * 2 + 2).Append($"<children: {e.GetType().Name}>\n"); return; }
+            foreach (var child in children) Dump(child, depth + 1);
         }
-        if (failures.Count != 0) throw new AggregateException(failures);
+    }
+
+    public void CopyScenario(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        foreach (string file in new[] { Scenario.Path, Scenario.RecordPath })
+            if (File.Exists(file)) File.Copy(file, System.IO.Path.Combine(directory, System.IO.Path.GetFileName(file)));
+    }
+
+    public void CopyDataRoot(string directory)
+    {
+        foreach (string file in Directory.EnumerateFiles(DataRoot, "*", SearchOption.AllDirectories))
+        {
+            string destination = System.IO.Path.Combine(directory, System.IO.Path.GetRelativePath(DataRoot, file));
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(destination)!);
+            using var source = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var target = File.Create(destination);
+            source.CopyTo(target);
+        }
     }
 }

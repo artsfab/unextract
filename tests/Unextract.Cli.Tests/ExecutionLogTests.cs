@@ -1,10 +1,13 @@
 using System.IO.Pipes;
 using System.Text;
 using Unextract.Windows;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Cli.Tests;
 
-// 実ファイルの新規作成・共有を確認する。自作GUID fixtureは削除せず保存する。
+// J10: 実行ログの新規作成と実共有 (docs/spec/machine-output.md#log)。CreateNew による既存ログ/ZIP/entries の不変、作成不能・競合作成の
+// 型付き失敗、デバイス (NUL・CON) とパイプを開けてもログとして受理しないこと (パイプには何も書かない)、各レコードの別読取ハンドルからの
+// 可視性、保持中の書込/削除 open の拒否と close 後の解放。削除の指示は行わない。
 public class ExecutionLogTests
 {
     [Theory]
@@ -178,6 +181,5 @@ public class ExecutionLogTests
         return output.ToArray();
     }
 
-    private static string Fixture() => Directory.CreateDirectory(Path.Combine(
-        AppContext.BaseDirectory, "fixtures", $"ExecutionLog-{Guid.NewGuid():N}")).FullName;
+    private static string Fixture() => TestFixtures.Create();
 }

@@ -7,6 +7,10 @@ namespace Unextract.Gui.Tests;
 
 // The display state of the redesigned window: the viewed item, the flat work list, the next-step guide and the
 // selection summary. All of it is display only; these tests also pin that it never changes selection or plans.
+// The viewed item (details pane) is independent of selection, filtering, removal and the lock while running: a filter that hides it
+// keeps the view and says so, removing the viewed Target returns to its Archive, and the selection never changes. Also the
+// transitions of the next-step guide and the selection summary, the status badges, the row summaries and the reasons an operation
+// is unavailable.
 public sealed class ViewStateTests
 {
     [Fact]

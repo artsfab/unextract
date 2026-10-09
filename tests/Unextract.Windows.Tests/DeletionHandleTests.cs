@@ -63,7 +63,7 @@ public class DeletionHandleTests
     [InlineData(0x0u)]
     public void SetDispositionEx_RejectsFlagsOtherThan0x3(uint flags)
     {
-        var dir = CreateDirectory($"{nameof(SetDispositionEx_RejectsFlagsOtherThan0x3)}-{flags:X}");
+        var dir = CreateDirectory();
         var file = WriteFile(dir, "a.txt", "hello");
 
         using (var handle = new WindowsFileSystemProbe().OpenForDeletion(file).Value!)

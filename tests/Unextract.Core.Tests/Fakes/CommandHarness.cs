@@ -85,7 +85,7 @@ internal sealed class CommandHarness
 
     public bool Exists(string name) => Fs.Find($@"C:\target\{name}") is not null;
 
-    // テスト用の entries ファイルを書く (テストの出力先の fixtures/ に一意な名前で。テストからは削除しない)。
+    // テスト用の entries ファイルを書く (実行中のテストの fixture に。テストの終了後に削除される)。
     public static string WriteEntries(byte[] content) => TestFiles.Write($"entries-{Guid.NewGuid():N}.txt", content);
 
     public static string WriteEntries(string text) => WriteEntries(System.Text.Encoding.UTF8.GetBytes(text));

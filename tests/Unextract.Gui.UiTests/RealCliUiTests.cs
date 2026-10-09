@@ -1,12 +1,14 @@
+using Xunit.Abstractions;
+
 namespace Unextract.Gui.UiTests;
 
 // The one path with the bundled real CLI: published package, self-made GUID fixture, own TMP and data root.
-public sealed class RealCliUiTests : UiTestBase
+public sealed class RealCliUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
-    [Fact]
+    [UiFact]
     public void SearchStrictAnalyzeAndConfirmedDeleteRemoveOnlyTheMatchedFile()
     {
-        var ui = Start(fake: false, kind: "real");
+        var ui = Start(fake: false);
         string archive = Path.Combine(ui.Fixtures, "real.zip"), target = Path.Combine(ui.Fixtures, "out");
         Files.Zip(archive, ("d/", ""), ("match.txt", "abc"), ("modified.txt", "abc"), ("missing.txt", "abc"));
         Directory.CreateDirectory(target);

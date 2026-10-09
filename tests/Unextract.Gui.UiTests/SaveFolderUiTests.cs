@@ -1,17 +1,18 @@
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.WindowsAPI;
+using Xunit.Abstractions;
 
 namespace Unextract.Gui.UiTests;
 
 // The log folder button and the folder picker. That Explorer really opens, and choosing a folder in the OS
 // dialog, are left to the human acceptance check (docs/MANUAL_TESTS.md#m14).
 
-public sealed class SaveFolderUiTests : UiTestBase
+public sealed class SaveFolderUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
-    [Fact]
+    [UiFact]
     public void LogFolderButtonExplainsThatTheFolderDoesNotExistYetAndShowsItsPath()
     {
-        var ui = Start(kind: "logfolder");
+        var ui = Start();
         Assert.False(Directory.Exists(ui.LogsDirectory));
         ui.Invoke("OpenLogFolderButton");
         var box = ui.WaitModal("実行ログ");
@@ -24,10 +25,10 @@ public sealed class SaveFolderUiTests : UiTestBase
         Assert.False(Directory.Exists(ui.LogsDirectory), "opening the button must not create the folder");
     }
 
-    [Fact]
+    [UiFact]
     public void CancellingTheFolderPickerKeepsTheSearchDirectory()
     {
-        var ui = Start(kind: "picker");
+        var ui = Start();
         ui.SetText("SearchDirectoryBox", ui.Fixtures);
         ui.Invoke("ChooseFolderButton");
         // The OS folder picker is a separate top-level window of the GUI process, modal to the main window.

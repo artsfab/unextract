@@ -1,15 +1,15 @@
 namespace Unextract.Core.Tests.Fixtures;
 
-// ディスク上の fixture はテストの出力ディレクトリ (bin/ 配下) の fixtures/ にだけ書く。
-// 実行のたびに同じ名前で上書きし、テストからは削除しない。
+// ディスク上の fixture は、実行中のテストが所有する fixture ディレクトリ (TestFixtures。テストの出力ディレクトリの
+// fixtures/<テスト名>-<GUID>) にだけ書く。テストの終了後に共通の削除処理が削除する。
 internal static class TestFiles
 {
-    public static string Directory { get; } =
-        System.IO.Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "fixtures")).FullName;
+    // 実行中のテストの新しい fixture ディレクトリ (呼ぶたびに別のディレクトリ)。
+    public static string NewDirectory() => TestFixtures.Create();
 
     public static string Write(string name, byte[] content)
     {
-        var path = Path.Combine(Directory, name);
+        var path = Path.Combine(NewDirectory(), name);
         File.WriteAllBytes(path, content);
         return path;
     }

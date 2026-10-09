@@ -191,7 +191,7 @@ textures/logo.png
 unextract analyze archive.zip --target D:\work\extracted | Out-File -Encoding utf8 analyze.txt
 ```
 
-PowerShell 7 の `>` やコマンドプロンプト (`cmd`) の `>` は UTF-8 で保存されます。PowerShell を経由して保存した場合に、日本語などの ASCII 以外の名前が正しく保存されるかは、まだ実機で確認していません (`docs/MANUAL_TESTS.md` の M13)。保存したファイルから、削除したいエントリの行の Entry 部分 (状態名の後から ` -> ` の前まで) を entries ファイルに書きます。
+PowerShell 7 の `>` やコマンドプロンプト (`cmd`) の `>` は UTF-8 で保存されます。ただし、コード ページ 932 のコンソールの Windows PowerShell 5.1 では、`Out-File -Encoding utf8` で保存しても日本語などの ASCII 以外の名前が文字化けすることを確認しています (PowerShell が unextract の出力をコード ページ 932 として読むため)。今回確認した名前では ZIP に一致するエントリが無い入力エラーとなり、削除0件でした。ただし、文字化け後の名前が ZIP 内の別のエントリに一致すると、そのファイルが削除条件を満たせば削除されます。文字化けした entries は使わず、保存後の Entry が意図した名前と一致することを確認してください。PowerShell 7 や他のコード ページでの保存は確認していません (`docs/OPEN_ISSUES.md`)。保存したファイルから、削除したいエントリの行の Entry 部分 (状態名の後から ` -> ` の前まで) を entries ファイルに書きます。
 
 ## 重要な注意
 
@@ -278,7 +278,7 @@ FATAL のときは、判定済みのエントリの結果、原因のエント�
 - **`delete` の実行中に target を操作しないでください。** 処理中のファイルの属性・ADS・hardlink の追加、親フォルダーの ACL の変更 (子のファイルの変更日時 (ChangeTime) が変わる) などは STOP の原因になります。処理に時間がかかる場合、途中で target が変わると STOP が増えることがあります (誤って削除することはありません)。
 - **ファイル自体の ACL で削除を拒否していても、親フォルダーの権限 (中の項目の削除の許可) によって削除される場合があります。** これは Windows の通常の権限の挙動で、unextract は個々のファイルの ACL を確認しません。
 - 削除したファイルの名前は、unextract がそのファイルを閉じた時点で消えます。検索インデクサやバックアップソフトが削除を妨げない形で読み取り中でも、名前は残りません。
-- Ctrl+C などで中断しても、検証していないファイルは削除しません。中断した時点までに削除したファイルは戻りません (`delete` の表示に出た `DELETED` の行が記録になります)。
+- Ctrl+C などで中断しても、検証していないファイルは削除しません。中断した時点までに削除したファイルは戻りません (`delete` の表示に出た `DELETED` の行が記録になります。最後に表示された行の次に処理していた1件は、行が表示される前に削除されていることがあります。[中断時の表示と実削除](docs/spec/cli.md#interruption))。
 
 ## 削除しない対象 (`SKIPPED_SPECIAL_FILE`)
 
@@ -326,9 +326,17 @@ FATAL のときは、判定済みのエントリの結果、原因のエント�
 
 - .NET SDK 10.0.401 (`global.json` で固定、`rollForward: latestPatch`)。警告はエラーとして扱います。
 
+標準の検証は次の1つで、毎回すべての段 (Release ビルド、solution のテスト、publish 版 E2E、GUI の配布スモーク、GUI の UI E2E) を実行し、合否を1つ出します。UI E2E があるので、ロックされていない対話デスクトップが必要で、実行中はマウスとキーボードに触れないでください。結果 (`summary.txt`・TRX・診断) はリポジトリ外の `%TEMP%\unextract-verify\<checkout>\latest` に残ります。詳細は [TESTING](docs/TESTING.md#verify)。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1
+```
+
+開発中に個別に実行するときは、通常の `dotnet build` / `dotnet test` も使えます (合否は `verify.ps1` で判定します)。
+
 ```text
 dotnet build -c Release
-dotnet test -c Release --no-build --logger "console;verbosity=detailed"
+dotnet test -c Release --no-build
 ```
 
 - RAR のテストは採用版の UnRAR.dll を使います。DLL はリポジトリに含めないので、テストの前に次でリポジトリ外 (既定 `%LOCALAPPDATA%\unextract-dev\unrar-7.23\`) に用意します (rarlab から取得し、SHA-256 を照合します。7-Zip か WinRAR の `UnRAR.exe` で展開します)。別の場所に置いた場合は環境変数 `UNEXTRACT_TEST_UNRAR_DLL` に DLL の絶対パスを設定します。DLL が無いと RAR のテストは失敗します (ZIP のテストには影響しません)。詳細は [TESTING](docs/TESTING.md#rar)。
@@ -337,8 +345,8 @@ dotnet test -c Release --no-build --logger "console;verbosity=detailed"
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\get-unrar-dll.ps1
 ```
 
-- `tests/Unextract.Windows.Tests` は実 NTFS 上で、テストが作った fixture の中のファイルを実際に削除します。fixture は `tests/<プロジェクト>/bin/<構成>/<TFM>/fixtures/` に作られ、**テストからは削除しません** (下記の掃除手順を使います)。ACL を変えるテストは終了時に元に戻します。
-- 一部のテストは、環境が前提を満たさないと失敗にせず、テスト出力に `前提不成立: ...` と書いてその項目の確認を行わずに終わります。`--logger "console;verbosity=detailed"` を付けると出力に残ります。該当するのは次のとおりです。
+- `tests/Unextract.Windows.Tests` は実 NTFS 上で、テストが作った fixture の中のファイルを実際に削除します。fixture は `tests/<プロジェクト>/bin/<構成>/<TFM>/fixtures/<テスト名>-<GUID>` に作られ、テストの終了後に成功・失敗を問わず共通の削除処理が削除します ([TESTING](docs/TESTING.md#fixtures))。ACL を変えるテストは終了時に元に戻し、戻ったことをテストの中で確かめます。
+- 一部のテストは、環境が前提を満たさないと失敗にせず、テスト出力に `前提不成立: ...` と書いてその項目の確認を行わずに終わります。`verify.ps1` はこれを「未観測」として別に数えて `summary.txt` に一覧にし、次の項目以外の前提不成立は不合格にします。
   - 8.3 の短い名前が生成されないボリューム (T06 と列挙のテスト)
   - `fsutil file setCaseSensitiveInfo` でフォルダー単位の大文字小文字の区別を有効にできない環境 (T15。権限や Windows の機能の構成によります)
   - `compact /c` または `fsutil sparse setflag` で属性を設定できない環境 (T08)
@@ -346,15 +354,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\get-unrar-dll.ps1
 
 ### E2E テストと手動テスト
 
-`tests/Unextract.E2E.Tests` は、ビルド済みの `unextract.exe` を別プロセスとして起動し、終了コード・標準出力・標準エラー出力と target の結果を確かめます ([TESTING](docs/TESTING.md#e2e) の X 系)。確認プロンプトの機能部分は Windows PTY で確認します。通常 build を含む全体検証 (`dotnet test unextract.sln`) に含まれます。配布形態の publish 版 E2E / PTY 検証には、次の wrapper を使います。
+`tests/Unextract.E2E.Tests` は、ビルド済みの `unextract.exe` を別プロセスとして起動し、終了コード・標準出力・標準エラー出力と target の結果を確かめます ([TESTING](docs/TESTING.md#e2e) の X 系)。確認プロンプトの機能部分は Windows PTY で確認します。通常 build を含む全体検証 (`dotnet test unextract.sln`) に含まれます。配布形態の publish 版 E2E / PTY 検証は `verify.ps1` の段の1つで、単独では次の wrapper を使います。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-e2e-tests.ps1
 ```
 
-wrapper は OS temp 直下の `unextract-e2e-publish-<GUID>` に Release / `win-x64` で一時 publish し、`UNEXTRACT_E2E_EXE` を設定して E2E project 全体を実行します。終了時に環境変数を復元し、自分が作った一時 publish だけを削除します。外部 exe と既存 `bin/` / `obj/` は削除しません。E2E test 自身は publish せず、`UNEXTRACT_E2E_EXE` が未設定なら通常 build 出力を使います。PTY fixture はテストが自動 cleanup し、その他の fixture は既存の掃除手順を使います。
+wrapper は OS temp 直下の `unextract-e2e-publish-<GUID>` に Release / `win-x64` で一時 publish し、`UNEXTRACT_E2E_EXE` を設定して E2E project 全体を実行します。終了時に環境変数を復元し、自分が作った一時 publish だけを削除します。外部 exe と既存 `bin/` / `obj/` は削除しません。E2E test 自身は publish せず、`UNEXTRACT_E2E_EXE` が未設定なら通常 build 出力を使います。fixture はテストの終了後に削除されます。
 
-Ctrl+C、進捗表示、コードページやフォント・折り返し・視認性など実端末での確認手順は [`docs/MANUAL_TESTS.md`](docs/MANUAL_TESTS.md) にあります。
+進捗表示の見え方、警告のフォント・折り返し・視認性など実端末での確認手順は [`docs/MANUAL_TESTS.md`](docs/MANUAL_TESTS.md) にあります。
 
 ### 配布ビルド
 
@@ -373,13 +381,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-gui-package.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-smoke-tests.ps1
 ```
 
-同じ配布処理で作った配布物に対するUI E2E (FlaUI。配布物の `unextract-gui.exe` を別プロセスで操作し、実CLIの代わりに偽CLIを使う) は次で実行します。ロックされていない対話デスクトップが必要で、実行中はマウスとキーボードに触れないでください。通常の `dotnet test unextract.sln` には含まれません。
+同じ配布処理で作った配布物に対するUI E2E (FlaUI。配布物の `unextract-gui.exe` を別プロセスで操作し、実CLIの代わりに偽CLIを使う) は `verify.ps1` の最後の段です。単独では次で実行します (結果は `%TEMP%\unextract-verify\<checkout>\ui-debug-latest`)。ロックされていない対話デスクトップが必要で、実行中はマウスとキーボードに触れないでください。通常の `dotnet test unextract.sln` には含まれません。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-ui-tests.ps1
 ```
 
-GUI関連のプロジェクト (`Unextract.Gui`、`Unextract.Gui.Tests`、`Unextract.Gui.FakeCli`、`Unextract.Gui.UiTests`) は `unextract.sln` に含まれ、CIの `dotnet build -c Release` (警告はエラー) でビルドされます。`dotnet test -c Release --no-build` で実行されるのは `Unextract.Gui.Tests` までで、UI E2Eは実行されません (CIでのUI E2Eと配布スモークは設定していません)。CLI単独のpublish版E2Eは従来どおり上の手順 (CIも同じ) で、GUI配布の検証は上の2つのスクリプトです。リリース番号 (`Version`) はGUIの実装では変更していません。
+GUI関連のプロジェクト (`Unextract.Gui`、`Unextract.Gui.Tests`、`Unextract.Gui.FakeCli`、`Unextract.Gui.UiTests`) は `unextract.sln` に含まれ、CIの `dotnet build -c Release` (警告はエラー) でビルドされます。`dotnet test -c Release --no-build` で実行されるのは `Unextract.Gui.Tests` までで、UI E2Eは実行されません。配布スモークとUI E2Eは `verify.ps1` が実行します (CIではUI E2Eを除きます)。リリース番号 (`Version`) はGUIの実装では変更していません。
 
 `src/Unextract.Cli` は単一ファイルの自己完結型 (win-x64、トリミングなし、出力名 `unextract.exe`) として publish できます。バージョンは `src/Unextract.Cli/Unextract.Cli.csproj` の `Version` の1か所です。
 
@@ -389,7 +397,7 @@ dotnet publish src/Unextract.Cli -c Release -p:PublishProfile=win-x64 -o <リポ
 
 ### テスト fixture の掃除
 
-`scripts/clean-test-fixtures.ps1` で、テストが残した `tests/*/bin/*/*/fixtures` を掃除します。
+テストの fixture は通常テストの終了後に削除されます。削除に失敗したものや、テストホストの異常終了 (ハング・クラッシュ) で残ったものは、`scripts/clean-test-fixtures.ps1` で `tests/*/bin/*/*/fixtures` ごと回収します。テストの実行中には使わないでください。
 
 ```powershell
 # 一覧だけ (何も変更しない。既定)
@@ -398,11 +406,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\clean-test-fixtures.
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\clean-test-fixtures.ps1 -Execute
 ```
 
-`-Execute` のときは、(1) `P03_*` の fixture に残った自分の SID の DENY を `icacls /remove:d` で戻し、(2) junction を `rmdir` (`/s` なし) で1つずつ外してリンク先が残ることを確かめ、(3) 残りを `cmd /c rmdir /s /q` で削除します。1つでも失敗したらその時点で止まります。
+`-Execute` のときは、(1) ACL を変えるテスト (`P03_*`・`S16_*`・`S34_*` など) の fixture に残った自分の SID の DENY を `icacls /remove:d` で戻し (reparse point とその先は触りません)、(2) junction を `rmdir` (`/s` なし) で1つずつ外してリンク先が残ることを確かめ、(3) 残りを `cmd /c rmdir /s /q` で削除します。1つでも失敗したらその時点で止まります。
 
 ### CI
 
-`.github/workflows/ci.yml` は push と pull request で、`windows-latest` 上で Release のビルド (警告ゼロ) とテストを行います。続けて、単一ファイルの exe を `dotnet publish` で作り、その exe を `UNEXTRACT_E2E_EXE` に指定して E2E テストを実行します。RAR のテストに必要な UnRAR.dll は、ビルドの前に `scripts\get-unrar-dll.ps1` で rarlab から取得・照合してリポジトリ外 (`runner.temp`) に置き、`UNEXTRACT_TEST_UNRAR_DLL` で Test と E2E に渡します。取得・照合に失敗すると CI は失敗します (RAR のテストを成功扱いにしません)。
+`.github/workflows/ci.yml` は push と pull request で、`windows-latest` 上で `scripts\verify.ps1 -Ci` を実行します。ローカルの標準の検証と同じ段から UI E2E だけを除いたもので (`-Ci` は GitHub Actions の中でしか受け付けません)、結果は成功・失敗を問わず成果物 `verify-results` に残ります。RAR のテストに必要な UnRAR.dll は、検証の前に `scripts\get-unrar-dll.ps1` で rarlab から取得・照合してリポジトリ外 (`runner.temp`) に置き、`UNEXTRACT_TEST_UNRAR_DLL` で渡します。取得・照合に失敗すると CI は失敗します (RAR のテストを成功扱いにしません)。
 
 ## ライセンス
 

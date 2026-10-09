@@ -4,6 +4,9 @@ using Unextract.Core.Tests.Fakes;
 
 namespace Unextract.Core.Tests;
 
+// J05: 共通の FS・内容検証の診断 (docs/spec/machine-output.md#codes)。最終確認の取得失敗と全 M0 不一致・番号の省略・API の順序。
+// 元の Win32 値・段階は ClassificationTests の T10/T13、ContentVerificationTests の C01〜C08、TargetRootTests と J04 も確認する。
+// S25/S27/S30 と Fast の非読取は既存の回帰。
 public class HandleDiagnosticTests
 {
     // J05: 最終確認の情報取得失敗と M0 不一致を、表示文字列を解析せず区別できる。

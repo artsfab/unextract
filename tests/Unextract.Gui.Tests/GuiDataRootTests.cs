@@ -1,8 +1,12 @@
 using System.IO;
 using Unextract.Gui.Services;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
+// The data root switch for the UI E2E only (environment variable UNEXTRACT_GUI_TEST_DATA_ROOT, read only by the composition root):
+// unset keeps %LOCALAPPDATA%\unextract; an existing absolute directory gives <root>\settings.json and <root>\logs; an empty,
+// relative, missing or file path is an error (start-up aborts) without falling back to the normal location. Not a user feature.
 public sealed class GuiDataRootTests
 {
     [Fact]
@@ -20,7 +24,7 @@ public sealed class GuiDataRootTests
     [Fact]
     public void AbsoluteExistingDirectoryMovesSettingsAndLogsUnderTheRoot()
     {
-        string root = ArchiveSearchTests.Fixture("dataroot");
+        string root = ArchiveSearchTests.Fixture();
         var result = GuiDataRoot.Resolve(root);
         Assert.Null(result.Error);
         Assert.Equal(Path.Combine(root, "settings.json"), result.SettingsPath);
@@ -49,7 +53,7 @@ public sealed class GuiDataRootTests
     [Fact]
     public void MissingAbsoluteDirectoryAndFileAreRejected()
     {
-        string root = ArchiveSearchTests.Fixture("dataroot");
+        string root = ArchiveSearchTests.Fixture();
         Assert.NotNull(GuiDataRoot.Resolve(Path.Combine(root, "missing")).Error);
         string file = Path.Combine(root, "file.txt");
         File.WriteAllText(file, "x");

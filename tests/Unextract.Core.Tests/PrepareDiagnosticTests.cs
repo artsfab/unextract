@@ -7,6 +7,8 @@ using Unextract.Core.Zip;
 
 namespace Unextract.Core.Tests;
 
+// J04: Prepare の診断の保持 (docs/spec/machine-output.md#result、#codes)。入力エラー/FATAL の原因参照・行番号、件数未取得と空 ZIP、
+// 人間向け表示の不変を確認する。関連: CommandTests の P11、EntriesListTests の L02〜L09/L17。
 public class PrepareDiagnosticTests
 {
     // J04: 両操作・両モードで、表示文字列からの復元なしに区分・原因・件数を取得できる。
@@ -37,7 +39,7 @@ public class PrepareDiagnosticTests
         switch (kind)
         {
             case "archive-open":
-                h.OpenArchive = _ => ZipArchiveSource.Open(Path.Combine(TestFiles.Directory, $"missing-{Guid.NewGuid():N}.zip"));
+                h.OpenArchive = _ => ZipArchiveSource.Open(Path.Combine(TestFiles.NewDirectory(), $"missing-{Guid.NewGuid():N}.zip"));
                 break;
             case "archive-unreadable":
                 h.OpenArchive = _ => ZipArchiveSource.Open(new MemoryStream([1, 2, 3]));

@@ -1,15 +1,18 @@
 using System.IO;
 using System.Text.Json;
 using Unextract.Gui.Services;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
+// Search settings with self-made settings files and sharing denials: only the last entry is saved, defaults after a broken or
+// unreadable file, and a save failure is reported with its path. The user's settings file and ACLs are never changed.
 public sealed class SearchSettingsTests
 {
     [Fact]
     public async Task StoresOnlyLastDirectoryAndNeverSessionData()
     {
-        string path = Path.Combine(ArchiveSearchTests.Fixture("settings"), "settings.json");
+        string path = Path.Combine(ArchiveSearchTests.Fixture(), "settings.json");
         var settings = new SearchSettings(path);
         Assert.Null((await settings.LoadAsync()).Directory);
         Assert.Null((await settings.SaveAsync(@"D:\first")).Error);
@@ -28,7 +31,7 @@ public sealed class SearchSettingsTests
     [InlineData("{\"search_directory\":\"relative\"}")]
     public async Task CorruptOrInvalidSettingsStartWithDefault(string content)
     {
-        string path = Path.Combine(ArchiveSearchTests.Fixture("settings"), "settings.json");
+        string path = Path.Combine(ArchiveSearchTests.Fixture(), "settings.json");
         File.WriteAllText(path, content);
         Assert.Null((await new SearchSettings(path).LoadAsync()).Directory);
     }
@@ -36,7 +39,7 @@ public sealed class SearchSettingsTests
     [Fact]
     public async Task ReadFailureUsesDefaultAndSaveFailureIsReportedWithPath()
     {
-        string path = Path.Combine(ArchiveSearchTests.Fixture("settings"), "settings.json");
+        string path = Path.Combine(ArchiveSearchTests.Fixture(), "settings.json");
         File.WriteAllText(path, "{}");
         using var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         var settings = new SearchSettings(path);

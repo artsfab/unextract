@@ -34,9 +34,9 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     }
 
     // fixture: dir/archive.zip、dir/target/。target に ZIP の内容どおりのファイル (ディレクトリエントリはディレクトリ) を置く。
-    private static Fixture Create(string name, params (string Name, byte[]? Content)[] entries)
+    private static Fixture Create(params (string Name, byte[]? Content)[] entries)
     {
-        var dir = CreateDirectory(name);
+        var dir = CreateDirectory();
         var target = Directory.CreateDirectory(System.IO.Path.Combine(dir, "target")).FullName;
         foreach (var (entry, content) in entries)
         {
@@ -57,10 +57,10 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     }
 
     // a.txt (前に削除済み)、p/b.txt (対象)、c.txt (後の未処理) の3件。
-    private static Fixture CreateApc(string name) => Create(name, ("a.txt", A), ("p/", null), ("p/b.txt", B), ("c.txt", C));
+    private static Fixture CreateApc() => Create(("a.txt", A), ("p/", null), ("p/b.txt", B), ("c.txt", C));
 
     // a.txt、b.txt、c.txt の3件。
-    private static Fixture CreateAbc(string name) => Create(name, ("a.txt", A), ("b.txt", B), ("c.txt", C));
+    private static Fixture CreateAbc() => Create(("a.txt", A), ("b.txt", B), ("c.txt", C));
 
     // 指定したエントリの時だけ action を呼ぶフック。
     private static Action<ZipEntryRef, IDeletionHandle> When(string name, Action action) => (entry, _) =>
@@ -117,7 +117,6 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     public void S01_DeletesOnlyVerifiedFiles(RunMode mode)
     {
         var f = Create(
-            $"{nameof(S01_DeletesOnlyVerifiedFiles)}-{mode}",
             ("same.txt", A), ("changed.txt", B), ("d/", null), ("d/deep.txt", C), ("d/ads.txt", A), ("empty/", null));
         File.WriteAllBytes(f.Path("changed.txt"), Bytes("bravo CONTENT"));
         File.WriteAllText(f.Path(@"d\ads.txt") + ":Zone.Identifier", "[ZoneTransfer]");
@@ -158,7 +157,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void S09_ArchiveItselfIsNotDeleted(RunMode mode)
     {
-        var dir = CreateDirectory($"{nameof(S09_ArchiveItselfIsNotDeleted)}-{mode}");
+        var dir = CreateDirectory();
         var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
         var zip = WriteZip(Path.Combine(target, "archive.zip"), Zip(("archive.zip", A), ("later.txt", B)));
         var later = Path.Combine(target, "later.txt");
@@ -190,7 +189,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [Fact]
     public void S13_CrcMismatchDuringCompare_Stops()
     {
-        var f = Create(nameof(S13_CrcMismatchDuringCompare_Stops), ("a.txt", A), ("b.txt", B), ("c.txt", C));
+        var f = Create(("a.txt", A), ("b.txt", B), ("c.txt", C));
         var patcher = new Core.Tests.Fixtures.ZipPatcher(File.ReadAllBytes(f.Zip));
         var zip = WriteZip(Path.Combine(f.Dir, "crc.zip"), patcher.SetCrc32(1, patcher.GetCrc32(1) ^ 1).ToArray());
 
@@ -214,11 +213,10 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData("acl-delete-and-delete-child", 5, RunMode.Fast)]
     public void S16_OpenDeniedButLooksSame_IsDeleteFailed(string situation, int expectedError, RunMode mode)
     {
-        var f = CreateAbc($"{nameof(S16_OpenDeniedButLooksSame_IsDeleteFailed)}-{situation}-{mode}");
+        var f = CreateAbc();
         var b = f.Path("b.txt");
         HelperProcess? helper = null;
-        Result r;
-        using (var acl = new AclChanges(output))
+        var r = AclChanges.Run(output, acl =>
         {
             try
             {
@@ -237,13 +235,13 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
                         break;
                 }
 
-                r = Delete(f.Zip, f.Target, f.Guard, mode: mode);
+                return Delete(f.Zip, f.Target, f.Guard, mode: mode);
             }
             finally
             {
                 helper?.Dispose();
             }
-        }
+        });
 
         Log(r);
         Assert.Equal(ExitStatus.Error, r.Status);
@@ -271,7 +269,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData("delete-pending", "識別確認も失敗", RunMode.Fast)]
     public void S17_IdentityInDoubtAtOpen_Stops(string situation, string reasonPart, RunMode mode)
     {
-        var f = CreateApc($"{nameof(S17_IdentityInDoubtAtOpen_Stops)}-{situation}-{mode}");
+        var f = CreateApc();
         var p = f.Path("p");
         var b = f.Path(@"p\b.txt");
         HelperProcess? helper = null;
@@ -325,7 +323,6 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     public void S19_PreCheckSkipsWithoutOpening(RunMode mode)
     {
         var f = Create(
-            $"{nameof(S19_PreCheckSkipsWithoutOpening)}-{mode}",
             ("folder.txt", A), ("junction.txt", A), ("readonly.txt", A), ("system.txt", A), ("ok.txt", A));
         File.Move(f.Path("folder.txt"), Path.Combine(f.Dir, "folder.moved"));
         Directory.CreateDirectory(f.Path("folder.txt"));
@@ -364,7 +361,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void S20_HandleChecksAreNotSkipped(RunMode mode)
     {
-        var f = Create($"{nameof(S20_HandleChecksAreNotSkipped)}-{mode}", ("ads.txt", A), ("hardlink.txt", A));
+        var f = Create(("ads.txt", A), ("hardlink.txt", A));
         File.WriteAllText(f.Path("ads.txt") + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
         CreateHardLink(Path.Combine(f.Dir, "hardlink-other.txt"), f.Path("hardlink.txt"));
 
@@ -387,7 +384,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void S20_HardLinksInDifferentParents_AreBothSkipped(RunMode mode)
     {
-        var f = Create($"{nameof(S20_HardLinksInDifferentParents_AreBothSkipped)}-{mode}",
+        var f = Create(
             ("original/hardlink.txt", A), ("ok.txt", A));
         Directory.CreateDirectory(f.Path("linked"));
         CreateHardLink(f.Path(@"linked\hardlink-other.txt"), f.Path(@"original\hardlink.txt"));
@@ -429,7 +426,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData("parent-case", "開いたファイルの最終パスが期待したパスと一致しません", RunMode.Fast)]
     public void S21_S22_S23_ChangeAfterEnumeration_Stops(string change, string reason, RunMode mode)
     {
-        var f = CreateApc($"{nameof(S21_S22_S23_ChangeAfterEnumeration_Stops)}-{change}-{mode}");
+        var f = CreateApc();
         var p = f.Path("p");
         var b = f.Path(@"p\b.txt");
 
@@ -494,7 +491,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void S24_OtherProcessCannotWriteRenameOrDeleteWhileDeletionHandleIsOpen(RunMode mode)
     {
-        var f = CreateAbc($"{nameof(S24_OtherProcessCannotWriteRenameOrDeleteWhileDeletionHandleIsOpen)}-{mode}");
+        var f = CreateAbc();
         var b = f.Path("b.txt");
         var codes = new List<(string, int)>();
         Action Attempts(string stage) => () =>
@@ -541,7 +538,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData("hidden", "H4", RunMode.Fast)]
     public void S25_S27_ChangeWhileHandleIsOpen_StopsAtFinalCheck(string change, string hook, RunMode mode)
     {
-        var f = CreateAbc($"{nameof(S25_S27_ChangeWhileHandleIsOpen_StopsAtFinalCheck)}-{change}-{hook}-{mode}");
+        var f = CreateAbc();
         var b = f.Path("b.txt");
         var inject = When("b.txt", () =>
         {
@@ -575,22 +572,26 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
         Assert.Equal(1, f.Guard.CheckCount);
     }
 
-    // S26 (実測): H3 (比較中) に祖先ディレクトリ (対象の親) の改名を試みる。改名が成功したか失敗したかと、そのときの結果を記録する。
-    // 改名が成功した場合は最終確認の最終パス不一致で STOP し削除しないこと、失敗した場合はそのファイルの処理が通常どおり進むことを判定する。
-    [Fact]
-    public void S26_Measure_AncestorRenameWhileDeletionHandleIsOpen()
+    // S26 (実測): H3 (比較中) に祖先ディレクトリ (対象の親、祖父母、その上) の改名を試みる。改名が成功したか失敗したかと、そのときの結果を
+    // 記録する。改名が成功した場合は最終確認の最終パス不一致で STOP し削除しないこと、失敗した場合はそのファイルの処理が通常どおり進むことを
+    // 判定する。共有モードの判定はファイルオブジェクト単位なので、別プロセスからの改名も同じ判定になる (docs/RATIONALE.md#sharing-limits)。
+    [Theory]
+    [InlineData("q/r/p")]
+    [InlineData("q/r")]
+    [InlineData("q")]
+    public void S26_Measure_AncestorRenameWhileDeletionHandleIsOpen(string ancestor)
     {
-        var f = CreateApc(nameof(S26_Measure_AncestorRenameWhileDeletionHandleIsOpen));
-        var p = f.Path("p");
+        var f = Create(("a.txt", A), ("q/", null), ("q/r/", null), ("q/r/p/", null), ("q/r/p/b.txt", B), ("c.txt", C));
+        var renamed = f.Path(ancestor.Replace('/', '\\'));
         string? attempt = null;
 
         var r = Delete(f.Zip, f.Target, f.Guard, hooks: new DeleteHooks
         {
-            DuringCompare = When("p/b.txt", () =>
+            DuringCompare = When("q/r/p/b.txt", () =>
             {
                 try
                 {
-                    Directory.Move(p, p + "-renamed");
+                    Directory.Move(renamed, renamed + "-renamed");
                     attempt = "成功";
                 }
                 catch (IOException ex)
@@ -605,20 +606,39 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
         });
 
         Log(r);
-        var result = r.ResultOf("p/b.txt");
-        output.WriteLine($"S26 結果: 祖先ディレクトリの改名 = {attempt}、p/b.txt = {result.Status} ({result.Reason})、終了状態 = {r.Status}");
+        var result = r.ResultOf("q/r/p/b.txt");
+        output.WriteLine($"S26 結果: 祖先ディレクトリ {ancestor} の改名 = {attempt}、q/r/p/b.txt = {result.Status} ({result.Reason})、終了状態 = {r.Status}");
         if (attempt == "成功")
         {
             Assert.Equal(DeleteStatus.Stopped, result.Status);
             Assert.Equal("最終確認で不一致: 最終パス", result.Reason);
-            Assert.True(File.Exists(Path.Combine(p + "-renamed", "b.txt")));
+            Assert.True(File.Exists(Path.Combine(renamed + "-renamed", Path.GetRelativePath(renamed, f.Path(@"q\r\p\b.txt")))));
         }
         else
         {
             Assert.NotNull(attempt);
             Assert.Equal(DeleteStatus.Deleted, result.Status);
-            Assert.Equal(["a.txt", "p/b.txt", "c.txt"], r.DeletedNames);
+            Assert.Equal(["a.txt", "q/r/p/b.txt", "c.txt"], r.DeletedNames);
         }
+    }
+
+    // S03 (Win、旧 M07): 確認待ちの間 (回答の直前) に c.txt へ追記する → 確認の後の検証はその時点の状態を見るので、c.txt は MODIFIED
+    // (サイズ不一致) で残り、ほかは削除される。確認待ちの間は target のファイルを開いていないので、追記は成功し、STOP にもならない。
+    [Theory]
+    [InlineData(RunMode.Strict)]
+    [InlineData(RunMode.Fast)]
+    public void S03_ChangeWhileAwaitingConfirmation_IsJudgedByCurrentState(RunMode mode)
+    {
+        var f = CreateAbc();
+
+        var r = Delete(f.Zip, f.Target, f.Guard, mode: mode, awaiting: () => File.AppendAllText(f.Path("c.txt"), " changed"));
+
+        Log(r);
+        Assert.Equal(ExitStatus.Success, r.Status);
+        Assert.Null(r.Report.Stop);
+        Assert.Equal(["a.txt", "b.txt"], r.DeletedNames);
+        Assert.Equal(DeleteStatus.Modified, r.ResultOf("c.txt").Status);
+        Assert.Equal([.. C, .. Bytes(" changed")], File.ReadAllBytes(f.Path("c.txt")));
     }
 
     // S28: H5 (削除指示の直前) で read-only 付与 → 指示が 5 で失敗し、対象は残り、以後を STOP。前は削除済み、後は未処理。
@@ -627,7 +647,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void S28_ReadOnlyBeforeDisposition_StopsAndKeepsFile(RunMode mode)
     {
-        var f = CreateAbc($"{nameof(S28_ReadOnlyBeforeDisposition_StopsAndKeepsFile)}-{mode}");
+        var f = CreateAbc();
         var b = f.Path("b.txt");
 
         var r = Delete(f.Zip, f.Target, f.Guard, mode: mode, hooks: new DeleteHooks
@@ -648,7 +668,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void S29_UnrelatedChanges_DoNotStop(RunMode mode)
     {
-        var f = CreateAbc($"{nameof(S29_UnrelatedChanges_DoNotStop)}-{mode}");
+        var f = CreateAbc();
         File.WriteAllBytes(f.Path("unrelated.txt"), Bytes("u"));
 
         var r = Delete(f.Zip, f.Target, f.Guard, mode: mode, hooks: new DeleteHooks
@@ -679,23 +699,23 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData("before-run", RunMode.Fast)]
     public void S34_Measure_DeleteDeniedOnTargetOnly(string when, RunMode mode)
     {
-        var f = CreateAbc($"{nameof(S34_Measure_DeleteDeniedOnTargetOnly)}-{when}-{mode}");
+        var f = CreateAbc();
         var b = f.Path("b.txt");
         File.WriteAllBytes(f.Path("unrelated.txt"), Bytes("u"));
-        Result r;
-        using (var acl = new AclChanges(output))
+        var r = AclChanges.Run(output, acl =>
         {
             if (when == "before-run")
             {
                 acl.Deny(b, "DE");
             }
 
-            r = Delete(f.Zip, f.Target, f.Guard, mode: mode, hooks: when == "during-compare"
+            var result = Delete(f.Zip, f.Target, f.Guard, mode: mode, hooks: when == "during-compare"
                 ? new DeleteHooks { DuringCompare = When("b.txt", () => acl.Deny(b, "DE")) }
                 : null);
 
             output.WriteLine($"S34 icacls (実行後): {(File.Exists(b) ? Cmd($"icacls \"{b}\"").Output.Trim() : "(対象なし)")}");
-        }
+            return result;
+        });
 
         Log(r);
         var result = r.ResultOf("b.txt");
@@ -729,7 +749,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void S35_EnumerationIsReusedDuringSequentialDeletion(RunMode mode)
     {
-        var f = Create($"{nameof(S35_EnumerationIsReusedDuringSequentialDeletion)}-{mode}", ("d/a.txt", A), ("d/b.txt", B), ("d/late.txt", C));
+        var f = Create(("d/a.txt", A), ("d/b.txt", B), ("d/late.txt", C));
         File.Move(f.Path(@"d\late.txt"), Path.Combine(f.Dir, "late.moved"));
 
         var r = Delete(f.Zip, f.Target, f.Guard, mode: mode, hooks: new DeleteHooks
@@ -757,7 +777,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void S37_Measure_ReadOnlyAfterEnumeration(RunMode mode)
     {
-        var f = CreateAbc($"{nameof(S37_Measure_ReadOnlyAfterEnumeration)}-{mode}");
+        var f = CreateAbc();
         var b = f.Path("b.txt");
 
         var r = Delete(f.Zip, f.Target, f.Guard, mode: mode, hooks: new DeleteHooks
@@ -787,7 +807,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [Fact]
     public void S38_Measure_EnumerationAndHandleAttributes()
     {
-        var dir = CreateDirectory(nameof(S38_Measure_EnumerationAndHandleAttributes));
+        var dir = CreateDirectory();
         var items = Directory.CreateDirectory(Path.Combine(dir, "items")).FullName;
         string Make(string name, FileAttributes? attributes = null)
         {
@@ -870,7 +890,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void A07_AnalyzeThenDelete_Agree(RunMode mode)
     {
-        var f = Create($"{nameof(A07_AnalyzeThenDelete_Agree)}-{mode}", ("same.txt", A), ("changed.txt", B), ("size.txt", C), ("missing.txt", A), ("d/", null), ("d/ads.txt", A));
+        var f = Create(("same.txt", A), ("changed.txt", B), ("size.txt", C), ("missing.txt", A), ("d/", null), ("d/ads.txt", A));
         File.WriteAllBytes(f.Path("changed.txt"), Bytes("bravo CONTENT"));
         File.WriteAllBytes(f.Path("size.txt"), Bytes("x"));
         File.Move(f.Path("missing.txt"), Path.Combine(f.Dir, "missing.moved"));
@@ -898,7 +918,6 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     public void A08_DeleteVerifiesCurrentStateNotAnalyzeResult(RunMode mode)
     {
         var f = Create(
-            $"{nameof(A08_DeleteVerifiesCurrentStateNotAnalyzeResult)}-{mode}",
             ("a.txt", A), ("same-recreated.txt", B), ("other-recreated.txt", C), ("ads.txt", A), ("readonly.txt", B));
         var analyzed = Analyze(f.Zip, f.Target, mode: mode);
         Assert.All(analyzed.Analysis.Results, x => Assert.Equal(Candidate(mode), x.Classification));
@@ -934,7 +953,7 @@ public class SequentialDeleteIntegrationTests(ITestOutputHelper output)
     public void L16_EntriesFileInsideTarget(RunMode mode)
     {
         var entries = Bytes("entries.txt\na.txt\n");
-        var f = Create($"{nameof(L16_EntriesFileInsideTarget)}-{mode}", ("entries.txt", entries), ("a.txt", A), ("b.txt", B));
+        var f = Create(("entries.txt", entries), ("a.txt", A), ("b.txt", B));
 
         var r = Delete(f.Zip, f.Target, f.Guard, mode: mode, entriesPath: f.Path("entries.txt"));
 

@@ -14,9 +14,9 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
 {
     private static readonly byte[] Hello = Bytes("hello");
 
-    private static (string Dir, string Target) NewTarget(string testName)
+    private static (string Dir, string Target) NewTarget()
     {
-        var dir = CreateDirectory(testName);
+        var dir = CreateDirectory();
         return (dir, Directory.CreateDirectory(Path.Combine(dir, "target")).FullName);
     }
 
@@ -28,7 +28,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T05_UnrelatedFiles_AreIgnored(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(T05_UnrelatedFiles_AreIgnored));
+        var (dir, target) = NewTarget();
         File.WriteAllBytes(Path.Combine(target, "keep.txt"), Hello);
         var unrelatedDir = Directory.CreateDirectory(Path.Combine(target, "unrelated-dir")).FullName;
         for (var i = 0; i < 300; i++)
@@ -54,7 +54,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T06_CaseDifference_IsMissing(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(T06_CaseDifference_IsMissing));
+        var (dir, target) = NewTarget();
         File.WriteAllBytes(Path.Combine(target, "File.txt"), Hello);
         Directory.CreateDirectory(Path.Combine(target, "Dir"));
         File.WriteAllBytes(Path.Combine(target, "Dir", "a.txt"), Hello);
@@ -73,7 +73,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T06_ShortNameOnly_IsMissing(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(T06_ShortNameOnly_IsMissing));
+        var (dir, target) = NewTarget();
         var longFile = Path.Combine(target, "Long File Name Sample.txt");
         File.WriteAllBytes(longFile, Hello);
         var longDir = Directory.CreateDirectory(Path.Combine(target, "Long Directory Sample")).FullName;
@@ -105,7 +105,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T07_T08_T09_SpecialAndAllowedAttributes(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(T07_T08_T09_SpecialAndAllowedAttributes));
+        var (dir, target) = NewTarget();
         string File(string name, FileAttributes? attributes = null)
         {
             var path = Path.Combine(target, name);
@@ -163,7 +163,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData("sparse", RunMode.Fast)]
     public void T08_CompressedAndSparse_AreMatched(string kind, RunMode mode)
     {
-        var (dir, target) = NewTarget($"{nameof(T08_CompressedAndSparse_AreMatched)}-{kind}");
+        var (dir, target) = NewTarget();
         var path = Path.Combine(target, "x.txt");
         File.WriteAllBytes(path, Hello);
         var (exitCode, text) = kind == "compressed" ? Cmd($"compact /c \"{path}\"") : Cmd($"fsutil sparse setflag \"{path}\"");
@@ -188,7 +188,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T09_ArchiveItself_IsSkipped(RunMode mode)
     {
-        var (_, target) = NewTarget(nameof(T09_ArchiveItself_IsSkipped));
+        var (_, target) = NewTarget();
         var zip = WriteZip(Path.Combine(target, "archive.zip"), Zip(("archive.zip", Hello)));
         var hash = Hash(zip);
 
@@ -205,7 +205,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T02_T03_ParentComponents(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(T02_T03_ParentComponents));
+        var (dir, target) = NewTarget();
         Directory.CreateDirectory(Path.Combine(target, "m2", "b"));
         File.WriteAllBytes(Path.Combine(target, "m2", "b", "c.txt"), Hello);
         File.WriteAllBytes(Path.Combine(target, "m3"), Hello);
@@ -235,7 +235,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T11_TargetOpenForWriting_IsFatal(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(T11_TargetOpenForWriting_IsFatal));
+        var (dir, target) = NewTarget();
         File.WriteAllBytes(Path.Combine(target, "first.txt"), Hello);
         var editing = Path.Combine(target, "editing.txt");
         File.WriteAllBytes(editing, Hello);
@@ -261,7 +261,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T12_NoTargetHandleRemainsAfterRun(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(T12_NoTargetHandleRemainsAfterRun));
+        var (dir, target) = NewTarget();
         var path = Path.Combine(target, "same.txt");
         File.WriteAllBytes(path, Hello);
         Directory.CreateDirectory(Path.Combine(target, "sub"));
@@ -288,7 +288,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void T15_CaseSensitiveDirectory(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(T15_CaseSensitiveDirectory));
+        var (dir, target) = NewTarget();
         var cs = Directory.CreateDirectory(Path.Combine(target, "cs")).FullName;
         var (exitCode, text) = Cmd($"fsutil file setCaseSensitiveInfo \"{cs}\" enable");
         if (exitCode != 0)
@@ -336,7 +336,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
         var (zipBytes, expected) = Broken(id);
         foreach (var state in new[] { "missing", "size-differs", "size-matches" })
         {
-            var (dir, target) = NewTarget($"{nameof(C_BrokenEntry_OnRealTarget)}-{id}-{state}");
+            var (dir, target) = NewTarget();
             if (state == "size-differs")
             {
                 File.WriteAllBytes(Path.Combine(target, "x.bin"), new byte[Data.Length + 1]);
@@ -374,7 +374,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
         var (zipBytes, _) = Broken(id);
         foreach (var state in new[] { "missing", "size-differs", "size-matches" })
         {
-            var (dir, target) = NewTarget($"{nameof(C15_Fast_BrokenEntry_OnRealTarget)}-{id}-{state}");
+            var (dir, target) = NewTarget();
             var x = Path.Combine(target, "x.bin");
             if (state == "size-differs")
             {
@@ -425,7 +425,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [Fact]
     public void T17_Fast_SizeOnly_OnRealTarget()
     {
-        var (dir, target) = NewTarget(nameof(T17_Fast_SizeOnly_OnRealTarget));
+        var (dir, target) = NewTarget();
         File.WriteAllBytes(Path.Combine(target, "same.txt"), Hello);
         File.WriteAllBytes(Path.Combine(target, "changed.txt"), Bytes("hellO"));
         File.WriteAllBytes(Path.Combine(target, "size.txt"), Bytes("hello, world"));
@@ -448,7 +448,7 @@ public class ClassificationIntegrationTests(ITestOutputHelper output)
     [InlineData(RunMode.Fast)]
     public void R06_DeclaredTotalOver64GiB_IsFatalEvenIfAllMissing(RunMode mode)
     {
-        var (dir, target) = NewTarget(nameof(R06_DeclaredTotalOver64GiB_IsFatalEvenIfAllMissing));
+        var (dir, target) = NewTarget();
         var patcher = new Core.Tests.Fixtures.ZipPatcher(Zip(Enumerable.Range(0, 5).Select(i => ($"f{i}.bin", (byte[]?)Hello)).ToArray()));
         for (var i = 0; i < 5; i++)
         {

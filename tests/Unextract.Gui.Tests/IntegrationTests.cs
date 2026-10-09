@@ -4,11 +4,17 @@ using Unextract.Gui.Models;
 using Unextract.Gui.Services;
 using Unextract.Gui.ViewModels;
 using static Unextract.Gui.Tests.SearchSessionTests;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
-// GUI consumer integration with the bundled real CLI. Every ZIP, target, temp and log directory is a
-// self-made GUID fixture under the test output; nothing outside it is a target. Fixtures are kept.
+// GUI consumer integration with the bundled real CLI. Every ZIP, target, temp and log directory is a self-made fixture under the
+// test output, deleted after the test. Fast deletes a same-size file with different content and keeps a file of another size (no
+// content guarantee); Strict keeps a file changed after the analysis and deletes the rest; two Targets of one Archive leave numbered
+// logs in registration order (-001, -002, one start time); the second hit on one file through a parent and a child Target is not an
+// error; a RAR (generator) is analyzed and deleted through the GUI path (a copy of the bundled CLI with the adopted DLL next to it),
+// and without the DLL the RAR analysis fails with the CLI explanation (location and remedy) as the failure details. No temporary
+// entries remain.
 public sealed class IntegrationTests
 {
     private static readonly byte[] Bytes = [1, 2, 3];
@@ -26,9 +32,9 @@ public sealed class IntegrationTests
         }
     }
 
-    private static async Task<Real> Open(string kind, params (string Name, byte[] Content)[] entries)
+    private static async Task<Real> Open(params (string Name, byte[] Content)[] entries)
     {
-        string root = ArchiveSearchTests.Fixture(kind);
+        string root = ArchiveSearchTests.Fixture();
         string archive = Path.Combine(root, "a.zip");
         Zip(archive, entries);
         string logs = Path.Combine(root, "logs");
@@ -42,9 +48,9 @@ public sealed class IntegrationTests
     }
 
     // RAR through the same GUI path. guiRoot is the folder whose cli\unextract.exe runs (the GUI never loads UnRAR.dll).
-    private static async Task<Real> OpenRar(string kind, string guiRoot, byte[] rar)
+    private static async Task<Real> OpenRar(string guiRoot, byte[] rar)
     {
-        string root = ArchiveSearchTests.Fixture(kind);
+        string root = ArchiveSearchTests.Fixture();
         string archive = Path.Combine(root, "a.rar");
         File.WriteAllBytes(archive, rar);
         string logs = Path.Combine(root, "logs");
@@ -60,7 +66,7 @@ public sealed class IntegrationTests
     // A copy of the bundled cli\ with the adopted UnRAR64.dll placed beside it, as a user would (the DLL is not shipped).
     private static string GuiRootWithUnrar()
     {
-        string root = Path.Combine(AppContext.BaseDirectory, "fixtures", "gui-unrar-app-" + Guid.NewGuid().ToString("N"));
+        string root = TestFixtures.Create();
         string cli = Directory.CreateDirectory(Path.Combine(root, "cli")).FullName;
         foreach (string file in Directory.EnumerateFiles(Path.Combine(DeploymentTests.GuiOutputDirectory, "cli")))
             File.Copy(file, Path.Combine(cli, Path.GetFileName(file)));
@@ -77,7 +83,7 @@ public sealed class IntegrationTests
             new() { Name = "d", IsDirectory = true, Attributes = 0x10 },
             new() { Name = "d/keep.txt", Data = Bytes },
         ]);
-        var r = await OpenRar("int-rar", GuiRootWithUnrar(), rar);
+        var r = await OpenRar(GuiRootWithUnrar(), rar);
         string target = Dir(r, "t");
         File.WriteAllBytes(Path.Combine(target, "same.txt"), Bytes);
         Directory.CreateDirectory(Path.Combine(target, "d"));
@@ -96,7 +102,7 @@ public sealed class IntegrationTests
     public async Task WithoutUnrarTheRarAnalysisFailsWithTheCliExplanationAndNothingChanges()
     {
         byte[] rar = Unextract.Core.Tests.Fixtures.Rar5Writer.Build([new() { Name = "same.txt", Data = Bytes }]);
-        var r = await OpenRar("int-rar-nodll", DeploymentTests.GuiOutputDirectory, rar);
+        var r = await OpenRar(DeploymentTests.GuiOutputDirectory, rar);
         string target = Dir(r, "t");
         File.WriteAllBytes(Path.Combine(target, "same.txt"), Bytes);
         await r.Model.AddTargetsAsync(target);
@@ -117,7 +123,7 @@ public sealed class IntegrationTests
     [Fact]
     public async Task FastDeletesSameSizeFilesWithoutComparingContentAndLeavesOtherSizesAlone()
     {
-        var r = await Open("int-fast", ("same.txt", Bytes), ("other.txt", Bytes));
+        var r = await Open(("same.txt", Bytes), ("other.txt", Bytes));
         string target = Dir(r, "t");
         File.WriteAllBytes(Path.Combine(target, "same.txt"), [9, 9, 9]);
         File.WriteAllBytes(Path.Combine(target, "other.txt"), [9, 9]);
@@ -136,7 +142,7 @@ public sealed class IntegrationTests
     [Fact]
     public async Task StrictRevalidatesAfterAnalysisSoAFileChangedAfterwardsIsKeptAndTheRestIsDeleted()
     {
-        var r = await Open("int-changed", ("keep.txt", Bytes), ("go.txt", Bytes));
+        var r = await Open(("keep.txt", Bytes), ("go.txt", Bytes));
         string target = Dir(r, "t");
         File.WriteAllBytes(Path.Combine(target, "keep.txt"), Bytes);
         File.WriteAllBytes(Path.Combine(target, "go.txt"), Bytes);
@@ -159,7 +165,7 @@ public sealed class IntegrationTests
     [Fact]
     public async Task TwoTargetsOfOneArchiveRunInRegistrationOrderWithConsecutiveLogNumbers()
     {
-        var r = await Open("int-two", ("x.txt", Bytes));
+        var r = await Open(("x.txt", Bytes));
         string first = Dir(r, "first");
         string second = Dir(r, "second");
         File.WriteAllBytes(Path.Combine(first, "x.txt"), Bytes);
@@ -184,7 +190,7 @@ public sealed class IntegrationTests
     [Fact]
     public async Task ParentAndChildTargetsOverlapWithoutErrorAndTheChildFindsItsFileAlreadyGone()
     {
-        var r = await Open("int-nested", ("x.txt", Bytes), ("sub/x.txt", Bytes));
+        var r = await Open(("x.txt", Bytes), ("sub/x.txt", Bytes));
         string parent = Dir(r, "p");
         string child = Dir(r, "p", "sub");
         File.WriteAllBytes(Path.Combine(parent, "x.txt"), Bytes);

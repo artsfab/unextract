@@ -1,6 +1,8 @@
+using Xunit.Abstractions;
+
 namespace Unextract.Gui.UiTests;
 
-public sealed class LockUiTests : UiTestBase
+public sealed class LockUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
     // Everything that configures the session at the window level.
     private static readonly string[] LockedTopLevel =
@@ -25,9 +27,9 @@ public sealed class LockUiTests : UiTestBase
         if (locked) Assert.Contains("処理の実行中は", ui.TextOf("TargetActionHintText", ui.Main));
     }
 
-    private (GuiSession Ui, string Archive, string Target) Prepare(string kind)
+    private (GuiSession Ui, string Archive, string Target) Prepare()
     {
-        var ui = Start(kind: kind);
+        var ui = Start();
         string archive = Path.Combine(ui.Fixtures, "a.zip"), target = Path.Combine(ui.Fixtures, "out");
         Files.Zip(archive, ("f1.txt", "x"), ("f2.txt", "y"));
         Directory.CreateDirectory(target);
@@ -36,10 +38,10 @@ public sealed class LockUiTests : UiTestBase
         return (ui, archive, target);
     }
 
-    [Fact]
+    [UiFact]
     public void WhileAnalyzingTheConfigurationIsLockedButBrowsingAndCancellingWork()
     {
-        var (ui, archive, target) = Prepare("lock-analysis");
+        var (ui, archive, target) = Prepare();
         string release = ui.FakeAnalyze(archive, target, "strict", [new(1, "f1.txt", "MATCHED", 1), new(2, "f2.txt", "MODIFIED", 1)], wait: true, waitAfter: 2);
         AssertLocked(ui, "a.zip", target, locked: false);
         Assert.True(ui.DetailButton("EditTargetButton").IsEnabled, "an unanalyzed Target can be edited");
@@ -76,10 +78,10 @@ public sealed class LockUiTests : UiTestBase
         ui.Scenario.Release(release);
     }
 
-    [Fact]
+    [UiFact]
     public void WhileDeletingTheConfigurationIsLockedAndADeletedTargetStaysLockedUntilReanalysis()
     {
-        var (ui, archive, target) = Prepare("lock-delete");
+        var (ui, archive, target) = Prepare();
         Item[] items = [new(1, "f1.txt", "MATCHED", 1), new(2, "f2.txt", "MODIFIED", 1)];
         ui.FakeAnalyze(archive, target, "strict", items);
         string release = ui.FakeDelete(archive, target, "strict", 2, 1, [new(1, "f1.txt", "DELETED", 1)], notSelected: 1, wait: true, waitAfter: 1);
@@ -131,14 +133,15 @@ public sealed class LockUiTests : UiTestBase
         Wait.Until(() => ui.Modal() is null, "the confirmation to close");
     }
 
-    [Fact]
+    [UiFact]
     public void ResearchAsksBeforeDiscardingTheSession()
     {
-        var (ui, archive, target) = Prepare("lock-research");
+        var (ui, archive, target) = Prepare();
         // The session has an archive with a Target: a second search must ask first.
         Assert.Equal("Targets: 1", ui.TextOf("ArchiveTargetCountText", ui.ArchiveRow("a.zip")));
         ui.Invoke("SearchButton");
         var box = ui.WaitModal("再検索の確認");
+        UiShots.Save(box, "research-confirmation");
         Assert.Contains("現在のArchive・Target設定・選択・解析結果を破棄します", DeletionUiTests.AllText(ui, box));
         ui.PressMessageBox(box, "2");
         Wait.Until(() => ui.Modal() is null, "the message box to close");

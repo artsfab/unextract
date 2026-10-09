@@ -526,7 +526,7 @@ public class CommandTests
                     h.OpenArchive = _ => ZipArchiveSource.Open(new MemoryStream(Bytes("not a zip")));
                     break;
                 case "entries-missing":
-                    entries = Path.Combine(TestFiles.Directory, $"missing-{Guid.NewGuid():N}.txt");
+                    entries = Path.Combine(TestFiles.NewDirectory(), $"missing-{Guid.NewGuid():N}.txt");
                     break;
                 case "entries-format":
                     entries = CommandHarness.WriteEntries("a.txt\n\nb.txt\n");
@@ -615,7 +615,7 @@ public class CommandTests
                 entries = CommandHarness.WriteEntries("a.txt\nb.txt\n");
                 break;
             case "directory":
-                entries = TestFiles.Directory;
+                entries = TestFiles.NewDirectory();
                 break;
             default:
                 entries = CommandHarness.WriteEntries("a.txt\nb.txt\nC.txt\n");
@@ -867,6 +867,48 @@ public class CommandTests
         Assert.Equal(0, h.Fs.OpenHandleCount);
     }
 
+    // 中断時の表示と実削除 (旧 M10 の I1・I2、docs/spec/cli.md#interruption) の人間向け出力の側: 結果行は、そのファイルの削除用ハンドルを
+    // 閉じた後、次のファイルを開く前に書く。結果行を書けなければ後続のファイルを開かない (書けなかった1件は削除済みで、表示されない)。
+    // 機械出力の同じ順序は J07・J13 が確かめる。
+    [Theory]
+    [InlineData(RunMode.Strict, false)]
+    [InlineData(RunMode.Fast, false)]
+    [InlineData(RunMode.Strict, true)]
+    [InlineData(RunMode.Fast, true)]
+    public void ResultLineFollowsCloseAndPrecedesNextOpen(RunMode mode, bool failAtB)
+    {
+        var zip = MakeZip(("a.txt", Hello), ("b.txt", Hello), ("c.txt", Hello));
+        var h = new CommandHarness(zip);
+        h.File("a.txt");
+        h.File("b.txt");
+        h.File("c.txt");
+        var output = new ResultLineRecorder(h.Fs.Calls, failAtB ? "b.txt" : null);
+        var error = new StringWriter();
+        var context = new CommandContext(h.Fs, () => h.Locations, Limits.Default, output, error,
+            OpenArchive: _ => ZipArchiveSource.Open(new MemoryStream(zip)));
+
+        var outcome = DeleteCommand.Run(new DeleteCommandRequest(
+            CommandHarness.ArchivePath, CommandHarness.TargetPath, mode, null, true, h.Fs, new ScriptedPrompt(true), context));
+
+        string[] order = failAtB
+            ? [@"OpenDeletion \\?\C:\target\a.txt", @"Close deletion \\?\C:\target\a.txt", "Line DELETED a.txt",
+                @"OpenDeletion \\?\C:\target\b.txt", @"Close deletion \\?\C:\target\b.txt", "Line DELETED b.txt (failed)"]
+            : [@"OpenDeletion \\?\C:\target\a.txt", @"Close deletion \\?\C:\target\a.txt", "Line DELETED a.txt",
+                @"OpenDeletion \\?\C:\target\b.txt", @"Close deletion \\?\C:\target\b.txt", "Line DELETED b.txt",
+                @"OpenDeletion \\?\C:\target\c.txt", @"Close deletion \\?\C:\target\c.txt", "Line DELETED c.txt"];
+        Assert.Equal(order, h.Fs.Calls.Where(call => call.StartsWith("OpenDeletion ", StringComparison.Ordinal)
+            || call.StartsWith("Close deletion ", StringComparison.Ordinal) || call.StartsWith("Line ", StringComparison.Ordinal)));
+        Assert.False(h.Exists("a.txt"));
+        Assert.False(h.Exists("b.txt"));
+        Assert.Equal(failAtB, h.Exists("c.txt"));
+        Assert.Equal(failAtB ? ExitStatus.Error : ExitStatus.Success, outcome.Status);
+        if (failAtB)
+        {
+            Assert.Contains("逐次処理の途中で中止しました。それまでに削除したファイルは元に戻りません。", error.ToString(), StringComparison.Ordinal);
+        }
+        Assert.Equal(0, h.Fs.OpenHandleCount);
+    }
+
     [Fact]
     public void SummaryOutputFailure_PreservesPossiblyDeletedStop()
     {
@@ -1023,6 +1065,27 @@ public class CommandTests
                 Disposed = true;
                 throw new IOException("injected dispose failure");
             }
+        }
+    }
+
+    // 結果行 (状態名 + 空白 + Entry) を書くたびに、偽 FS の呼び出し記録へ "Line <状態名> <Entry>" を足す。failAt の Entry の行は書けない。
+    private sealed class ResultLineRecorder(List<string> calls, string? failAt) : StringWriter
+    {
+        public override void WriteLine(string? value)
+        {
+            var parts = value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
+            if (parts is ["DELETED" or "MODIFIED" or "MISSING", _, ..])
+            {
+                if (parts[1] == failAt)
+                {
+                    calls.Add($"Line {parts[0]} {parts[1]} (failed)");
+                    throw new IOException("injected result line failure");
+                }
+
+                calls.Add($"Line {parts[0]} {parts[1]}");
+            }
+
+            base.WriteLine(value);
         }
     }
 

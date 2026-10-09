@@ -1,13 +1,14 @@
 using FlaUI.Core.WindowsAPI;
+using Xunit.Abstractions;
 
 namespace Unextract.Gui.UiTests;
 
-public sealed class FastModeUiTests : UiTestBase
+public sealed class FastModeUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
-    [Fact]
+    [UiFact]
     public void FastShowsTheWarningAndChangingTheModeAsksBeforeDiscardingResults()
     {
-        var ui = Start(kind: "fast");
+        var ui = Start();
         string archive = Path.Combine(ui.Fixtures, "a.zip"), target = Path.Combine(ui.Fixtures, "out");
         Files.Zip(archive, ("f.txt", "abc"));
         Directory.CreateDirectory(target);
@@ -32,6 +33,7 @@ public sealed class FastModeUiTests : UiTestBase
         // Changing the mode with results asks first. Cancel keeps both the mode and the results.
         ui.ClickUntil("StrictRadio", () => ui.Modal() is not null, "the mode change confirmation");
         var box = ui.WaitModal("モード変更の確認");
+        UiShots.Save(box, "mode-change-confirmation");
         Assert.Contains("既存の解析結果をすべて破棄します", DeletionUiTests.AllText(ui, box));
         ui.PressMessageBox(box, "2");
         Wait.Until(() => ui.Modal() is null, "the message box to close");

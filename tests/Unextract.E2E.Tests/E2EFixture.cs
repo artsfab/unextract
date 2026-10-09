@@ -1,13 +1,13 @@
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using Unextract.Core.Tests.Fixtures;
 using Unextract.Windows;
 using Unextract.Windows.Tests;
 
 namespace Unextract.E2E.Tests;
 
-// E2E の作業ディレクトリ。テストの出力先の fixtures/<テスト名>-<GUID>/ に毎回ユニークな名前で作り、その中に archive.zip と
-// target/ を置く。テストからは削除しない (掃除は scripts/clean-test-fixtures.ps1)。junction・ACL・symlink は使わない。
+// E2E の作業ディレクトリ。テストの出力先の fixtures/<テスト名>-<GUID>/ に作り (TestFixtures)、その中に archive.zip と
+// target/ を置く。テストの終了後に共通の削除処理が削除する (起動した exe はテストの中で終了済み)。junction・ACL・symlink は使わない。
 public sealed class E2EFixture
 {
     private E2EFixture(string directory)
@@ -23,12 +23,7 @@ public sealed class E2EFixture
 
     public string ArchivePath { get; }
 
-    public static E2EFixture Create([CallerMemberName] string testName = "")
-    {
-        var path = Path.Combine(AppContext.BaseDirectory, "fixtures", $"{testName}-{Guid.NewGuid():N}");
-        System.IO.Directory.CreateDirectory(path);
-        return new E2EFixture(path);
-    }
+    public static E2EFixture Create() => new(TestFixtures.Create());
 
     // FileMode.CreateNew: 既存のファイルを上書きしない。
     public E2EFixture WriteZip(byte[] zip)

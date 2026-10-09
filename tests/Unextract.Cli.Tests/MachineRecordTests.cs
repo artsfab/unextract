@@ -10,10 +10,14 @@ using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Zip;
 using Unextract.Windows;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Cli.Tests;
 
 // J11: Core の値だけから v1 の状態・原因・件数・省略を生成する。writer は使わない。
+// 全原因種別・状態・SkipReason・段階の明示的な対応、Number/raw name/64bit Length、run のパス・件数、全 outcome/終了コード、モード・
+// 段階による counts と error の省略、STOP の診断・不確実性、配送失敗対象を含む報告専用の集計。analyze の通常/空/FATAL の件数は自作の
+// fixture で実 command の結果とも照合する。削除は行わない (docs/spec/machine-output.md#records、#result、#codes)。
 public class MachineRecordTests
 {
     public static TheoryData<FatalKind, string> FatalCodes => new()
@@ -529,8 +533,7 @@ public class MachineRecordTests
     [InlineData(RunMode.Fast, false, true)]
     public void J11_ActualAnalysisCountsAndFatalCauseFollowExistingSummary(RunMode mode, bool fail, bool empty)
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "fixtures", $"{nameof(J11_ActualAnalysisCountsAndFatalCauseFollowExistingSummary)}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
+        var directory = TestFixtures.Create();
         var target = Directory.CreateDirectory(Path.Combine(directory, "target")).FullName;
         var zip = Path.Combine(directory, "archive.zip");
         using (var stream = new FileStream(zip, FileMode.CreateNew))

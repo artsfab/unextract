@@ -2,6 +2,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- Blame hang timeout for every run of this project, also a direct "dotnet test" (gui.runsettings). -->
+    <RunSettingsFilePath>$(MSBuildProjectDirectory)\gui.runsettings</RunSettingsFilePath>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -16,5 +18,9 @@
   <ItemGroup>
     <Compile Include="..\Unextract.Core.Tests\Fixtures\RarWriter.cs" Link="Fixtures\RarWriter.cs" />
     <Compile Include="..\Unextract.Core.Tests\Fixtures\UnrarTestDll.cs" Link="Fixtures\UnrarTestDll.cs" />
+  </ItemGroup>
+  <!-- Fixtures of each test are deleted after the test by the shared owner (docs/TESTING.md#fixtures). -->
+  <ItemGroup>
+    <Compile Include="..\Unextract.Core.Tests\Fixtures\TestFixtures.cs" Link="Fixtures\TestFixtures.cs" />
   </ItemGroup>
 </Project>

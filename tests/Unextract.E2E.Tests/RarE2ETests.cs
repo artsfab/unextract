@@ -7,31 +7,14 @@ namespace Unextract.E2E.Tests;
 // テスト U70〜U73: RAR の E2E (X/J 系の RAR 版。docs/TESTING.md#rar)。製品は UnRAR64.dll を実行中の exe と同じフォルダーからだけ読み、DLL は
 // 製品に同梱しない (docs/spec/rar.md#pinning)。そこで、テスト対象の exe のフォルダーの直下のファイルを fixture の下へ複製し、隣に
 // 採用版の DLL (UnrarTestDll。リポジトリ外) を置いた配置で RAR を実行する (利用者が DLL を置いた状態の再現)。元の exe のフォルダーには
-// DLL を置かず、DLL の無い配置として使う。RAR はテスト専用の生成器 (RarWriter、Stored) で作る。fixture はテストから削除しない。
-public sealed class RarE2ETests
+// DLL を置かず、DLL の無い配置として使う。RAR はテスト専用の生成器 (RarWriter、Stored) で作る。fixture は各テストの終了後、DLL を置いた配置はクラスの全テストの後に削除する。
+public sealed class RarE2ETests(RarPlacementWithLibrary placement) : IClassFixture<RarPlacementWithLibrary>
 {
     private const int Success = 0;
     private const int Error = 1;
 
-    private static readonly Lazy<string> ExeWithLibrary = new(CreatePlacementWithLibrary);
-
     private static readonly byte[] A = E2EFixture.Bytes("alpha content");
     private static readonly byte[] B = E2EFixture.Bytes("bravo content");
-
-    // テスト対象の exe のフォルダーの直下のファイルを複製し、UnRAR64.dll を隣に置く (テストの実行ごとに1つ)。
-    private static string CreatePlacementWithLibrary()
-    {
-        var source = Path.GetDirectoryName(UnextractProcess.ExePath)!;
-        var app = Path.Combine(AppContext.BaseDirectory, "fixtures", $"rar-app-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(app);
-        foreach (var file in Directory.EnumerateFiles(source))
-        {
-            File.Copy(file, Path.Combine(app, Path.GetFileName(file)), overwrite: false);
-        }
-
-        UnrarTestDll.CopyTo(app);
-        return Path.Combine(app, Path.GetFileName(UnextractProcess.ExePath));
-    }
 
     private static string WriteRar(E2EFixture fixture, byte[] rar, string name = "archive.rar")
     {
@@ -56,7 +39,7 @@ public sealed class RarE2ETests
         var exe = UnextractProcess.ExePath;
         var library = Path.Combine(Path.GetDirectoryName(exe)!, "UnRAR64.dll");
         Assert.False(File.Exists(library), $"exe のフォルダーに UnRAR64.dll がある (同梱しない): {library}");
-        var fixture = E2EFixture.Create($"{nameof(U70_WithoutLibrary_RarIsFatal_ZipWorks)}-{command}").WriteTarget("a.txt", A);
+        var fixture = E2EFixture.Create().WriteTarget("a.txt", A);
         var rar = WriteRar(fixture, Rar5Writer.Build([File5("a.txt", A)]));
         var entries = Path.Combine(fixture.Directory, "entries.txt");
         File.WriteAllBytes(entries, E2EFixture.Bytes("a.txt\n"));
@@ -98,7 +81,7 @@ public sealed class RarE2ETests
         var before = E2EFixture.Snapshot(fixture.Target);
         var archive = E2EFixture.Describe(rar);
 
-        var result = Run(ExeWithLibrary.Value, fixture, rar, "analyze", null);
+        var result = Run(placement.Exe, fixture, rar, "analyze", null);
 
         Assert.True(result.ExitCode == Success, result.ToString());
         Assert.Equal(string.Empty, result.StandardError);
@@ -117,13 +100,13 @@ public sealed class RarE2ETests
     [InlineData(true)]
     public void U72_JsonNames_ToEntries_ToDelete(bool fast)
     {
-        var fixture = E2EFixture.Create($"{nameof(U72_JsonNames_ToEntries_ToDelete)}-{fast}")
+        var fixture = E2EFixture.Create()
             .WriteTarget("a.txt", A).WriteTarget(@"d\b.txt", B).WriteTarget(@"d\keep.txt", A);
         var rar = WriteRar(fixture, Rar5Writer.Build(
             [File5("a.txt", A), new Rar5File { Name = "d", IsDirectory = true, Attributes = 0x10 }, File5("d/b.txt", B), File5("d/keep.txt", A)]));
         string[] mode = fast ? ["--fast"] : [];
 
-        var analyzed = Run(ExeWithLibrary.Value, fixture, rar, "analyze", null, [.. mode, "--jsonl"]);
+        var analyzed = Run(placement.Exe, fixture, rar, "analyze", null, [.. mode, "--jsonl"]);
 
         Assert.True(analyzed.ExitCode == Success, analyzed.ToString());
         var names = analyzed.OutputLines.Select(line => JsonDocument.Parse(line).RootElement)
@@ -136,7 +119,7 @@ public sealed class RarE2ETests
         var log = Path.Combine(fixture.Directory, "run.jsonl");
         fixture.CheckGuard();
 
-        var deleted = Run(ExeWithLibrary.Value, fixture, rar, "delete", null, [.. mode, "--yes", "--entries", entries, "--jsonl", "--log", log]);
+        var deleted = Run(placement.Exe, fixture, rar, "delete", null, [.. mode, "--yes", "--entries", entries, "--jsonl", "--log", log]);
 
         Assert.True(deleted.ExitCode == Success, deleted.ToString());
         Assert.Equal(Encoding.UTF8.GetBytes(deleted.StandardOutput), File.ReadAllBytes(log));
@@ -154,8 +137,8 @@ public sealed class RarE2ETests
         var cwd = Directory.CreateDirectory(Path.Combine(fixture.Directory, "cwd")).FullName;
         fixture.CheckGuard();
 
-        var analyzed = UnextractProcess.RunExe(ExeWithLibrary.Value, cwd, null, "analyze", rar, "--target", fixture.Target);
-        var deleted = UnextractProcess.RunExe(ExeWithLibrary.Value, cwd, null, "delete", rar, "--target", fixture.Target, "--yes");
+        var analyzed = UnextractProcess.RunExe(placement.Exe, cwd, null, "analyze", rar, "--target", fixture.Target);
+        var deleted = UnextractProcess.RunExe(placement.Exe, cwd, null, "delete", rar, "--target", fixture.Target, "--yes");
 
         Assert.True(analyzed.ExitCode == Success, analyzed.ToString());
         Assert.True(deleted.ExitCode == Success, deleted.ToString());
@@ -163,4 +146,31 @@ public sealed class RarE2ETests
         Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.Target));
         Assert.Equal(["archive.rar", "cwd", "target"], Directory.EnumerateFileSystemEntries(fixture.Directory).Select(Path.GetFileName).Order(StringComparer.Ordinal));
     }
+}
+
+// テスト対象の exe のフォルダーの直下のファイルを複製し、UnRAR64.dll を隣に置いた配置 (このクラスのテストで共有する1つ)。
+// テストメソッドより寿命が長いので、所有者 (FixtureOwner) を自分で持ち、クラスの全テストの後 (Dispose) に削除する。
+public sealed class RarPlacementWithLibrary : IDisposable
+{
+    private readonly FixtureOwner _owner = new("rar-app");
+    private readonly Lazy<string> _exe;
+
+    public RarPlacementWithLibrary() => _exe = new(Create);
+
+    public string Exe => _exe.Value;
+
+    private string Create()
+    {
+        var source = Path.GetDirectoryName(UnextractProcess.ExePath)!;
+        var app = _owner.Create();
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            File.Copy(file, Path.Combine(app, Path.GetFileName(file)), overwrite: false);
+        }
+
+        UnrarTestDll.CopyTo(app);
+        return Path.Combine(app, Path.GetFileName(UnextractProcess.ExePath));
+    }
+
+    public void Dispose() => _owner.Cleanup();
 }

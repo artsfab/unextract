@@ -8,10 +8,15 @@ using Unextract.Core.Results;
 using Unextract.Core.Target;
 using Unextract.Core.Tests.Fakes;
 using ProtectedLocationsResult = Unextract.Windows.ProtectedLocationsResult;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Cli.Tests;
 
 // J12: CLIの通知・終端・ログ所有の結合。ZIP/log/entriesだけが実fixture、targetの削除は偽FSで模擬する。
+// 両操作/両モードの通知の接続、全 outcome と終了コード、ShowProgress 有効時の stderr 空・確認入力の非参照、Prepare の各段階 (両モード)・
+// 引数/ログ作成の失敗の非接触、空/全 DIRECTORY・entries の欠番選択と未処理。ログ作成後の Prepare 失敗、存在しない ZIP/entries とログの
+// 同一パス、正常時の byte 一致・終了後の解放、Prepared の close 例外時の ZIP 解放と成功 result の抑制、OUTPUT_FAILED と開始の有無、
+// 終端の log write/close 失敗・stderr 失敗でも実終了 1 (docs/spec/machine-output.md#invocation、#result、#log)。
 public class MachineCliTests
 {
     [Theory]
@@ -130,36 +135,40 @@ public class MachineCliTests
     [InlineData("match", true, "input_error", "ENTRIES_NO_MATCH")]
     public void J12_PrepareFailuresHaveNoRunAndCreatedLogIncludesResult(string stage, bool delete, string outcome, string code)
     {
-        var f = new MachineCliFixture();
-        var zip = stage == "validation" ? f.Zip(("../bad.txt", "x")) : f.Zip(("a.txt", "hello"));
-        string? entries = null;
-        switch (stage)
+        // Prepare の失敗は run より前に終わるので、Fast でも同じ result になる (E2E の J15 は Strict だけ)。
+        foreach (var fast in new[] { false, true })
         {
-            case "archive": zip = f.PathFor("absent.zip"); break;
-            case "unreadable": System.IO.File.WriteAllText(zip, "invalid zip"); break;
-            case "locations": f.Locations = new(null, new FatalError(FatalKind.ProtectedLocationUnresolved)); break;
-            case "target": f.Fs.Remove(f.Fs.Get(MachineCliFixture.Target)); break;
-            case "identity": f.Fs.Get(f.FakePathFor(zip)).Errors[FakeOp.GetFileIdentity] = 5; break;
-            case "entries": entries = f.Entries(string.Empty); break;
-            case "match": entries = f.Entries("unknown.txt\n"); break;
+            var f = new MachineCliFixture();
+            var zip = stage == "validation" ? f.Zip(("../bad.txt", "x")) : f.Zip(("a.txt", "hello"));
+            string? entries = null;
+            switch (stage)
+            {
+                case "archive": zip = f.PathFor("absent.zip"); break;
+                case "unreadable": System.IO.File.WriteAllText(zip, "invalid zip"); break;
+                case "locations": f.Locations = new(null, new FatalError(FatalKind.ProtectedLocationUnresolved)); break;
+                case "target": f.Fs.Remove(f.Fs.Get(MachineCliFixture.Target)); break;
+                case "identity": f.Fs.Get(f.FakePathFor(zip)).Errors[FakeOp.GetFileIdentity] = 5; break;
+                case "entries": entries = f.Entries(string.Empty); break;
+                case "match": entries = f.Entries("unknown.txt\n"); break;
+            }
+            var log = delete ? f.PathFor("run.jsonl") : null;
+            var run = f.Run(f.Args(zip, delete, fast, log: log, entries: entries));
+            Assert.Single(run.Records);
+            var end = AssertResult(run, outcome, 1, code, "prepare");
+            if (!delete && stage is "validation" or "identity")
+            {
+                Assert.Equal(new[] { "undetermined" }, end.GetProperty("counts").EnumerateObject().Select(p => p.Name));
+                Assert.Equal(1, end.GetProperty("counts").GetProperty("undetermined").GetInt32());
+            }
+            else Assert.False(end.TryGetProperty("counts", out _));
+            AssertNoEntriesTouched(f);
+            if (log is not null)
+            {
+                Assert.Equal(run.Bytes, System.IO.File.ReadAllBytes(log));
+                AssertLogReleased(log);
+            }
+            using var releasedZip = new FileStream(zip, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         }
-        var log = delete ? f.PathFor("run.jsonl") : null;
-        var run = f.Run(f.Args(zip, delete, log: log, entries: entries));
-        Assert.Single(run.Records);
-        var end = AssertResult(run, outcome, 1, code, "prepare");
-        if (!delete && stage is "validation" or "identity")
-        {
-            Assert.Equal(new[] { "undetermined" }, end.GetProperty("counts").EnumerateObject().Select(p => p.Name));
-            Assert.Equal(1, end.GetProperty("counts").GetProperty("undetermined").GetInt32());
-        }
-        else Assert.False(end.TryGetProperty("counts", out _));
-        AssertNoEntriesTouched(f);
-        if (log is not null)
-        {
-            Assert.Equal(run.Bytes, System.IO.File.ReadAllBytes(log));
-            AssertLogReleased(log);
-        }
-        using var releasedZip = new FileStream(zip, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     }
 
     [Theory]
@@ -509,9 +518,9 @@ internal sealed class MachineCliFixture
     public ProtectedLocationsResult Locations { get; set; } = new(TargetLocationPolicy.None, null);
     public Exception? ResolveFailure { get; set; }
 
-    public MachineCliFixture([CallerMemberName] string name = "")
+    public MachineCliFixture()
     {
-        _directory = Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "fixtures", $"{name}-{Guid.NewGuid():N}")).FullName;
+        _directory = TestFixtures.Create();
         Fs.AddDirectory(Target);
         Fs.AddDirectory(FakeDirectory);
     }

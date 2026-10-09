@@ -17,6 +17,8 @@ namespace Unextract.Gui.Tests;
 // Acceptance measurements at the ZIP entry-count limit (100,000 entries per archive, docs/spec/zip.md) and
 // several Targets held at once. All data is simulated in memory: no file system target, no deletion.
 // The bounds are deliberately loose regression guards; the measured numbers go to the test output.
+// Measured: JSONL receiving in 4 KiB chunks; adopting and holding 10 Targets (memory), filtering and building the delete plan; and
+// in WPF on the STA, repeated details switching, scrolling and filtering.
 // Tests that create WPF windows run serially in one collection. When xUnit ran the classes that create MainWindow in
 // parallel, a test (in DeploymentTests) failed intermittently; with those classes in the "Wpf" collection the failure
 // no longer reproduced (Gui.Tests then passed 15 consecutive runs). It was seen only under parallel test execution, not

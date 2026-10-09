@@ -6,6 +6,16 @@ using Xunit.Abstractions;
 
 namespace Unextract.E2E.Tests;
 
+// J14〜J19: 機械出力を exe (通常 build と publish 版) で確かめる (docs/spec/machine-output.md)。
+// - J14〜J16: 両操作/両モードの分類・件数・終了コード、ASCII/LF、生の name と UTF-8/CP437/Cf/補助平面、空 ZIP/全 DIRECTORY、ログとの
+//   byte 一致。JSON→UTF-8 entries→delete で同サイズ変更を再検証し、選択外と未処理を区別する。Prepare の失敗 (--log NUL を含む) では
+//   run なし・削除0件・作成後のログの result を Strict で確認する (Fast で同じ result になることは J12)。CRC 異常の FATAL/STOP と Fast の
+//   非読取、実共有拒否の DELETE_FAILED と後続の削除。
+// - J17: target 内のログの DELETE_FAILED・非削除、後続の削除と終了後の解放。J18: stdout の drain を止め、別読取ハンドルから run と
+//   entry の LF を観測して、ログ先行・実行中の可視性・書込/DELETE access の拒否を確認し、drain 再開後に全 byte を照合する。
+// - J19: run の LF 受信と別ハンドルからのログ entry の観測を同期点に stdout の読み手を close する。途中で検出した場合は OUTPUT_FAILED/
+//   終了1・後続未処理、非検出時は承認範囲の完走を検証し、ログの最後の entry/result・counts と実削除の範囲を照合する。終端の配送だけの
+//   失敗では記録済みの result と実終了コードを区別する。検出自体を全環境の assert にせず、観測条件は docs/OPEN_ISSUES.md#observations。
 public sealed class MachineOutputE2ETests(ITestOutputHelper output)
 {
     private static string[] Options(bool fast, string operation, string? log = null) =>
@@ -222,25 +232,18 @@ public sealed class MachineOutputE2ETests(ITestOutputHelper output)
         }
     }
 
-    // J15: Prepare/result のみ、ログ作成前と作成後、ログと入力が同じパスの場合。
+    // J15: Prepare/result のみ、ログ作成前と作成後、ログと入力が同じパスの場合。Strict だけ (Prepare の失敗は run より前に終わり、
+    // Fast でも同じ result になる。モードの違いは CLI の J12 が確かめる)。
     [Theory]
-    [InlineData("usage", false)]
-    [InlineData("usage", true)]
-    [InlineData("existing-log", false)]
-    [InlineData("existing-log", true)]
-    [InlineData("create-log", false)]
-    [InlineData("create-log", true)]
-    [InlineData("device-log", false)]
-    [InlineData("device-log", true)]
-    [InlineData("invalid-zip", false)]
-    [InlineData("invalid-zip", true)]
-    [InlineData("archive-is-log", false)]
-    [InlineData("archive-is-log", true)]
-    [InlineData("entries-is-log", false)]
-    [InlineData("entries-is-log", true)]
-    [InlineData("entries-no-match", false)]
-    [InlineData("entries-no-match", true)]
-    public async Task J15_PrepareFailuresDeleteNothing(string scenario, bool fast)
+    [InlineData("usage")]
+    [InlineData("existing-log")]
+    [InlineData("create-log")]
+    [InlineData("device-log")]
+    [InlineData("invalid-zip")]
+    [InlineData("archive-is-log")]
+    [InlineData("entries-is-log")]
+    [InlineData("entries-no-match")]
+    public async Task J15_PrepareFailuresDeleteNothing(string scenario)
     {
         var fixture = E2EFixture.Create().WriteTarget("same.txt", "same");
         if (scenario != "archive-is-log")
@@ -286,7 +289,7 @@ public sealed class MachineOutputE2ETests(ITestOutputHelper output)
         }
 
         using var process = new MachineProcess(fixture, "delete",
-            [.. fast ? new[] { "--fast" } : [], .. scenario != "usage" ? new[] { "--yes" } : [], "--log", log, .. extra]);
+            [.. scenario != "usage" ? new[] { "--yes" } : [], "--log", log, .. extra]);
         var result = await process.Complete();
         End(result, outcome, 1);
         var final = Assert.Single(result.Records);
@@ -310,17 +313,15 @@ public sealed class MachineOutputE2ETests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData("analyze", false)]
-    [InlineData("analyze", true)]
-    [InlineData("delete", false)]
-    [InlineData("delete", true)]
-    public async Task J15_ArchiveValidationFailure(string operation, bool fast)
+    [InlineData("analyze")]
+    [InlineData("delete")]
+    public async Task J15_ArchiveValidationFailure(string operation)
     {
         var fixture = E2EFixture.Create().WriteZip(ZipFixture.Create(new FixtureEntry("../bad.txt", E2EFixture.Bytes("same"))))
             .WriteTarget("same.txt", "same");
         var before = E2EFixture.Snapshot(fixture.Target);
         var archive = E2EFixture.Describe(fixture.ArchivePath);
-        using var process = new MachineProcess(fixture, operation, Options(fast, operation));
+        using var process = new MachineProcess(fixture, operation, Options(fast: false, operation));
         var result = await process.Complete();
         End(result, "fatal", 1);
         var final = Assert.Single(result.Records);

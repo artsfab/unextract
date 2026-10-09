@@ -6,6 +6,9 @@
     process only. Existing executables, build outputs and test fixtures are not
     removed. PTY tests clean up their own fixtures; other fixtures follow the
     existing manual cleanup policy.
+    With -ResultsDirectory (verify.ps1 passes it), the TRX file e2e-publish.trx and
+    exe.txt (the absolute path of the tested exe) are written there; the directory
+    must exist and is neither emptied nor removed by this script.
     Returns the publish/test exit code. A wrapper or cleanup error returns 1
     when no publish/test failure has already occurred.
     ASCII only for Windows PowerShell 5.1 compatibility.
@@ -13,7 +16,9 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-e2e-tests.ps1
 #>
 [CmdletBinding()]
-param()
+param(
+    [string]$ResultsDirectory
+)
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
@@ -46,7 +51,13 @@ try {
         }
         [Environment]::SetEnvironmentVariable('UNEXTRACT_E2E_EXE', $exe, 'Process')
         $stage = 'test'
-        & dotnet test (Join-Path $repoRoot 'tests/Unextract.E2E.Tests') -c Release --logger 'console;verbosity=detailed'
+        $arguments = @((Join-Path $repoRoot 'tests/Unextract.E2E.Tests'), '-c', 'Release', '--logger', 'console;verbosity=detailed')
+        if ($ResultsDirectory) {
+            $results = [System.IO.Path]::GetFullPath($ResultsDirectory)
+            [System.IO.File]::WriteAllText((Join-Path $results 'exe.txt'), $exe)
+            $arguments += @('--results-directory', $results, '--logger', 'trx;LogFileName=e2e-publish.trx')
+        }
+        & dotnet test @arguments
         $exitCode = $LASTEXITCODE
     }
 }

@@ -9,18 +9,16 @@ using Unextract.Core.Target;
 using ProtectedLocations = Unextract.Windows.ProtectedLocations;
 using ProtectedLocationsResult = Unextract.Windows.ProtectedLocationsResult;
 using WindowsFileSystemProbe = Unextract.Windows.WindowsFileSystemProbe;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Cli.Tests;
 
 // CLI の引数解析、サブコマンドの振り分け、終了状態、出力先 (stdout / stderr)、最上位の例外捕捉、進捗の表示 (K 系・O16 の CLI の部分)。
-// target は実 NTFS 上の fixture (テストの出力先の fixtures/ の下に毎回ユニークな名前で作る)。テストからは削除しない。
+// target は実 NTFS 上の fixture (テストの出力先の fixtures/ の下に <テスト名>-<GUID> で作る。TestFixtures)。テストの終了後に共通の削除処理が削除する。
 // delete の削除の指示は SimulatedDeletionProbe で模擬する (削除用ハンドルは実際に開くが、SetDispositionEx を OS に渡さない)。
 // そのため、どのケースでも target のファイルは変わらない (実削除は Unextract.Windows.Tests でガード付きで確認する)。
 public class CliApplicationTests
 {
-    private static readonly string FixtureDirectory =
-        Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "fixtures")).FullName;
-
     private sealed class RecordingPrompt(string? answer = "y", bool interactive = true) : IConfirmationPrompt
     {
         public List<string> Asked { get; } = [];
@@ -135,12 +133,7 @@ public class CliApplicationTests
             prompt ?? new RecordingPrompt(),
             showProgress);
 
-    private static string NewDirectory([CallerMemberName] string name = "")
-    {
-        var path = Path.Combine(FixtureDirectory, $"{name}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(path);
-        return path;
-    }
+    private static string NewDirectory() => TestFixtures.Create();
 
     private static string WriteZip(string directory, params (string Name, string? Content)[] entries)
     {
@@ -163,9 +156,9 @@ public class CliApplicationTests
     }
 
     // 同一内容 (same.txt)、同サイズの内容違い (changed.txt)、サイズ違い (size.txt)、不存在 (missing.txt)、ディレクトリエントリ (d/)。
-    private static (string Zip, string Target) Standard([CallerMemberName] string name = "")
+    private static (string Zip, string Target) Standard()
     {
-        var dir = NewDirectory(name);
+        var dir = NewDirectory();
         var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
         var zip = WriteZip(dir, ("same.txt", "hello"), ("changed.txt", "hello"), ("size.txt", "hello"), ("missing.txt", "x"), ("d/", null));
         File.WriteAllText(Path.Combine(target, "same.txt"), "hello");

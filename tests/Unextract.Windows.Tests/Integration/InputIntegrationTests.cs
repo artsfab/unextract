@@ -14,7 +14,7 @@ public class InputIntegrationTests(ITestOutputHelper output)
 
     // P03: 読み取り権限のない ZIP → ZIP を開けない (入力エラー)。読み取り (一覧) 権限のない target → 入力エラー。
     // ACL は対象の読み取り (RD) だけを自分の SID で拒否し、finally で必ずその DENY を除去して元に戻す (ファイルは削除しない)。
-    // 戻せなかった場合はパスと理由をテスト出力に残す (失敗にはしない)。
+    // 戻せなかった場合や DENY が残った場合はテストを失敗にする (AclChanges)。
     [Theory]
     [InlineData(RunMode.Strict)]
     [InlineData(RunMode.Fast)]
@@ -25,21 +25,23 @@ public class InputIntegrationTests(ITestOutputHelper output)
         var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
         var lockedTarget = Directory.CreateDirectory(Path.Combine(dir, "locked-target")).FullName;
         var lockedZip = WriteZip(Path.Combine(dir, "locked.zip"), Zip(("a.txt", Hello)));
-        using var acl = new AclChanges(output);
-        acl.Deny(lockedZip, "RD");
-        acl.Deny(lockedTarget, "RD");
+        AclChanges.Run(output, acl =>
+        {
+            acl.Deny(lockedZip, "RD");
+            acl.Deny(lockedTarget, "RD");
 
-        var zipResult = ZipArchiveSource.Open(lockedZip);
-        Assert.Null(zipResult.Source);
-        Assert.Equal(FatalKind.ArchiveOpenFailed, zipResult.Fatal!.Kind);
+            var zipResult = ZipArchiveSource.Open(lockedZip);
+            Assert.Null(zipResult.Source);
+            Assert.Equal(FatalKind.ArchiveOpenFailed, zipResult.Fatal!.Kind);
 
-        var targetResult = Analyze(zip, lockedTarget, mode: mode);
-        Assert.Equal(ExitStatus.Error, targetResult.Status);
-        Assert.Equal(FatalKind.TargetCheckFailed, targetResult.PrepareError?.Kind);
-        Assert.Contains("Win32 エラー 5", targetResult.Error, StringComparison.Ordinal);
+            var targetResult = Analyze(zip, lockedTarget, mode: mode);
+            Assert.Equal(ExitStatus.Error, targetResult.Status);
+            Assert.Equal(FatalKind.TargetCheckFailed, targetResult.PrepareError?.Kind);
+            Assert.Contains("Win32 エラー 5", targetResult.Error, StringComparison.Ordinal);
 
-        // 対照: 権限のある target では通る。
-        Assert.Null(Analyze(zip, target, mode: mode).PrepareError);
+            // 対照: 権限のある target では通る。
+            Assert.Null(Analyze(zip, target, mode: mode).PrepareError);
+        });
     }
 
     // P04: ZIP を保持している間、別ハンドルでの書き込みオープンと改名が失敗する。既に書き込み用に開かれている ZIP は開けない。
@@ -104,7 +106,7 @@ public class InputIntegrationTests(ITestOutputHelper output)
     [InlineData("junction", FatalKind.TargetIsReparsePoint, RunMode.Fast)]
     public void P06_InvalidTarget_IsInputError(string kind, FatalKind expected, RunMode mode)
     {
-        var dir = CreateDirectory($"{nameof(P06_InvalidTarget_IsInputError)}-{kind}");
+        var dir = CreateDirectory();
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(("a.txt", Hello)));
         var real = Directory.CreateDirectory(Path.Combine(dir, "real")).FullName;
         File.WriteAllBytes(Path.Combine(real, "a.txt"), Hello);
@@ -144,7 +146,7 @@ public class InputIntegrationTests(ITestOutputHelper output)
     [InlineData(Environment.SpecialFolder.ProgramFiles, null, FatalKind.TargetIsProtectedLocation, RunMode.Fast)]
     public void P06_ProtectedLocation_IsInputError(Environment.SpecialFolder folder, string? child, FatalKind expected, RunMode mode)
     {
-        var dir = CreateDirectory($"{nameof(P06_ProtectedLocation_IsInputError)}-{folder}");
+        var dir = CreateDirectory();
         var zip = WriteZip(Path.Combine(dir, "archive.zip"), Zip(("a.txt", Hello)));
         var target = Environment.GetFolderPath(folder);
         if (child is not null)

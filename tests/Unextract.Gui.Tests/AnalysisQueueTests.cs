@@ -6,9 +6,20 @@ using Unextract.Gui.Services;
 using Unextract.Gui.ViewModels;
 using static Unextract.Gui.Tests.JsonlReceiverTests;
 using static Unextract.Gui.Tests.SearchSessionTests;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
+// The analysis queue, with a simulated runner and real-format JSONL through the receiver: the sequential queue (Archive order, then
+// Target registration order; one at a time; continuing after a failure; independent of display filters; Archive, selection and
+// single scopes); adopting only a normal completion (an interrupted entry, a mismatched exit code, an incompatible version or an
+// unknown code is not adopted and goes through DisplayText); retiring the snapshot when a re-analysis starts, never reviving it after
+// a failure or cancellation; nothing starts after a cancellation; settings locked while running while viewing and filtering go on;
+// re-observing a missing Target and not running it; the mode-change confirmation discarding all results (candidates of the other mode
+// are never reused); 64-bit length totals; empty and all-DIRECTORY ZIPs; progress from run.selected, the received count and the
+// Target position; class and path filters independent of selection; a runner refusal stopping the queue. The bundled real CLI
+// analyzes a self-made ZIP and target in Strict and Fast, the snapshot is adopted, and every file keeps its path, size, SHA-256 and
+// last write time. A list of 300,000 entries keeps only the filtered indexes and builds no rows.
 public sealed class AnalysisQueueTests
 {
     [Fact]
@@ -395,7 +406,7 @@ public sealed class AnalysisQueueTests
     [Fact]
     public async Task BundledCliAnalysisThroughTheViewModelAdoptsAllEntriesAndLeavesFixtureUnchanged()
     {
-        string fixture = ArchiveSearchTests.Fixture("analysis-queue");
+        string fixture = ArchiveSearchTests.Fixture();
         string archive = Path.Combine(fixture, "内容 空白.zip");
         string target = Path.Combine(fixture, "target dir");
         Directory.CreateDirectory(target);

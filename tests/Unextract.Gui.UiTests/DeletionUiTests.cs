@@ -1,10 +1,11 @@
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Input;
 using FlaUI.Core.WindowsAPI;
+using Xunit.Abstractions;
 
 namespace Unextract.Gui.UiTests;
 
-public sealed class DeletionUiTests : UiTestBase
+public sealed class DeletionUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
     private static readonly Item[] TwoFiles = [new(1, "f1.txt", "MATCHED", 10), new(2, "f2.txt", "MODIFIED", 10)];
 
@@ -17,10 +18,10 @@ public sealed class DeletionUiTests : UiTestBase
         Keyboard.Type(key);
     }
 
-    [Fact]
+    [UiFact]
     public void SelectedTargetsHiddenByTheArchiveFilterStayInTheDeletionAndAreMarked()
     {
-        var ui = Start(kind: "del-hidden");
+        var ui = Start();
         string a = Path.Combine(ui.Fixtures, "a.zip"), b = Path.Combine(ui.Fixtures, "b.zip");
         string ta = Path.Combine(ui.Fixtures, "out-a"), tb = Path.Combine(ui.Fixtures, "out-b");
         Files.Zip(a, ("f1.txt", "x"), ("f2.txt", "y"));
@@ -81,10 +82,10 @@ public sealed class DeletionUiTests : UiTestBase
         Assert.Empty(Directory.EnumerateFileSystemEntries(ui.TempDirectory));
     }
 
-    [Fact]
+    [UiFact]
     public void ExcludedTargetsAreListedWithReasonsAndNeitherEnterNorEscapeStartsTheCli()
     {
-        var ui = Start(kind: "del-excluded");
+        var ui = Start();
         string z1 = Path.Combine(ui.Fixtures, "z1.zip"), z2 = Path.Combine(ui.Fixtures, "z2.zip");
         Files.Zip(z1, ("e.txt", "x"));
         Files.Zip(z2, ("e.txt", "x"));

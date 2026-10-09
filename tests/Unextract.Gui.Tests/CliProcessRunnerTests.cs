@@ -6,9 +6,16 @@ using System.Text;
 using Unextract.Gui.Models;
 using Unextract.Gui.Services;
 using static Unextract.Gui.Tests.JsonlReceiverTests;
+using Unextract.Core.Tests.Fixtures;
 
 namespace Unextract.Gui.Tests;
 
+// The CLI process runner. With a simulated adapter: the real exit and both EOFs are awaited independently, the real exit code wins
+// and the result is kept, start-up is certain, no restart after an unconfirmed exit, and only an analyze can be cancelled. Self-made
+// PowerShell children add an immediate exit, heavy output on both pipes, draining after an output error, the bounded stderr,
+// cancellation, and a missing result or a mismatched exit code; a delete-role child deletes nothing and exits on a release file it
+// owns. The bundled real CLI analyzes a self-made ZIP and target (empty and not) in Strict and Fast, and every file keeps its path,
+// size, SHA-256 and last write time. None of this replaces the acceptance of the delete queue, closing or performance.
 public sealed class CliProcessRunnerTests
 {
     private static CliLocation Location => new(DeploymentTests.GuiOutputDirectory);
@@ -372,12 +379,7 @@ public sealed class CliProcessRunnerTests
             await Task.Delay(10, timeout.Token);
         }
     }
-    private static string Fixture()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "fixtures", "gui-process-" + Guid.NewGuid().ToString("N"), "日本語 空白");
-        Directory.CreateDirectory(path);
-        return path;
-    }
+    private static string Fixture() => ArchiveSearchTests.Fixture();
     private static string Emit(string text) => "$b = [Convert]::FromBase64String('" + Convert.ToBase64String(Encoding.ASCII.GetBytes(text)) +
         "')\n$o = [Console]::OpenStandardOutput()\n$o.Write($b,0,$b.Length)\n$o.Flush()\n";
     private static CliProcessRunner ScriptRunner(string script)

@@ -91,15 +91,18 @@ internal static class Flows
     // A details-pane button of the viewed Target or archive.
     public static AutomationElement DetailButton(this GuiSession ui, string id) => ui.Get(id, ui.Main);
 
-    // The four selection operations are in the "change selection" menu (a popup window of the GUI process).
+    // The four selection operations are in the "change selection" menu, a popup that UI Automation shows as a child window of
+    // the main window. Only those child windows are searched, not the whole tree of the main window.
     public static void SelectionMenu(this GuiSession ui, string id)
     {
         ui.Invoke("SelectionMenuButton");
-        var item = Wait.Until(() => ui.TopLevelWindows().Select(w => w.FindFirstDescendant(ui.Conditions.ByAutomationId(id))).FirstOrDefault(e => e is not null),
+        var item = Wait.Until(() => Popups(ui).Select(w => w.FindFirstDescendant(ui.Conditions.ByAutomationId(id))).FirstOrDefault(e => e is not null),
             $"the menu item '{id}'");
         item.Patterns.Invoke.Pattern.Invoke();
-        Wait.Until(() => ui.TopLevelWindows().All(w => w.FindFirstDescendant(ui.Conditions.ByAutomationId(id)) is null), "the menu to close");
+        Wait.Until(() => Popups(ui).All(w => w.FindFirstDescendant(ui.Conditions.ByAutomationId(id)) is null), "the menu to close");
     }
+
+    private static AutomationElement[] Popups(GuiSession ui) => ui.Main.FindAllChildren(ui.Conditions.ByControlType(ControlType.Window));
 
     // Analyzes every selected, unanalyzed Target and waits until the queue is finished.
     public static void AnalyzeSelected(this GuiSession ui)

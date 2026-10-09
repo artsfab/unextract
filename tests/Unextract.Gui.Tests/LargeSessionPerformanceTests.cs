@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.IO;
-using System.IO.Compression;
 using System.Windows.Controls;
 using Unextract.Gui.Models;
 using Unextract.Gui.Services;
@@ -13,10 +11,13 @@ using static Unextract.Gui.Tests.SearchViewTests;
 
 namespace Unextract.Gui.Tests;
 
-// Measurements for many archives and Targets: the work list of 10,000 archives with 3 Targets each, browsing
-// while a job reports progress, and a real search over many self-made ZIP files. Simulated data except the search
-// fixture; no deletion. The target for ordinary operations (select, view, filter) is an answer within one second;
+// Measurements for many archives and Targets: the work list of 10,000 archives with 3 Targets each, and browsing
+// while a job reports progress. Simulated data only; no deletion. The target for ordinary operations (select, view, filter) is an answer within one second;
 // the numbers go to the test output (they describe this machine, not a guarantee for real data).
+// Measured: bulk add, first display, filtering, select all / none, per-item and per-Archive selection, details switching,
+// scrolling and mode change; details switching and filtering while analysis progress is received. Process memory is written to the
+// output (it includes tests running in parallel in the same host). Searching many ZIPs on a real disk is not measured continuously
+// (the search function is ArchiveSearchTests). Real GPU rendering and the feel of operation are manual (M14).
 // Tests that create WPF windows run serially in one collection. When xUnit ran the classes that create MainWindow in
 // parallel, a test (in DeploymentTests) failed intermittently; with those classes in the "Wpf" collection the failure
 // no longer reproduced (Gui.Tests then passed 15 consecutive runs). It was seen only under parallel test execution, not
@@ -134,39 +135,4 @@ public sealed class LargeSessionPerformanceTests(ITestOutputHelper output)
         }
         finally { window.Close(); }
     });
-
-    [Fact]
-    public async Task SearchingTenThousandSelfMadeZipFilesIsMeasured()
-    {
-        // Self-made fixture (kept for the cleanup script): 10,000 minimal ZIP files in 100 directories, plus other files.
-        string root = ArchiveSearchTests.Fixture("search-many");
-        var watch = Stopwatch.StartNew();
-        byte[] empty;
-        using (var buffer = new MemoryStream())
-        {
-            using (new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true)) { }
-            empty = buffer.ToArray();
-        }
-        for (int d = 0; d < 100; d++)
-        {
-            string dir = Directory.CreateDirectory(Path.Combine(root, $"フォルダー{d:D3}")).FullName;
-            for (int i = 0; i < 100; i++) File.WriteAllBytes(Path.Combine(dir, $"資料-{i:D3}.zip"), empty);
-            File.WriteAllText(Path.Combine(dir, "readme.txt"), "not a zip");
-        }
-        Report("fixture作成 (10,000 ZIP)", watch.Elapsed);
-        var model = new MainViewModel(new("cli", true, "available"), new ArchiveSearch(), new FakeSettings()) { SearchDirectory = root };
-        watch.Restart();
-        Assert.True(await model.SearchAsync());
-        var search = watch.Elapsed;
-        Report($"再帰検索 ({model.Archives.Count:N0} Archive)", search);
-        Assert.Equal(10_000, model.Archives.Count);
-        Assert.Empty(model.Diagnostics);
-        watch.Restart();
-        model.ArchiveFilter = "フォルダー042";
-        Report($"検索結果の絞り込み ({model.VisibleArchives.Count:N0} 件)", watch.Elapsed);
-        Assert.Equal(100, model.VisibleArchives.Count);
-        output.WriteLine(Memory());
-        // A loose guard only: file system speed differs; the measured time is the result.
-        Assert.True(search < TimeSpan.FromMinutes(1), $"検索が遅い: {search}");
-    }
 }

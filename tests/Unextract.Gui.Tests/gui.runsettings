@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Default run settings of Unextract.Gui.Tests (RunSettingsFilePath in the project), so they also apply to a direct
+     "dotnet test". A test host that runs one test longer than 2 minutes (for example a hung STA dispatcher) is stopped
+     with a mini dump in the results directory; the run then fails as aborted (docs/TESTING.md#fixtures). -->
+<RunSettings>
+  <LoggerRunSettings>
+    <Loggers>
+      <Logger friendlyName="blame" enabled="True" />
+    </Loggers>
+  </LoggerRunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="blame" enabled="True">
+        <Configuration>
+          <CollectDumpOnTestSessionHang TestTimeout="120000" HangDumpType="mini" />
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

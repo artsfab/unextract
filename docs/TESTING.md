@@ -2,7 +2,7 @@
 
 役割: 検証原則、変更別のテストコード案内、重要回帰・再現上の知識と受入条件。テスト変更・実行時に該当節を読む。
 
-[原則・安全](#principles) / [系列索引](#test-series) / [GUI](#gui) / [フック](#hooks) / [回帰](#regressions) / [再現](#reproduction) / [RAR](#rar) / [E2E](#e2e) / [受入](#acceptance)
+[原則・安全](#principles) / [標準の検証](#verify) / [fixture](#fixtures) / [系列索引](#test-series) / [GUI](#gui) / [フック](#hooks) / [回帰](#regressions) / [再現](#reproduction) / [RAR](#rar) / [E2E](#e2e) / [受入](#acceptance)
 
 <a id="principles"></a>
 ## 共通の原則・安全装置
@@ -28,12 +28,40 @@
 **期待値の扱い**: Skip・期待値緩和は禁止。実測の結果は推測で確定せず、[未確認一覧](OPEN_ISSUES.md#observations)に観測条件と範囲を記す。仕様と違えば明示された規定・決定を調べ、新しい製品判断は保留して報告する。
 
 
-実削除を伴う Win・E2E テストは、テストが自分で作った一意な fixture ディレクトリの中のファイルだけを削除する。削除指示の直前のフック (H5) で、テスト側のガード (`DeletionGuard`) が削除用ハンドルの最終パスが fixture の内側であること (`\` 境界付きの比較) と、fixture から対象の親までの各ディレクトリが reparse point でないことを確かめ、違反なら例外で中止する。このガードはテストの安全装置であり、製品の安全装置の代わりにしない。ACL を変えるテストは `finally` で元に戻し、終了後に `icacls` で DENY が残っていないことを確認する。fixture のディレクトリ自体はテストから削除しない (PTY の例外は E2E節)。
+実削除を伴う Win・E2E テストは、テストが自分で作った一意な fixture ディレクトリの中のファイルだけを削除する。削除指示の直前のフック (H5) で、テスト側のガード (`DeletionGuard`) が削除用ハンドルの最終パスが fixture の内側であること (`\` 境界付きの比較) と、fixture から対象の親までの各ディレクトリが reparse point でないことを確かめ、違反なら例外で中止する。このガードはテストの安全装置であり、製品の安全装置の代わりにしない。ACL を変えるテストは [AclChanges](../tests/Unextract.Windows.Tests/AclChanges.cs) の `Run` で元に戻し、自分の SID の DENY が残っていないことをテストの中で確かめる (戻せない・残っていればテストの失敗。本体の失敗も保持する)。fixture はテストの終了後に共通の削除処理が削除する ([fixture](#fixtures))。
+
+<a id="verify"></a>
+## 標準の検証
+
+引き渡しの合否は [verify.ps1](../scripts/verify.ps1) の1回の実行で判定する。実行者がテストを選んだり省略したりする運用は使わず、毎回次の段をこの順ですべて実行する (段を選ぶ引数は無い)。
+
+1. Release ビルド (警告ゼロ)
+2. solution のテスト (`dotnet test unextract.sln -c Release`。この間は `UNEXTRACT_E2E_EXE` を解除し、現在の Release build の exe を使う)
+3. 一時 publish と publish 版 E2E ([run-e2e-tests.ps1](../scripts/run-e2e-tests.ps1))
+4. GUI の publish とスモーク ([run-gui-smoke-tests.ps1](../scripts/run-gui-smoke-tests.ps1))
+5. UI E2E の全件 ([run-gui-ui-tests.ps1](../scripts/run-gui-ui-tests.ps1))。開始前に、セッションが対話的で入力デスクトップ (`Default`) を開けることを確かめ、満たさなければ不合格にする。ロックしない、実行中はマウスとキーボードに触れない、リモートデスクトップを最小化しない、サービスセッションで実行しない、ほかの UI テストと同時に実行しない、が前提である。
+
+- 合否: 全段と結果の集約が成功したときだけ `PASSED`。テスト段は、期待するアセンブリごとの TRX があり、実行件数が0でなく、全件が成功し、テストホストが中断していないことを確かめる。ビルドとスモークは終了コードで判定する。ある段が失敗したら後続の段は実行せず (UI E2E は最後なので、先の段の失敗ではデスクトップを占有しない)、実行済みの段の結果・止まった段・未実行の段を `summary.txt` に残す。対話デスクトップ・UnRAR.dll の不足、テストホストの中断、TRX の欠落は不合格である。
+- 未観測: 環境に依存する次の観測だけは、前提が成り立たないときに「前提不成立: ...」を出力して確認を行わずに終わる。`verify.ps1` はこれをテスト名・モード・理由つきで「未観測」として別に数え、その性質の成功には数えない。ほかが成功なら判定は `PASSED (not observed: N)` である。対象は `DirectoryEnumeratorTests` の8.3名、T06の8.3名、T08の圧縮・sparse属性、T15のcase-sensitive設定に固定し ([test-results.ps1](../scripts/test-results.ps1))、それ以外の前提不成立は不合格にする。OS・ボリューム全体の設定変更、常時の昇格、専用ボリュームは要求しない。
+- 結果: リポジトリ外の `%TEMP%\unextract-verify\<checkout識別子>\latest` (識別子は正規化した checkout のパスから決める) に、`summary.txt` (段ごとの判定・所要時間・アセンブリごとの件数・使った exe の絶対パス・未観測・問題) と、段・アセンブリ別の TRX と診断を置く。開始時に、この保存先に対応する名前付き Mutex を取得してから保存先だけを空にし、集約まで保持する。使用中なら既存の結果を変えずに非0で終える。保存先とその経路の reparse point は拒否する。`run-gui-ui-tests.ps1` を単独で実行したときは同じ親の `ui-debug-latest` を使い、標準検証の結果を上書きしない。
+- 構成は Release に統一する。開発中の `dotnet test` (Debug) と、失敗したテストだけの再実行 (`dotnet test --filter`、`run-gui-ui-tests.ps1 -Filter`) はデバッグの手段として使ってよいが、合否は最後に `verify.ps1` を全段で実行して判定する。
+- CI ([workflow](../.github/workflows/ci.yml)) は `verify.ps1 -Ci` を実行する。`-Ci` は UI E2E だけを除き (結果に「excluded in CI」と出す)、`GITHUB_ACTIONS=true` のときしか受け付けない。結果は成功・失敗を問わず成果物として保存する。
+- 文書・コメントだけの変更では、リンク先のアンカーと不可視文字だけを確かめればよい ([受入条件](#acceptance))。
+
+<a id="fixtures"></a>
+## fixture の作成と削除
+
+- 作成: テストが使うディスク上の作業ディレクトリは、共通の補助 [TestFixtures](../tests/Unextract.Core.Tests/Fixtures/TestFixtures.cs) (各テストプロジェクトへ `Compile Include ... Link` で取り込む) だけで作る。場所は `<テストの出力先>\fixtures\<テスト名>-<32桁の16進>` で、実行中のテストの所有一覧に登録する。作成前に、ドライブのルートから fixtures ルートまでの経路が通常のディレクトリ (reparse point でない) であることを確かめる。所有者のいない呼び出し (テストメソッドの外) は拒否する。`fixtures` 直下に直接書く補助や、登録を経由しない作成を新設しない。
+- 削除の契機は2つだけである。(a) 既定は、アセンブリ単位の `BeforeAfterTestAttribute` (`FixtureCleanup`) が、テストの終了後に成功・失敗を問わず削除する (xUnit の順序は Before → テスト → After → テストクラスの Dispose)。(b) テストメソッドより寿命の長い資源は、明示的な所有者 (`FixtureOwner`) を持つ側が削除する。UI E2E の `UiTestBase` は GUI の終了 (必要なら強制終了) の後に、`RarE2ETests` の DLL を置いた配置はクラスの全テストの後 (class fixture の Dispose) に削除する。終了を確認できない GUI の fixture は削除せず、パスを報告する。
+- 削除処理 (1か所): 登録した絶対パスだけを、fixtures ルートの直下・`<接頭辞>-<32桁の16進>` の名前・それ自体と上位の経路に reparse point が無いことを削除の直前に確かめてから消す。fixtures ルート自体は消さない。reparse point の中へ入らずに ReadOnly 属性を外し (リンクはリンクだけを外す)、`Directory.Delete(recursive)` で削除する。ACL は変えない。一時的な共有違反は合計2秒まで再試行する。削除後に存在しないことを確かめ (アクセス拒否を不存在と扱わない)、残ればパスと原因を示してテストを失敗にする。テスト本体の失敗も保持し、残りの所有パスの削除も試みる。安全性は [TestFixturesTests](../tests/Unextract.Windows.Tests/TestFixturesTests.cs) (junction の先・ルートや上位の junction・未登録のパス・ルート自体・DENY・別の所有者・属性/長いパス/不可視文字) が常に確かめる。
+- 残存プロセス・ACL: 起動した exe・PTY・ヘルパー・GUI はテストの中で終了させ、ACL は `AclChanges.Run` で戻してから削除に進む。STA のテスト ([SearchViewTests](../tests/Unextract.Gui.Tests/SearchViewTests.cs) の `OnSta`) は、処理・Dispatcher・STA スレッドの終了を待ってから完了する。ハングは Gui.Tests の既定の runsettings ([gui.runsettings](../tests/Unextract.Gui.Tests/gui.runsettings)) の Blame (2分・mini dump) が testhost ごと止め、実行は中断として不合格になる。
+- 失敗時の診断は fixture に頼らない。判定に使った状態は assert のメッセージとテスト出力に含め、fixture の中にしか無い情報 (偽 CLI の記録・GUI のログ) は削除の前に結果ディレクトリへ書く (UI E2E)。画面写真は fixture の外に保存する。
+- 回収: テストホストの異常終了 (ハング・クラッシュ) では削除が行われないことがある。残ったものは [clean-test-fixtures.ps1](../scripts/clean-test-fixtures.ps1) で回収する (既定は一覧のみ、`-Execute` で実行。稼働中のテストと同時に実行しない)。次の実行の開始時の一括削除、失敗時の保持、再利用・キャッシュは行わない。並行する別の実行の fixture には触れない (自分の登録パスだけを扱う)。
 
 <a id="test-series"></a>
 ## 変更別の系列とコード
 
-Coreは副作用・API失敗を注入した判定、Winは実NTFS/Win32、CLIは同一プロセス、E2Eはexeの別プロセス、PTYは対話機能、Mは実端末を担う。単純ケースの入力・期待値は現行メソッドを読む。テスト名/ID/assertは文書再編で変更しない。CoreだけではWindowsの同一個体保証は証明できない。
+Coreは副作用・API失敗を注入した判定、Winは実NTFS/Win32、CLIは同一プロセス、E2Eはexeの別プロセス、PTYは対話機能、Mは実端末を担う。各テストクラスが確かめる内容はクラス冒頭のコメントに書き、本書には複製しない。単純ケースの入力・期待値は現行メソッドを読む。テスト名/ID/assertは文書再編で変更しない。CoreだけではWindowsの同一個体保証は証明できない。
 
 | 変更領域 | 系列 | 担当コードと追加先 |
 |---|---|---|
@@ -51,22 +79,20 @@ Coreは副作用・API失敗を注入した判定、Winは実NTFS/Win32、CLIは
 | entries | L | [EntriesListTests](../tests/Unextract.Core.Tests/EntriesListTests.cs)、[CommandTests](../tests/Unextract.Core.Tests/CommandTests.cs)、[Win逐次](../tests/Unextract.Windows.Tests/Integration/SequentialDeleteIntegrationTests.cs) |
 | 引数 | K | [CommandLineParserTests](../tests/Unextract.Core.Tests/CommandLineParserTests.cs)、[CliApplicationTests](../tests/Unextract.Cli.Tests/CliApplicationTests.cs) |
 | 機械モード引数・事前検出 | J01〜J03 | [CommandLineParserTests](../tests/Unextract.Core.Tests/CommandLineParserTests.cs) のJ01/J02、[MachineModeDetectionTests](../tests/Unextract.Cli.Tests/MachineModeDetectionTests.cs) のJ03 ([起動](spec/machine-output.md#invocation)) |
-| Prepare診断の保持 | J04 / P / L | [PrepareDiagnosticTests](../tests/Unextract.Core.Tests/PrepareDiagnosticTests.cs) のJ04、CommandTestsのP11、EntriesListTestsのL02〜L09/L17。入力エラー/FATAL、原因参照・行番号、件数未取得と空ZIP、表示不変を確認 ([result](spec/machine-output.md#result)、[コード](spec/machine-output.md#codes)) |
-| 共通FS・内容検証の診断 | J05 / T / C / P / S | [HandleDiagnosticTests](../tests/Unextract.Core.Tests/HandleDiagnosticTests.cs) のJ05は最終確認の取得失敗と全M0不一致・番号省略・API順序。ClassificationTestsのT10/T13、ContentVerificationTestsのC01〜C08、TargetRootTestsとJ04で元のWin32値・段階を確認。S25/S27/S30とFast非読取は既存の回帰 ([コード](spec/machine-output.md#codes)) |
-| delete固有の診断 | J06 / S / O15 | [DeleteDiagnosticTests](../tests/Unextract.Core.Tests/DeleteDiagnosticTests.cs) のJ06は識別確認自体の番号、resolve・hardlink検査の失敗、指示失敗後の状態と不確実性、正常結果の診断省略、通知とStopの原因参照を確認。SequentialDeleteTestsのS13/S15〜S18/S22/S23/S25/S27〜S33と例外テストは原因種別・段階・番号を確認し、S05/S06とCommandTestsのO15は同じハンドル・順序・表示を回帰 ([result](spec/machine-output.md#result)、[コード](spec/machine-output.md#codes)) |
-| close後の同期通知・途中件数 | J07 / A / S / O | [CommandNotificationTests](../tests/Unextract.Core.Tests/CommandNotificationTests.cs) のJ07はPrepare通知→open→close→結果通知→次のopen、通知例外の非継続・資源終了、ZIP順とFATAL原因非通知、DIRECTORY累計・STOPPED・欠番選択・配送前の処理済み事実を両モードで確認。空ZIP/全DIRECTORY、64bit宣言Lengthと追加I/Oなし、Prepared終了処理例外、通知経路の表示/進捗/確認入力非使用も確認。ClassificationTests/SequentialDeleteTests/CommandTestsが既存のハンドル数・結果・人間向け表示を回帰 ([レコード](spec/machine-output.md#records)、[result](spec/machine-output.md#result)、[完了境界](spec/machine-output.md#boundary)) |
+| Prepare診断の保持 | J04 / P / L | [PrepareDiagnosticTests](../tests/Unextract.Core.Tests/PrepareDiagnosticTests.cs)、CommandTestsのP11、EntriesListTestsのL02〜L09/L17 |
+| 共通FS・内容検証の診断 | J05 / T / C / P / S | [HandleDiagnosticTests](../tests/Unextract.Core.Tests/HandleDiagnosticTests.cs)、ClassificationTests、ContentVerificationTests、TargetRootTests |
+| delete固有の診断 | J06 / S / O15 | [DeleteDiagnosticTests](../tests/Unextract.Core.Tests/DeleteDiagnosticTests.cs)、SequentialDeleteTests、CommandTests |
+| close後の同期通知・途中件数 | J07 / A / S / O | [CommandNotificationTests](../tests/Unextract.Core.Tests/CommandNotificationTests.cs)。人間向け出力の同じ順序はCommandTests |
 | 表示・警告 | O | [AnalyzeOutputTests](../tests/Unextract.Core.Tests/AnalyzeOutputTests.cs)、[CommandTests](../tests/Unextract.Core.Tests/CommandTests.cs)、[SafeDisplayTests](../tests/Unextract.Core.Tests/SafeDisplayTests.cs)、[CliApplicationTests](../tests/Unextract.Cli.Tests/CliApplicationTests.cs) |
-| ASCII/LFのシリアライズ | J08 | [MachineOutputTests](../tests/Unextract.Cli.Tests/MachineOutputTests.cs) はrun/entry/resultの明示的フィールド、null省略、数値/bool、64bit Length、BOM/CRなし・LF終端、日本語/CP437相当の文字/補助平面/Cf/C1/区切り/引用符/バックスラッシュのraw name往復を確認。Core型からの対応は別に検証する ([出力先](spec/machine-output.md#destinations)、[レコード](spec/machine-output.md#records)) |
-| 同期配送・出力失敗先の非再利用 | J09 | [MachineOutputWriterTests](../tests/Unextract.Cli.Tests/MachineOutputWriterTests.cs) は同一byte列のログwrite/flush→stdout write/flush、借用stdout非close、ログ/stdoutのwrite・部分write・flush失敗、健全な先だけへのOUTPUT_FAILED、報告失敗・全出力不能、終端失敗の追加result拒否、ログclose失敗の型と非retryを確認。各処理段階との結合はJ13が担う ([出力先](spec/machine-output.md#destinations)、[result](spec/machine-output.md#result)) |
-| ログの新規作成・実共有 | J10 | [ExecutionLogTests](../tests/Unextract.Cli.Tests/ExecutionLogTests.cs) はCreateNewによる既存ログ/ZIP/entriesの不変、作成不能・競合作成の型付き失敗、デバイス (`NUL`・`CON`) とパイプを開けてもログとして受理しないこと (パイプには何も書かない)、各レコードの別読取ハンドルからの可視性、保持中の書込/削除open拒否とclose後の解放を確認。削除指示は行わず、自作GUID fixtureを保存する ([実行ログ](spec/machine-output.md#log)) |
-| Core型からv1レコードへの対応 | J11 | [MachineRecordTests](../tests/Unextract.Cli.Tests/MachineRecordTests.cs) は全原因種別・状態・SkipReason・段階の明示的対応、Number/raw name/64bit Length、runのパス・件数、全outcome/終了コード、モード・段階によるcountsとerrorの省略、STOP診断・不確実性、配送失敗対象を含む報告専用集計をwriterなしで確認。analyzeの通常/空/FATAL件数は自作GUID fixtureで実commandの結果とも照合し、削除は行わない ([レコード](spec/machine-output.md#records)、[result](spec/machine-output.md#result)、[コード](spec/machine-output.md#codes)) |
-| CLIの機械経路・ログ所有・終端 | J12 | [MachineCliTests](../tests/Unextract.Cli.Tests/MachineCliTests.cs) は両操作/両モードの通知接続、全outcomeと終了コード、ShowProgress有効時のstderr空・確認入力非参照、Prepare各段階・引数/ログ作成失敗の非接触、空/全DIRECTORY・entriesの欠番選択と未処理を確認。実ZIP/log/entriesと既存FakeFileSystemを使い、削除は模擬する。ログ作成後のPrepare失敗・存在しないZIP/entriesとログの同一パス、正常byte一致・終了後解放、Preparedのclose例外時のZIP解放と成功result抑制、OUTPUT_FAILEDと開始有無、終端log write/close失敗・stderr失敗でも実終了1を確認 ([起動](spec/machine-output.md#invocation)、[result](spec/machine-output.md#result)、[実行ログ](spec/machine-output.md#log)) |
-| 配送失敗と完了境界の結合 | J13 | [MachineBoundaryTests](../tests/Unextract.Cli.Tests/MachineBoundaryTests.cs) は各I/O直前に既存fakeの呼び出し記録を取り込み、run配送→処理→当該ファイルのclose→log write/flush→stdout write/flush→次のopenと、Prepared終了後のresultを同じ時系列で確認。両操作/両モードのrun・先頭/途中/最終entry・resultにwrite/部分write/flush失敗を注入し、後続非接触・失敗先の非再利用・未終端行、配送失敗対象を含む件数とDIRECTORY/選択外/後続0件の境界を確認。STOPPED配送失敗のpossibly_deletedと開始有無、両出力先/報告の失敗、Prepared closeとの例外競合、終端resultと実終了コードの食い違い・ログclose失敗も確認。target削除は模擬で、実パイプ消失の観測はE2Eが担う ([出力先](spec/machine-output.md#destinations)、[result](spec/machine-output.md#result)、[完了境界](spec/machine-output.md#boundary)) |
-| 機械出力の通常/publish exe | J14〜J16 | [MachineOutputE2ETests](../tests/Unextract.E2E.Tests/MachineOutputE2ETests.cs) は両操作/両モードの分類・件数・終了コード、ASCII/LF、生のnameとUTF-8/CP437/Cf/補助平面、空ZIP/全DIRECTORY、ログとのbyte一致を確認。JSON→UTF-8 entries→deleteで同サイズ変更を再検証し、選択外と未処理を区別する。Prepare失敗 (`--log NUL` を含む) ではrunなし・削除0件・作成後ログのresultを確認。CRC異常のFATAL/STOPとFast非読取、実共有拒否のDELETE_FAILEDと後続削除も確認 ([レコード](spec/machine-output.md#records)、[result](spec/machine-output.md#result)) |
-| exe実行中のログ保持・共有 | J17〜J18 | 同じE2EのJ17はtarget内ログのDELETE_FAILED・非削除、後続削除と終了後の解放を確認。J18はstdoutのdrainを止め、別読取ハンドルからrunとentryのLFを観測して、ログ先行・実行中の可視性・書込/DELETE access拒否を確認し、drain再開後に全byteを照合する。削除指示は製品経路だけで、通常fixtureは保存 ([実行ログ](spec/machine-output.md#log)) |
-| 実パイプ切断の観測 | J19 | 同じE2EのJ19はrunのLF受信と別ハンドルからのログentry観測を同期点にstdoutの読み手をcloseする。途中で検出した場合はOUTPUT_FAILED/終了1・後続未処理、非検出時は承認範囲の完走を検証し、ログの最後のentry/result・countsと実削除範囲を照合する。終端配送だけの失敗では記録済resultと実終了コードを区別する。検出自体を全環境のassertにせず、観測条件は[OPEN_ISSUES](OPEN_ISSUES.md#observations)へ記す ([出力先](spec/machine-output.md#destinations)、[result](spec/machine-output.md#result)) |
-| exe・対話 | X | [E2ETests](../tests/Unextract.E2E.Tests/E2ETests.cs)、[PtyConfirmationTests](../tests/Unextract.E2E.Tests/PtyConfirmationTests.cs) |
-| 実端末・実測 | M / L18 | [手動手順](MANUAL_TESTS.md)、[唯一の状態更新先](OPEN_ISSUES.md#manual-status) |
+| ASCII/LFのシリアライズ | J08 | [MachineOutputTests](../tests/Unextract.Cli.Tests/MachineOutputTests.cs) |
+| 同期配送・出力失敗先の非再利用 | J09 | [MachineOutputWriterTests](../tests/Unextract.Cli.Tests/MachineOutputWriterTests.cs) |
+| ログの新規作成・実共有 | J10 | [ExecutionLogTests](../tests/Unextract.Cli.Tests/ExecutionLogTests.cs) |
+| Core型からv1レコードへの対応 | J11 | [MachineRecordTests](../tests/Unextract.Cli.Tests/MachineRecordTests.cs) |
+| CLIの機械経路・ログ所有・終端 | J12 | [MachineCliTests](../tests/Unextract.Cli.Tests/MachineCliTests.cs) |
+| 配送失敗と完了境界の結合 | J13 | [MachineBoundaryTests](../tests/Unextract.Cli.Tests/MachineBoundaryTests.cs) |
+| 機械出力のexe (通常build・publish版)、実行中のログ保持、実パイプ切断の観測 | J14〜J19 | [MachineOutputE2ETests](../tests/Unextract.E2E.Tests/MachineOutputE2ETests.cs)。J19の観測条件は[OPEN_ISSUES](OPEN_ISSUES.md#observations) |
+| exe・対話 | X | [E2ETests](../tests/Unextract.E2E.Tests/E2ETests.cs)、[PtyConfirmationTests](../tests/Unextract.E2E.Tests/PtyConfirmationTests.cs) (X28・X29)、[PtyConsoleTests](../tests/Unextract.E2E.Tests/PtyConsoleTests.cs) (X30・X31)、[InterruptE2ETests](../tests/Unextract.E2E.Tests/InterruptE2ETests.cs) (X32) |
+| 実端末の見え方・GUI受入・DLL導入 | M05・M08・M14・M15 | [手動手順](MANUAL_TESTS.md)、[唯一の状態更新先](OPEN_ISSUES.md#manual-status) |
 
 ### 操作・モード適用の読み方
 
@@ -77,44 +103,37 @@ A05はanalyzeへの--yes/-y/--entries/--dry-run拒否をK系と同じ条件で�
 
 契約は[GUI仕様](spec/gui.md)、配置は[ARCHITECTURE](ARCHITECTURE.md#gui)。画面を変えたときの確認は[下の節](#gui-review)、人間の受入は[M14](MANUAL_TESTS.md#m14)。
 
-[Gui.Tests](../tests/Unextract.Gui.Tests/DeploymentTests.cs)は、通常buildの同梱CLIが入力エラーだけの呼び出しで起動できること、GUIのdepsにCore/Windows/Cliがないこと、固定配置以外のexeへフォールバックしないこと、GUIの出力 (`cli\` を含む) とGUIのdepsにUnRAR.dllが無いこと (同梱しない) を確認する。CLI欠落時の説明表示はSTA上でWPFの実ツリーを作って検証する。fixtureは既存方針どおり保存する。
+[Gui.Tests](../tests/Unextract.Gui.Tests) は、VM・サービスを模擬のrunner・偽CLI・実形式のJSONLで、WPFの表示をSTA上の実ツリーで、CLIとの結合を同梱の実CLIと自作fixtureで確かめる。各クラスの確認内容はクラス冒頭のコメントにある。
 
-[JsonlReceiverTests](../tests/Unextract.Gui.Tests/JsonlReceiverTests.cs)は、byte分割・複数行同時受信、生のUnicode名・64bit length、LF未終端断片、未知フィールド・診断コードの受理と、不正な版・型・順序・必要項目・completed件数の拒否を確認する。正常解析時に省略される未判定件数と、途中終了時の必要項目を区別する。deleteのindex欠番とSTOPPED、internal_errorの不確実性を保持する。
-
-[CliProcessRunnerTests](../tests/Unextract.Gui.Tests/CliProcessRunnerTests.cs)は、実終了と両EOFの独立待機、実終了コード優先・result保持、起動の確実性、終了未確認後の再起動防止、解析だけのキャンセルを模擬adapterで検証する。自作のPowerShell子プロセスでも即時終了・両パイプの大量出力・出力異常後のdrain・stderrの保持制限・キャンセル・result欠落と終了コード不一致を確認する。delete役の子は実削除せず、所有するreleaseファイルで通常終了させる。同梱の実CLIでは、自作ZIPとtargetの空/非空解析をStrict/Fastで実行し、ファイルのパス・サイズ・SHA-256・更新日時の不変を確認する。これらはGUIの削除キュー・終了操作・性能の受入を代替しない。
-
-[ArchiveSearchTests](../tests/Unextract.Gui.Tests/ArchiveSearchTests.cs)は、自作fixtureで非再帰/再帰、ZIP拡張子、メタデータ、hidden/systemのZIP・ディレクトリと実junctionの回避を確認する。ZIPの中身は検索で読まない。内部adapterでは列挙途中の例外、アクセス拒否、走査中の消失・メタデータ失敗、再帰進入前のreparse差替えを注入し、残りの場所が検索されることを確認する。Targetの存在確認は、実際の後からの作成と、確認不能の注入を分けて検証する。通常の属性確認による検索回避を、敵対的な同時変更下のハンドル安全性保証に読み替えない。
-
-[TargetTemplateTests](../tests/Unextract.Gui.Tests/TargetTemplateTests.cs)は、既知変数・最後の拡張子・環境変数等の非展開、空名・不正構文・絶対パス形式・Windows名・dot成分、重複キーの区切りとドライブルートを確認する。[SearchSessionTests](../tests/Unextract.Gui.Tests/SearchSessionTests.cs)は、一括追加対象・個別登録エラー・重複スキップ、親三状態、フィルタ/閲覧と選択の独立、全件/表示中の選択、設定編集・モデル除去、再検索の破棄確認、操作ロック、存在の再評価・保存失敗通知を確認する。[SearchSettingsTests](../tests/Unextract.Gui.Tests/SearchSettingsTests.cs)は、自作設定ファイルと共有拒否を用い、最後の1件だけの保存、破損・読込失敗時の既定値、保存失敗のパス付き通知を確認する。利用者の設定ファイルやACLは変更しない。
-
-[SearchViewTests](../tests/Unextract.Gui.Tests/SearchViewTests.cs)は、STA/Dispatcher上のWPFツリーで、作業一覧 (Archive行の後にそのTarget行が並ぶ1つの仮想化一覧で、行の中に一覧を入れ子にしない) のバインディング、親三状態、表示中の選択操作、行でのSpaceによる選択の切替と矢印による閲覧の分離、Targetエディター (各プリセットと形式エラー、一括追加で全Archiveを解決すること) を確認する。[ViewStateTests](../tests/Unextract.Gui.Tests/ViewStateTests.cs)は、閲覧対象 (詳細欄) が選択・絞り込み・除去・実行中のロックから独立していること (絞り込みで隠れても閲覧を保ちその旨を示す、除去した閲覧中のTargetはそのArchiveの表示へ戻る、選択は変えない)、次の操作の案内と選択の要約の遷移、状態バッジ・行の要約・操作できない理由の表示を確認する。これらは表示専用で、削除計画などの判定は従来どおりであることも確認する。[ScreenRenderTests](../tests/Unextract.Gui.Tests/ScreenRenderTests.cs)は、主な状態 (初期、検索後、Target追加、解析結果、解析失敗、絞り込みで隠れた閲覧、解析中、キャンセル、Fast、削除後の成功・結果が不完全・未実行、通知) を既定寸法・最小寸法・1920×1080の150%/200%相当の論理寸法で描画し、主要部品がウィンドウ内に面積を持つこととバインディングエラーが無いことを確認して、PNGを自作fixtureへ保存する (実装担当の画面確認用。画像差分の判定はしない)。ダイアログも同様に描画する。
-
-[AnalysisQueueTests](../tests/Unextract.Gui.Tests/AnalysisQueueTests.cs)は、模擬runnerと受信器を通した実形式のJSONLで、逐次キュー (Archive順・Target登録順、同時実行1、失敗後の続行、表示フィルタ非依存、Archive/選択/個別の対象範囲)、正常完了だけの採用 (途中entry・終了コード不一致・非互換・未知コードは未採用でDisplayTextの表示変換を通す)、再解析開始時のスナップショット退役と失敗・キャンセルでの非復活、キャンセル後の後続未開始、実行中の設定ロックと閲覧・フィルタの継続、Target不存在の再観測と未実行、モード変更の確認と全結果破棄 (他モードの候補を再利用しない)、64bit lengthの合計、空ZIP・全DIRECTORY、run.selected/受信件数/Target位置の進捗、分類・パスの絞り込みと選択の独立、runnerの拒否によるキュー停止を確認する。同梱の実CLIでも、自作ZIP・targetをStrict/Fastで解析してスナップショットを採用し、ファイルのパス・サイズ・SHA-256・更新日時の不変を確認する。30万entryの一覧がフィルタ後のindexだけを保持し行を作らないこともここで確認する。[AnalysisViewTests](../tests/Unextract.Gui.Tests/AnalysisViewTests.cs)は、STA上のWPFツリーで、閲覧中のTargetの詳細欄の結果一覧 (ウィンドウ内で使える高さを持ち、仮想化され、別の一覧に入れ子にならない)、分類・パス絞り込みとTargetごとの絞り込み状態の保持、Fast警告の表示、解析中だけの進捗とキャンセルをバインディングエラーなしで確認する。大量entryの応答時間・メモリは性能受入で測る。
-
-[DeletionPreparationTests](../tests/Unextract.Gui.Tests/DeletionPreparationTests.cs)は、削除計画の対象固定 (選択中・現モードの正常解析・候補のみ、表示フィルタ非依存、除外と理由、候補0件・不存在・削除実行済みの除外)、確認文の項目 (Target数・最大候補件数・論理サイズ・完全削除・取り消せないこと・Fastの両非保証、削除するTargetの全件一覧、表示フィルタで隠れた選択済みTargetの印と件数、除外の全件)、承認が無い場合にCLI・entries・ログへ触れないこと、承認後の計画の陳腐化 (再解析・モード変更) の拒否を確認する。起動では、渡すモード・絶対パス・entries・ログ、ZIP順の生のFullName、1回の一括内で共通の開始時刻と通し番号、プロセス終了後の所有entriesだけの後始末、確実な未起動・準備失敗 (ログ場所・entries作成失敗・UTF-8化不能) での解析保持と再実行、起動後のエラー終了でのdelete実行済み化と後続停止、後始末失敗が結果を変えないこと、終了未確認・起動成否不明でのentries残置とdelete実行済み化、runnerの同期的な拒否だけを未起動とし実行中の想定外の例外は起動成否不明 (結果不明・entries残置・後続停止) とすること、終了要求でKillせず後続を始めないことを模擬runnerで検証する。直前のdelete結果1件が再解析 (成功・失敗) とモード変更で残り、次に起動したdeleteでだけ置き換わること、後続の未実行・確実な未起動・準備失敗は直近の一括削除の状態として別に表示され直前のdelete結果とログパスを置き換えないこと (後始末の通知もその状態に付くこと)、消費済みスナップショットがセッションの削除候補合計から外れることもここで確認する。entriesのUTF-8実バイト量が上限ちょうどなら許可され、1バイト超過ならCLIを起動せず未開始として後続を止めることもここで確認する。実[EntriesStore](../src/Unextract.Gui/Services/EntriesStore.cs)は、BOMなしUTF-8・LF・生の大小文字/区切り/不可視文字、一意名、所有外ファイルの非削除、共有拒否時の削除失敗通知、部分書込後の後始末を自作fixtureで確認する。実[LogLocation](../src/Unextract.Gui/Services/LogLocation.cs)は、開始時刻+通し番号の名前、同名ログがあるときのGUID付き別名、ファイルを先に作らないこと、作成不能な保存場所を確認する。同梱の実CLIでは、自作ZIP・targetに対し、解析後に一致するようになった非候補を触れずに候補だけを削除し、一時entriesが残らず命名どおりのログが書かれることを確認する (自作fixtureの実削除)。
-
-[DeleteReportTests](../tests/Unextract.Gui.Tests/DeleteReportTests.cs)は、受信できた範囲からの削除結果の表示を確認する。正常終了の削除成功件数と64bitを含むDELETED length合計、`DELETE_FAILED`のみの終了1、STOP (停止理由・possibly_deleted・表示変換)、`run`なしの削除0件、`run`のみ・先頭/中間/最後のentryでの途絶、index欠番を数値+1で扱わないこと、次の候補が無い場合に不明対象を作らないこと、`internal_error`の`deletion_started`の真偽による違い、解析後のZIPの並べ替え・エントリ数変化では1件を特定せず未受信の承認候補を結果不明とし、CLIがentry_nameで報告した対象だけを名指しすること、変化が見えない場合もCLIの報告を解析時順の推定より優先すること、承認していないentry_nameの結果不明、entry_nameの無い`result.error.possibly_deleted`の表示、非互換版・読めない行・重複index・stdout読取失敗・実終了未確認・承認範囲外の出力 (selected不一致・承認外の名前) の原因別の「結果不明」、runを受信していない場合のログ未確認、実終了コードとresultの食い違い、run.targetの差の表示のみを模擬出力で確認する。[DeletionPreparationTests](../tests/Unextract.Gui.Tests/DeletionPreparationTests.cs)は、これらのVM反映 (delete実行済み・スナップショット消費・後続の未実行・ログパス表示と作成未確認の明示・自動再試行や再解析をしないこと) を確認する。[AnalysisViewTests](../tests/Unextract.Gui.Tests/AnalysisViewTests.cs)は、実行中のdeleteへ閉じる要求を2回出してもKillも終了もせず、待機文言を出し、現在のTarget完了後に後続を始めず閉じることと、解析中の終了要求がキャンセルを経て閉じることを実ウィンドウで確認する。GUIクラッシュ・OS強制終了・電源断後の挙動は保証対象外で、テストしない。
-
-[IntegrationTests](../tests/Unextract.Gui.Tests/IntegrationTests.cs)は、同梱の実CLIと自作GUID fixtureで、Fastの削除 (同サイズで内容が違うファイルは削除され、サイズが違うファイルは残る。内容の一致は保証しない)、解析後に変更されたファイルをStrictが残して残りだけ削除すること、同一Archiveの2 Targetが登録順で連番ログ (`-001`・`-002`、共通の開始時刻) を残すこと、親子Targetが重複して指す同じファイルの2回目をエラーにしないこと、RAR (生成器) をGUIの経路で解析・削除できること (同梱CLIの複製の隣に採用版のDLLを置いた自作の配置) と、DLLの無い同梱CLIではRARの解析が失敗し、CLIの説明 (置き場所と対処) が失敗の詳細になることを確認する。いずれも一時entriesは残らない。fixtureは保存し、テストからは削除しない。
-
-[PerformanceTests](../tests/Unextract.Gui.Tests/PerformanceTests.cs)は、ZIPのエントリ数上限 (100,000件、[ZIP](spec/zip.md)) の模擬結果を使い、JSONL受信 (4 KiB単位)、10 Target分の採用・保持メモリ・絞り込み・削除計画の作成、STA上のWPFでの詳細の繰返し切替・スクロール・絞り込みの応答を測る。[LargeSessionPerformanceTests](../tests/Unextract.Gui.Tests/LargeSessionPerformanceTests.cs)は、10,000 Archive×3 Targetの作業一覧 (一括追加、初回表示、絞り込み、すべて選択/解除、個別とArchive単位の選択、詳細の切替、スクロール、モード変更)、解析の進捗を受信している間の詳細切替・絞り込み、自作fixtureの10,000 ZIPの再帰検索を測り、プロセスメモリを出力する。通常の選択・詳細切替・絞り込みは1秒以内を目標として判定し、検索・受信などは緩い上限とする。実測値はテスト出力へ書く (この環境の値であり、実データの性能保証や対応件数の上限ではない。メモリ値は同じテストホストで並行するテストを含む)。描画 (Opacity 0のウィンドウ) とレイアウトは測るが、実GPUでの描画・操作の体感は[手動確認](MANUAL_TESTS.md)の対象。削除は行わない。
-
-[GuiDataRootTests](../tests/Unextract.Gui.Tests/GuiDataRootTests.cs)は、UI E2E専用の保存先切替 (環境変数 `UNEXTRACT_GUI_TEST_DATA_ROOT`、合成ルートだけが読む) の決定を確認する。未設定は従来の `%LOCALAPPDATA%\unextract` のまま、絶対パスの既存ディレクトリは `<root>\settings.json` と `<root>\logs`、空文字・相対パス・不存在・ファイルは通常の保存先へフォールバックせずエラー (起動中止) とする。これは利用者向け機能ではない。[SearchViewTests](../tests/Unextract.Gui.Tests/SearchViewTests.cs)は、Tab順が視覚順に沿うこと (入力欄 → 検索 → フォルダーを選択 → サブディレクトリ → モード (2つのラジオで1停止) → 絞り込み → 一括追加 → 選択の変更)、UI E2Eが操作する要素の自動化用IDと一覧の行・チェックボックスの名前、ダイアログの自動化用IDを確認する。
+| 領域 | クラス |
+|---|---|
+| 配布の構成 (同梱CLI・依存・UnRAR.dllを同梱しないこと) | [DeploymentTests](../tests/Unextract.Gui.Tests/DeploymentTests.cs) |
+| JSONLの受信・CLIプロセスの寿命 | [JsonlReceiverTests](../tests/Unextract.Gui.Tests/JsonlReceiverTests.cs)、[CliProcessRunnerTests](../tests/Unextract.Gui.Tests/CliProcessRunnerTests.cs) |
+| 検索・Target・設定 | [ArchiveSearchTests](../tests/Unextract.Gui.Tests/ArchiveSearchTests.cs)、[TargetTemplateTests](../tests/Unextract.Gui.Tests/TargetTemplateTests.cs)、[SearchSessionTests](../tests/Unextract.Gui.Tests/SearchSessionTests.cs)、[SearchSettingsTests](../tests/Unextract.Gui.Tests/SearchSettingsTests.cs) |
+| 作業一覧・閲覧・Tab順・自動化ID (STA) | [SearchViewTests](../tests/Unextract.Gui.Tests/SearchViewTests.cs)、[ViewStateTests](../tests/Unextract.Gui.Tests/ViewStateTests.cs) |
+| 画面の配置制約の正本 (全状態×寸法とダイアログ、STA) | [ScreenRenderTests](../tests/Unextract.Gui.Tests/ScreenRenderTests.cs)。描画は毎回、PNGの保存は `UNEXTRACT_GUI_SHOTS` 指定時だけ ([画面確認](#gui-review)) |
+| 解析キュー・結果表示・終了操作 | [AnalysisQueueTests](../tests/Unextract.Gui.Tests/AnalysisQueueTests.cs)、[AnalysisViewTests](../tests/Unextract.Gui.Tests/AnalysisViewTests.cs) |
+| 削除計画・起動・結果表示 | [DeletionPreparationTests](../tests/Unextract.Gui.Tests/DeletionPreparationTests.cs)、[DeleteReportTests](../tests/Unextract.Gui.Tests/DeleteReportTests.cs) |
+| 同梱の実CLIとの結合 (Fast・Strict・連番ログ・RAR) | [IntegrationTests](../tests/Unextract.Gui.Tests/IntegrationTests.cs) |
+| 性能 (模擬データ。実測値はテスト出力) | [PerformanceTests](../tests/Unextract.Gui.Tests/PerformanceTests.cs)、[LargeSessionPerformanceTests](../tests/Unextract.Gui.Tests/LargeSessionPerformanceTests.cs) |
+| UI E2E専用の保存先の切替 | [GuiDataRootTests](../tests/Unextract.Gui.Tests/GuiDataRootTests.cs) |
 
 [UI E2E](../tests/Unextract.Gui.UiTests)は、FlaUI UIA3とxUnitで、配布形態のGUI (publishした `unextract-gui.exe`) を別プロセスとして起動し、UI Automation経由で操作・観測する。製品はFlaUIを参照しない。既存のSTA上のWPFテストを置き換えるものではない。範囲は次のとおり。
 
 - Archive単位のまとめ選択 (作業一覧の行のチェック) と表示中の選択操作、閲覧 (詳細欄) と一括選択の独立 (絞り込みで隠れた閲覧対象、閲覧中のTargetの除去)、隠れた選択済みTargetの確認画面での印・件数と偽CLIの記録 (entriesに含まれる)、Target編集ロックと削除実行済みTargetの再解析まで続くロック、再検索の確認、Fast警告とモード変更の確認・Fastの両非保証の再表示、削除除外の理由と既定ボタン (Enter・Escで偽CLIが起動されない)、削除できるTargetが無いときの理由の一覧。
 - 失敗・結果不明の画面 (偽CLIの異常出力で到達させる): 解析失敗の詳細、`DELETE_FAILED`での停止と後続の未実行、未知の版による結果不明とログの案内、出力の途絶による不完全な結果。
 - キーボード操作 (Tab順が視覚順でウィンドウ自体に止まらないこと、モードは1停止位置で矢印でも同じ確認を経て変わること、[基本の流れ](spec/gui.md#quality)の全行程を明示承認までキーボードだけで行うこと、Target設定のEnter・Esc・不正テンプレート)。
-- 主要部品がウィンドウ内にあること、状態別×寸法別の画面写真 (既定・最小・1920×1080の150%/200%相当の論理寸法。自作fixtureの `shots`、実装担当の画面確認用。差分比較はしない)、不可視文字・260文字を超えるパスの表示 (読取専用のテキスト欄の値も含む)、実行中終了 (解析のキャンセル、deleteは現在Targetだけ完了して後続を起動しない)、保存フォルダー操作 (保存先の案内、フォルダー選択ダイアログのEsc)。
+- 起動時の寸法で主要部品がウィンドウ内にあること (寸法は変えない。ウィンドウのDPIを出力する。状態×寸法の配置は上のScreenRenderTests)、不可視文字・260文字を超えるパスの表示 (読取専用のテキスト欄の値も含む)、実行中終了 (解析のキャンセル、deleteは現在Targetだけ完了して後続を起動しない)、保存フォルダー操作 (保存先の案内、フォルダー選択ダイアログのEsc)。
 
 - 実CLIの正常系1本 (配布物と自作GUID fixtureで、検索 → Strict解析 → 確認 → 削除。MATCHEDだけが消え、命名どおりのログができ、一時entriesが残らない)。
 
-各テストのGUIは、一意なfixtureをデータルート・`TMP`/`TEMP`・偽CLIシナリオにして起動する。全体の前後で利用者の `%LOCALAPPDATA%\unextract` が変わらないことを、読み取りだけで確認する。待機は期限付きの条件確認で、固定sleepは否定の確認の短い待ちだけに使う。入力は原則UIAのパターンで、実マウス・実キーはキーボード操作とクリックの確認 (モードのラジオボタンなど) に限り、効果が見えるまで再試行する。後始末はGUIを強制終了せず、偽CLIの解放ファイルを作ってから通常終了を要求し、終了しなければプロセスIDを報告して失敗とする。fixtureはテストから削除しない。
+各テストのGUIは、一意なfixtureをデータルート・`TMP`/`TEMP`・偽CLIシナリオにして起動する。全体の前後で利用者の `%LOCALAPPDATA%\unextract` が変わらないことを、読み取りだけで確認する。待機は期限付きの条件確認で、固定sleepは否定の確認の短い待ちだけに使う。入力は原則UIAのパターンで、実マウス・実キーはキーボード操作とクリックの確認 (モードのラジオボタンなど) に限り、効果が見えるまで再試行する。1秒を超えた待機は待った対象とともにテスト出力に書き、タイムアウトには待機中に起きた例外の種類と回数を含める。各テストは起動したGUIのfixtureと結果ディレクトリをテスト出力に書く。
+
+合否と失敗時の診断: UI E2Eは全件1回の成功で合格とし、再試行で合格にせず、1回の失敗も不具合として扱う。テスト本体が失敗すると ([UiFact/UiTheory](../tests/Unextract.Gui.UiTests/UiFact.cs) が本体の直後に呼ぶ)、GUIを閉じる前に、結果ディレクトリ (`run-gui-ui-tests.ps1` が渡す `UNEXTRACT_UI_RESULTS`。[標準の検証](#verify)) の `diagnostics\<テスト名>-<id>\` へ、デスクトップ全体の画面、GUIプロセスの全トップレベルウィンドウのUIAの木、偽CLIのシナリオと呼び出し記録、GUIのデータルート (設定・ログ) を保存する。後始末は、偽CLIの解放ファイルを作ってから通常終了を要求する。終了しなければテストを失敗にしてプロセスIDを報告し、診断を保存してから、そのテストが起動したプロセスツリーだけを強制終了して後続のテストへの影響を断つ。診断には期限があり、取得に失敗しても強制終了は省かない。終了を確認できなければ、残ったfixtureのパスも報告する。
 
 [偽CLI](../tests/Unextract.Gui.FakeCli)は、シナリオファイル (環境変数 `UNEXTRACT_FAKE_CLI_SCENARIO`) の応答をoperation・archive・targetで選び (`max_uses` あり)、JSONL v1の行をそのまま書く。解放ファイルを待つことで「実行中」を決定的に作り、受け取った引数とentriesの内容を記録する。ZIP・targetの読み書きと削除・改名は一切しない。`--log` が渡されたときは本物と同じく新規作成して同じ行を書く。シナリオ未指定、または一致する応答がなければ何も書かず終了コード3。配布物には入れない。[FakeCliTests](../tests/Unextract.Gui.UiTests/FakeCliTests.cs)は非UIで、偽CLIの正常系の出力 (Strict/Fastの解析、delete) が、同じ自作fixtureを同梱の実CLIで実行したJSONLと同じレコード (種別・フィールド・型・値) であることと、偽CLIの記録・解放待ち・ログを確認する。
 
-UI E2Eはロックされていない対話デスクトップを必要とし、実行中は人がマウスとキーボードに触れない。最小化したリモートデスクトップ、サービスセッション、ほかのUIテストとの同時実行は対象外。通常の `dotnet test unextract.sln` では実行されず (`dotnet build unextract.sln` ではビルドされる)、次のスクリプトだけが実行する。スクリプトは配布物と偽CLI入りの複製をOS tempへ作り、パスを環境変数 (`UNEXTRACT_UI_GUI_PACKAGE`・`UNEXTRACT_UI_FAKE_PACKAGE`) で渡し、0件の実行を失敗とし、環境変数を復元して自作tempだけを後始末する。環境変数が無ければテストは失敗する (前提不成立にしない)。配布スクリプトを変えたときはUI E2Eも再実行する。UI E2Eの合格は、色・フォーカス枠・省略表示・DPIの目視確認や、CLIの安全性・実データでの性能の代替ではない。
+UI E2Eは[標準の検証](#verify)の最後の段で、その前提 (ロックされていない対話デスクトップなど) に従う。通常の `dotnet test unextract.sln` では実行されず (`dotnet build unextract.sln` ではビルドされる)、次のスクリプトだけが実行する。スクリプトは配布物と偽CLI入りの複製をOS tempへ作り、パスを環境変数 (`UNEXTRACT_UI_GUI_PACKAGE`・`UNEXTRACT_UI_FAKE_PACKAGE`) で渡し、0件の実行を失敗とし、環境変数を復元して自作tempだけを後始末する。環境変数が無ければテストは失敗する (前提不成立にしない)。UI E2Eの合格は、色・フォーカス枠・省略表示・DPIの目視確認や、CLIの安全性・実データでの性能の代替ではない。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui-ui-tests.ps1
@@ -140,12 +159,12 @@ STA上でWPFのウィンドウを作るGui.Testsのクラス (AnalysisViewTests�
 
 画面・文言・寸法・状態の表示を変えたら、機能テストに加えて、実装者が実際の画面を見て評価し、明らかに使いづらい点を直してから先へ進む。見た目・操作性の問題を人間の確認待ちとして残さない。人間の確認はその後の受入 ([M14](MANUAL_TESTS.md#m14)) である。
 
-- 写真: UI E2Eの `LayoutUiTests` が配布物を操作して状態別×寸法別の写真を各fixtureの `shots` (`tests/Unextract.Gui.UiTests/bin/<構成>/net10.0-windows/fixtures/` 配下) へ保存し、STA描画の `ScreenRenderTests` も同様にGui.Testsのfixtureへ保存する。リポジトリに入れず、掃除は `clean-test-fixtures.ps1` による。写真を開いて確認し、写真で判断できない操作感 (スクロール、フォーカスの移動、閲覧の切り替え) は配布物を自作fixtureで実際に操作する。画像差分の自動判定はしない。
+- 写真: STA描画の `ScreenRenderTests` (と `SearchViewTests` の作業一覧) が全状態×寸法とダイアログを撮る。環境変数 `UNEXTRACT_GUI_SHOTS` に fixture の外の絶対パスを指定して `dotnet test tests/Unextract.Gui.Tests --filter "FullyQualifiedName~ScreenRenderTests"` を実行すると、そこへPNGを保存する (通常の実行では描画だけを行い保存しない)。STAで描画できないOSのメッセージボックス (モード変更・再検索の確認) は `run-gui-ui-tests.ps1 -Shots` が既存のUI E2Eの中で結果ディレクトリの `shots` へ撮る。リポジトリに入れない。写真を開いて確認し、写真で判断できない操作感 (スクロール、フォーカスの移動、閲覧の切り替え) は配布物を自作fixtureで実際に操作する。画像差分の自動判定はしない。
 - 状態 (画面構成を変えたらその構成で同じ状態を撮る): 初期 (未検索)、検索0件・検索の通知、Archive多数、Archive・Targetの閲覧、Target設定 (各プリセット・不正テンプレート・一括追加)、解析の準備中・進捗、解析結果 (Strict・Fast、分類・パスの絞り込み)、解析失敗・キャンセル、モード変更の確認、Fast警告、削除確認 (除外あり・全Target除外・隠れた選択・Fast)、削除中・終了待機、削除後 (成功・`DELETE_FAILED`・未実行・途絶・結果不明)、再検索の確認、通知の展開、長いパス・不可視文字。
 - 寸法: 既定、最小、1920×1080の画面を150%・200%で使うときの作業領域に相当する論理寸法。OSの表示拡大率は実装者が変更しない (利用者環境の設定変更になる)。実際の拡大率とモニター間の移動はM14で扱う。
 - 評価観点 ([利用品質](spec/gui.md#quality)の具体化): (1) 流れ — 基本の流れを説明なしで完走でき、次の操作と操作できない理由が分かる。(2) 情報 — 各Targetの状態 (未解析・解析中・解析済み・失敗・キャンセル・delete実行済み・結果不明)、候補件数・候補サイズが見分けられ、削除対象・除外・モードを取り違えず、Fastの非保証が埋もれない。(3) レイアウト — 主要な情報と操作が過度なスクロールなしに見え、入れ子のスクロールで結果が隠れず、文字欠け・重なり・ボタンの切れ・不要な横スクロールが無く、長いパスの全文を確認できる。(4) 操作 — 関連する操作がまとまり、ラベルが動作を表し、削除を他の操作と取り違えにくく、キーボードだけで完走でき、Tab順が視覚順でウィンドウ自体に止まらず、フォーカス枠が見え、既定の操作は安全側。(5) 文言 — 用語とCLIの分類名が画面間で揃い、エラー・通知が原因と次の行動を示す。
 - 指摘の扱い: 重大 (削除対象・結果・モードを誤認し得る、操作を完了できない、必要な情報が見えない) と中 (明らかに使いづらい、上の観点を満たさない) は直して0件にし、影響する全状態を撮り直す。軽微 (好みの範囲) は直すか、残す理由を記録する (現行で意図して残した点は[画面構成の判断](RATIONALE.md#gui-layout))。契約を変えないと解決できない指摘は製品判断として報告する。
-- 回帰: 構造を変えたらUI E2Eの観測点 (自動化ID・名前・操作手順) を新しい構成へ移してよいが、上のUI E2Eの範囲の各要件を観測し続け、件数ではなく要件の網羅で判定する。状態・安全性の期待値を緩めず、Skipで通さない。状態・受信・大量表示を変えたら性能試験も実行する。最終版ではsolution全体、性能試験、UI E2E全件の連続3回成功、publish版E2E、GUI配布スモークを確認する。
+- 回帰: 構造を変えたらUI E2Eの観測点 (自動化ID・名前・操作手順) を新しい構成へ移してよいが、上のUI E2Eの範囲の各要件を観測し続け、件数ではなく要件の網羅で判定する。状態・安全性の期待値を緩めず、Skipで通さない。引き渡しは[標準の検証](#verify)の合格で判定する (性能試験・UI E2E全件・publish版E2E・GUI配布スモークを毎回含む。UI E2Eは全件1回の成功で合格とし、再試行で合格にしない)。
 
 <a id="hooks"></a>
 ## フックと失敗注入
@@ -189,7 +208,7 @@ R系列は既定上限ちょうど/+1と小さな注入値の双方を扱う。�
 
 Z系列は予約名の成分・拡張子/空白/大小文字、ZIP内のcase/file-dir/親file衝突、種別と区切りの矛盾、ZIP64/DD/調整済SFX/末尾ごみと未調整SFXを区別する。T系列は8.3生成とcase-sensitive設定の前提不成立を成功扱いしない。属性の未知ビットも既知許可ビットとの組合せで確認する。
 
-L系列はUTF-8/BOM、UTF-16/32 BOM、不正UTF-8、空/BOMのみ、LF/CRLF混在と末尾改行、行途中CR、trimなし、重複の両行番号、未知/大小文字/区切りヒント、dir/暗黙dir、コメント/glob無し、境界、最後の行の誤り、転記不可文字を確認する。入力のUTF-16拒否とPowerShellの実保存形式L18は別である。
+L系列はUTF-8/BOM、UTF-16/32 BOM、不正UTF-8、空/BOMのみ、LF/CRLF混在と末尾改行、行途中CR、trimなし、重複の両行番号、未知/大小文字/区切りヒント、dir/暗黙dir、コメント/glob無し、境界、最後の行の誤り、転記不可文字を確認する。入力のUTF-16拒否と、PowerShellが実際に保存する形式 (X31) は別である。
 
 O/X系列はカテゴリー内ZIP順、0件カテゴリーの行省略と合計への掲載、モード別カテゴリー、FATALの判定済み/原因/未判定、stdout/stderr所属、非対話stdinにyを書いても中止、STOP前の部分削除、正常exe/publish exeの転記・日本語・CP437を確認する。生の危険文字をソースへ入れずescape fixtureで作る。
 
@@ -200,7 +219,7 @@ J系列 ([機械可読出力](spec/machine-output.md)) は引数・診断・clos
 
 以下のE-2・PoC 6の原観測は `606d89c:docs/PLAN_VALIDATION.md` の同名見出しで参照できる。
 
-- ACLはfinallyで復元し、icaclsでDENY残存を確認する。親DACLを途中で変えると継承再適用で子・兄弟のChangeTimeが変わり、狙った対象より先にSTOPし得る。親DELETE_CHILD拒否は操作開始前に設定し、競合で変える対象を限定する。
+- ACLは`AclChanges.Run`で復元し、DENYの残存はテストの失敗として検出する。親DACLを途中で変えると継承再適用で子・兄弟のChangeTimeが変わり、狙った対象より先にSTOPし得る。親DELETE_CHILD拒否は操作開始前に設定し、競合で変える対象を限定する。
 - ADS追加側はDELETEを共有しなければ、製品の削除用ハンドルと共有違反になる。共有R/W/Dを使って、ADSによる最終確認の検出とopen拒否を混同しない。これらは2026-10-02 E-2 (Windows 11 10.0.26300、NTFS、.NET 10.0.12、同一プロセス別ハンドル) のfixture上の観測で、PoC 6には別プロセスの観測もある。
 - メタデータ書き戻しは内容変更を隠せる。A08の現在内容検証でStrict MODIFIEDとFastの契約を確認し、ID/日時だけを一致の証拠にしない。
 - Fast body非読取はCoreのRecordingContentProvider、ThrowOnRead、呼び出し記録でGetContent/Open/target readを直接確認する。CRC計算専用フックはないので、body非読取・CRC期待値非参照からの間接確認と区別する。Winの結果だけをbody/CRCの直接観測と呼ばない。
@@ -228,13 +247,15 @@ RARの系列は[上表](#test-series)のC16とU。偽のソース・セッショ
 <a id="e2e"></a>
 ## E2E・PTY・実行案内
 
-通常のbuild/testコマンドは[ルートREADME](../README.md#ビルドとテスト)、CIの正本は[workflow](../.github/workflows/ci.yml)。dotnet runを使わずビルド済みexeを使う。publishはリポジトリ外へ出し、publish版E2E/PTYの標準は[run-e2e-tests.ps1](../scripts/run-e2e-tests.ps1)。wrapperは自作tempへRelease/win-x64 publish、UNEXTRACT_E2E_EXE設定、E2E全体実行、環境変数復元・cleanupを行う。通常buildの全体検証と配布exe検証を区別する。
+通常のbuild/testコマンドは[ルートREADME](../README.md#ビルドとテスト)、CIの正本は[workflow](../.github/workflows/ci.yml)。dotnet runを使わずビルド済みexeを使う。publishはリポジトリ外へ出し、publish版E2E/PTYは[標準の検証](#verify)の段 ([run-e2e-tests.ps1](../scripts/run-e2e-tests.ps1)) が実行する。wrapperは自作tempへRelease/win-x64 publish、UNEXTRACT_E2E_EXE設定、E2E全体実行、環境変数復元・cleanupを行う。通常buildの全体検証と配布exe検証を区別する。
 
 E2E自身はpublishせず、UNEXTRACT_E2E_EXEがあればそれ、なければ通常build出力exeを使う。見つからなければ失敗で、前提不成立にしない。stdin/stdout/stderrをリダイレクトし、人間向け出力はUTF-8で読む。機械出力の[MachineProcess](../tests/Unextract.E2E.Tests/MachineProcess.cs)はStandardOutput.BaseStreamを読んでASCII/LFを検証し、stdinを開いたままにして入力待ちなしの終了も確認する。J18/J19の同期はレコードのLFを条件にし、sleepだけで再現を決めない。60秒timeoutでprocess treeを終了させ失敗とする。fixtureは出力先fixturesのテスト名+GUIDで、起動前のDeletionGuardも働かせる。
 
-PTYは同一端末にstdout/stderrが流れるため、所属はCore/CLIで別に確認する。X28は実際の警告順序とn中止を担い、y・実端末の字形/折り返し/視認性はMに残す。Porta.PtyはE2E専用依存で製品に追加しない。通常fixtureは保存し[cleanup script](../scripts/clean-test-fixtures.ps1)を使う。PTYだけはprocess tree終了・Dispose後に自作GUID fixtureをcleanupし、失敗を黙殺せず元の例外・terminal outputを保持する。wrapperも自作tempだけを片付け、外部exeや既存bin/objを削除しない。
+PTYは同一端末にstdout/stderrが流れるため、所属はCore/CLIで別に確認する。進捗は結果行の前に (消去の空白・CRとともに) 残るので、結果行を読む前に除く (見え方はM05)。X28は警告順序とn中止、X29はEnter中止とyによる逐次削除、X30はコードページ932/65001での名前の表示と実行後のコードページの復元、X31はコードページ932のコンソールでのWindows PowerShell 5.1の保存形式 (`>`・`Out-File -Encoding utf8`) を担う。X31は保存形式と名前の文字化けを実測して記録し、UTF-16ならL02の拒否、それ以外なら「MATCHEDの2件だけを削除」か「入力エラーで削除0件」のどちらかという安全側の性質だけを判定する。字形・折り返し・視認性はM05/M08に残す。Porta.PtyはE2E専用依存で製品に追加しない。PTYはprocess tree終了・Dispose後にテストを終え、fixtureは共通の削除処理 ([fixture](#fixtures)) が削除する。PTYの後始末の失敗は黙殺せず、元の例外・terminal outputを保持する。wrapperも自作tempだけを片付け、外部exeや既存bin/objを削除しない。
 
-実端末は[MANUAL_TESTS](MANUAL_TESTS.md)、実施状態と手順保留は[OPEN_ISSUES](OPEN_ISSUES.md)。M10/M13は実行前にレビューする。全製品テスト合格はM系や前提不成立を埋めない。
+X32は通常出力 (`delete --yes`) とJSONL (`delete --jsonl --yes --log`) × Strict/Fastで、逐次処理の途中のexeを強制終了し、[中断時の表示と実削除](spec/cli.md#interruption)の性質 (表示したDELETEDは削除済み、表示されない削除は最後の結果の次の1件だけでその候補に限る、JSONLは「stdout ⊆ ログ ⊆ 実削除」) を判定する。stdoutのパイプ容量を超える固定のfixture (一致する小さなファイル512件) で、最初の完全なDELETEDを受け取った後は強制終了まで読まないので、子は末尾のファイルまで進めない。判定はEOFまで回収した完全な行・レコードだけで行い、差が0件か1件かは記録するだけにする。Ctrl+Cの実入力ではなく、最終確認を省く退行は検出できない (S25などの最終確認のテストが担う)。
+
+実端末は[MANUAL_TESTS](MANUAL_TESTS.md)、実施状態は[OPEN_ISSUES](OPEN_ISSUES.md#manual-status)。全製品テスト合格はM系や前提不成立を埋めない。
 
 <a id="acceptance"></a>
 ## 受入条件
@@ -244,7 +265,7 @@ PTYは同一端末にstdout/stderrが流れるため、所属はCore/CLIで別�
 - analyzeは削除能力を持たず全件の分類・非破壊、FATALの判定済み/未判定を確認する。
 - Prepare・entries入力エラー・確認中止で削除0件。旧CLIとdry-runは開始前に拒否する。
 - deleteは1件ずつ1回open、同じハンドルで1回比較 (Strict)・M0全項目・指示・成立確認。選択外、特殊対象、ZIP自身、無関係ファイル、dirを削除しない。
-- DELETE_FAILEDで非削除続行、未知エラーSTOP、親ID/最終パス/事前判定が働く。STOP前の削除は戻らず後続は未処理。指示後STOPは削除された可能性を保持する。
+- DELETE_FAILEDで非削除続行、未知エラーSTOP、親ID/最終パス/事前判定が働く。STOP前の削除は戻らず後続は未処理。指示後STOPは削除された可能性を保持する。強制終了時の表示と実削除は[中断時](spec/cli.md#interruption)のとおり。
 - 共通安全性をFastでも確認し、同サイズ異内容の削除を仕様どおりと判定する。非読取と実測量非計上も確認する。
 - 機械可読出力の完了境界 (`run`前は削除0件、書けなければ先へ進まない)、機械モードの`--yes`必須、`--jsonl`なしの不変性、実行ログとstdoutの一致を確認する。
 - RARでも同じ受入条件を両操作・両モードで確認し、RAR固有の拒否 (Solid・分割・暗号化・SFX・リンク・辞書サイズ)、DLLが利用できないときのRARだけのFATAL (4つの原因ごとの説明と削除0件、target・entriesに触れないこと) とZIPへの無影響、Prepareの内容読み取り用openがデータを読まないこと、`RAR_EXTRACT` 不使用を確認する ([RAR](#rar))。
@@ -252,10 +273,8 @@ PTYは同一端末にstdout/stderrが流れるため、所属はCore/CLIで別�
 
 文書・コメントだけの変更では破壊を伴う実測や全製品テストを新規実行する必要はない。
 
-### 自動テストで代替しない現行要求
+### 観測ケースと手動の受入
 
-L18はWindows PowerShell 5.1の `>` と `Out-File -Encoding utf8` の保存形式を実測する。Get-Content/Set-Contentで形式を作り替えず先頭バイトを記録し、UTF-16ならL02の拒否・UTF-8案内、BOM付きUTF-8ならL01の受理を確認する。native出力の文字化けも記録する。[M13](MANUAL_TESTS.md#m13)は手順レビュー待ちで、L02/X21のBOM拒否をもって完了とはしない。
+S26/S34/S37/S38は観測ケースであり、現在の限定付き結果は[OPEN_ISSUES](OPEN_ISSUES.md#observations)にある。S26は親・祖父母・その上の祖先のそれぞれで、改名成功なら最終パス不一致STOP/非削除、失敗なら通常処理を確認する。S34はDELETED/STOP、DeletePending・終了状態・対象以外の非削除を記録する。S37は成功なら属性SKIPPED、open失敗なら識別確認のDELETE_FAILEDで、いずれも非削除を確認する。S38は属性/tagごとに一致/不一致を記録し、相違があれば事前判定の説明を検討する。未観測を推定でassertの期待値にしない。
 
-S26/S34/S37/S38は観測ケースであり、現在の限定付き結果は[OPEN_ISSUES](OPEN_ISSUES.md#observations)にある。S26は改名成功なら最終パス不一致STOP/非削除、失敗なら通常処理を確認する。S34はDELETED/STOP、DeletePending・終了状態・対象以外の非削除を記録する。S37は成功なら属性SKIPPED、open失敗なら識別確認のDELETE_FAILEDで、いずれも非削除を確認する。S38は属性/tagごとに一致/不一致を記録し、相違があれば事前判定の説明を検討する。未観測を推定でassertの期待値にしない。
-
-M09/M10/M11/M12は必須の確認事項に残す。M09は同時open調査 (設計非依存)、M10は中断後の表示と実削除、M11はメモリマップ経由の書き込み、M12(a)/(b)は近似の祖先改名/read-only open。M10の許容とM11の再現方法は未確立で、製品保証を追加しない。M01〜M08の実端末手順もPTY/E2Eだけでは代替しない。
+手動の受入はM05・M08 (実端末での見え方)、M14 (GUI)、M15 (DLLの導入と実物のRAR) だけである ([手動に残す理由](MANUAL_TESTS.md#manual-purpose))。M09 (同時open) とM11 (書き込み可能なマップ) は受入から外した。M11の限界は[FS限界](spec/filesystem.md#limitations)に残し、未確認として扱う。X31は保存形式の実測を記録するテストで、記録を推定で置き換えない。

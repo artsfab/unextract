@@ -6,6 +6,10 @@ using Unextract.Gui.Services;
 
 namespace Unextract.Gui.Tests;
 
+// The JSONL v1 receiver: byte-split and multi-line chunks, raw Unicode names and 64-bit lengths, an unterminated last fragment,
+// accepted unknown fields and diagnostic codes, and rejected versions, types, order, required fields and completed counts. The
+// undetermined count that a normal analyze omits is told apart from the fields required after an early end. A delete keeps index
+// gaps, STOPPED and the uncertainty of internal_error.
 public sealed class JsonlReceiverTests
 {
     internal static CliJob Job(CliOperation operation = CliOperation.Analyze, CliMode mode = CliMode.Strict) =>

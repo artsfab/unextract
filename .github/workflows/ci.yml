@@ -21,7 +21,7 @@ jobs:
 
       # RAR のテストが使う採用版の UnRAR64.dll を rarlab から取得し、外側の exe と DLL の SHA-256 を照合してリポジトリ外 (runner.temp) に置く
       # (docs/TESTING.md#rar)。DLL はリポジトリにも配布物にも入れない (docs/spec/rar.md#pinning)。取得・照合に失敗したらこのステップで CI を失敗にする
-      # (RAR のテストを成功扱いにしない)。以降のステップ (Test・E2E) は UNEXTRACT_TEST_UNRAR_DLL で DLL を読む。
+      # (RAR のテストを成功扱いにしない)。以降の検証は UNEXTRACT_TEST_UNRAR_DLL で DLL を読む。
       # GITHUB_ENV への追記は BOM を付けない (Windows PowerShell 5.1 の Out-File -Encoding utf8 は BOM を付ける)。
       - name: UnRAR.dll for RAR tests (pinned, outside the repository)
         shell: powershell
@@ -31,20 +31,18 @@ jobs:
           if ([string]::IsNullOrEmpty($dll) -or -not (Test-Path -LiteralPath $dll -PathType Leaf)) { throw 'UnRAR64.dll was not prepared.' }
           [System.IO.File]::AppendAllText($env:GITHUB_ENV, "UNEXTRACT_TEST_UNRAR_DLL=$dll`n")
 
-      # TreatWarningsAsErrors (Directory.Build.props) により、警告が1件でもあればビルドが失敗する。
-      - name: Build
-        run: dotnet build -c Release
+      # 標準の検証 (docs/TESTING.md#verify)。Release ビルド (警告ゼロ)、solution のテスト、publish 版 E2E、GUI の publish とスモークを
+      # ローカルと同じスクリプトで実行する。-Ci は UI E2E だけを除く (GITHUB_ACTIONS=true のときしか受け付けない)。
+      - name: Verify (standard verification without UI E2E)
+        id: verify
+        shell: powershell
+        run: ./scripts/verify.ps1 -Ci
 
-      # テスト出力 (「前提不成立: ...」を含む) をログに残すため、詳細表示のコンソールロガーを使う。
-      - name: Test
-        run: dotnet test -c Release --no-build --logger "console;verbosity=detailed"
-
-      # 配布形態 (単一ファイルの自己完結型 exe。win-x64.pubxml) を publish し、E2E (X 系) を同じテストのままその exe に対して実行する。
-      # 出力先はリポジトリの外 (runner.temp)。
-      - name: Publish (single-file)
-        run: dotnet publish src/Unextract.Cli -p:PublishProfile=win-x64 -o "${{ runner.temp }}\publish"
-
-      - name: E2E test (published exe)
-        env:
-          UNEXTRACT_E2E_EXE: ${{ runner.temp }}\publish\unextract.exe
-        run: dotnet test tests/Unextract.E2E.Tests -c Release --no-build --logger "console;verbosity=detailed"
+      # 成功・失敗を問わず、TRX・診断・summary.txt を成果物として残す。
+      - name: Upload verification results
+        if: always() && steps.verify.outputs.results != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-results
+          path: ${{ steps.verify.outputs.results }}
+          if-no-files-found: warn

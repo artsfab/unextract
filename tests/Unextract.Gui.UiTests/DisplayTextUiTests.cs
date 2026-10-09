@@ -2,12 +2,13 @@ using System.Globalization;
 using System.Text;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
+using Xunit.Abstractions;
 
 namespace Unextract.Gui.UiTests;
 
 // Control, bidirectional-control and other invisible characters (and very long paths) in archive, Target and entry
 // names are shown in the escaped \u{...} form. Test code writes the characters as \u escapes only.
-public sealed class DisplayTextUiTests : UiTestBase
+public sealed class DisplayTextUiTests(ITestOutputHelper output) : UiTestBase(output)
 {
     // Written as code points, not as characters or escapes in the source (see the repository rule on invisible characters).
     private static readonly string Rlo = Char(0x202E), Zwsp = Char(0x200B), Lri = Char(0x2066), Rli = Char(0x2067);
@@ -46,10 +47,10 @@ public sealed class DisplayTextUiTests : UiTestBase
         Assert.True(readOnlyValues > 0, "no read-only text was checked");
     }
 
-    [Fact]
+    [UiFact]
     public void InvisibleCharactersAndVeryLongPathsAreShownEscaped()
     {
-        var ui = Start(kind: "display");
+        var ui = Start();
         string deep = ui.Fixtures;
         for (int i = 0; i < 6; i++) deep = Path.Combine(deep, new string((char)('a' + i), 45));
         deep = Path.Combine(deep, "dir" + Lri + "x");

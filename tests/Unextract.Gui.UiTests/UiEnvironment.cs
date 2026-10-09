@@ -14,6 +14,19 @@ internal static class UiEnvironment
     // The same GUI files with cli\unextract.exe replaced by the fake CLI.
     public static string FakePackage { get; } = Package(FakePackageVariable);
 
+    public const string ResultsVariable = "UNEXTRACT_UI_RESULTS";
+
+    // The results directory of this run (TRX, failure diagnostics), outside the fixtures. Set by run-gui-ui-tests.ps1.
+    public static string Results { get; } = ResultsDirectory();
+
+    private static string ResultsDirectory()
+    {
+        string? value = Environment.GetEnvironmentVariable(ResultsVariable);
+        if (string.IsNullOrEmpty(value) || !Path.IsPathFullyQualified(value) || !Directory.Exists(value))
+            throw new InvalidOperationException($"{ResultsVariable} must name an existing results directory (run scripts\\run-gui-ui-tests.ps1). Value: '{value}'");
+        return value;
+    }
+
     private static string Package(string variable)
     {
         string? value = Environment.GetEnvironmentVariable(variable);
@@ -21,14 +34,6 @@ internal static class UiEnvironment
             !File.Exists(Path.Combine(value, "cli", "unextract.exe")))
             throw new InvalidOperationException($"{variable} must name a GUI package directory with unextract-gui.exe and cli\\unextract.exe (run scripts\\run-gui-ui-tests.ps1). Value: '{value}'");
         return value;
-    }
-
-    // Fixtures live where scripts/clean-test-fixtures.ps1 looks: tests/*/bin/*/*/fixtures. Tests never delete them.
-    public static string NewFixture(string kind)
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "fixtures", "ui-" + kind + "-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(path);
-        return path;
     }
 
     private static readonly nint PerMonitorAwareV2 = -4;

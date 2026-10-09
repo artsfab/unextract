@@ -3,6 +3,9 @@ using System.Text.Json;
 
 namespace Unextract.Cli.Tests;
 
+// J09: 同期配送と出力失敗先の非再利用 (docs/spec/machine-output.md#destinations、#result)。同一 byte 列のログ write/flush → stdout
+// write/flush、借用 stdout を close しないこと、ログ/stdout の write・部分 write・flush の失敗、健全な先だけへの OUTPUT_FAILED、報告の
+// 失敗・全出力不能、終端失敗の後の追加 result の拒否、ログ close 失敗の型と非 retry。各処理段階との結合は J13 (MachineBoundaryTests)。
 public class MachineOutputWriterTests
 {
     private static readonly MachineRunRecord Run = new("delete", "strict", "archive.zip", "C:\\target", 1, 1, false);
