@@ -35,7 +35,7 @@ public sealed class ScreenRenderTests(ITestOutputHelper output)
 
     private static readonly string[] MainParts =
         ["SearchDirectoryBox", "SearchButton", "ChooseFolderButton", "RecursiveCheckBox", "StrictRadio", "FastRadio", "ArchiveFilterBox",
-         "BulkAddButton", "SelectionMenuButton", "ArchiveList", "DetailPanel", "AnalyzeSelectedButton", "DeleteSelectedButton", "NextStepText",
+         "BulkAddButton", "SelectionMenuButton", "ArchiveList", "DetailPanel", "AnalyzeSelectedButton", "PruneDirsCheckBox", "DeleteSelectedButton", "NextStepText",
          "StatusText", "DiagnosticsToggle", "OpenLogFolderButton"];
 
     private sealed record Scene(MainViewModel Model, FakeRunner Runner);
@@ -277,6 +277,7 @@ public sealed class ScreenRenderTests(ITestOutputHelper output)
         scene.Runner.Handler = (job, _) => Task.FromResult(job.Target == model.Archives[1].Targets[0].Path ? Failed(job) : Ok(job, ("a.txt", "MATCHED", 10)));
         await model.AnalyzeSelectedAsync();
         model.ArchiveFilter = "c.zip";
+        model.PruneDirs = true;
         var plan = model.PlanDeletion()!;
         Assert.NotEmpty(plan.Excluded);
         Assert.NotEqual(0, plan.HiddenCount);
@@ -311,7 +312,7 @@ public sealed class ScreenRenderTests(ITestOutputHelper output)
             }
         }
         await ShootDialog(new DeletionConfirmWindow(plan, model.ConfirmationListText(plan)), "20-confirm-fast-hidden-excluded",
-            [.. confirmParts, "FastPanel", "HiddenPanel"], [(780, 660), (720, 460), (960, 516)]);
+            [.. confirmParts, "FastPanel", "HiddenPanel", "PruneDirsText"], [(780, 660), (720, 460), (960, 516)]);
         model.ArchiveFilter = "";
         model.SelectTargets(false, false);
         model.Archives[1].Targets[0].IsSelected = true;
@@ -333,7 +334,7 @@ public sealed class ScreenRenderTests(ITestOutputHelper output)
     private static CliJobResult Interrupted(CliJob job)
     {
         var run = new CliRun("delete", job.ModeValue, job.Archive, job.Target, 2, 1, true);
-        var output = new CliOutput(run, [], null, ProtocolIssue.None, null);
+        var output = new CliOutput(run, [], null, ProtocolIssue.None, null, []);
         return new(CliStartState.Started, true, unchecked((int)0xC0000005), true, true, false, output, "", false, null);
     }
 }

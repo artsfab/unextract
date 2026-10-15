@@ -8,7 +8,7 @@ internal enum CliStartState { BeforeStartFailure, NotStarted, Started, Unknown }
 internal enum ProtocolIssue { None, IncompatibleVersion, InvalidOutput }
 
 internal sealed record CliJob(CliOperation Operation, CliMode Mode, string Archive, string Target,
-    string? Entries = null, string? Log = null)
+    string? Entries = null, string? Log = null, bool PruneDirs = false)
 {
     public string OperationValue => Operation == CliOperation.Analyze ? "analyze" : "delete";
     public string ModeValue => Mode == CliMode.Strict ? "strict" : "fast";
@@ -24,8 +24,8 @@ internal sealed record CliJob(CliOperation Operation, CliMode Mode, string Archi
             Absolute(Entries);
             Absolute(Log);
         }
-        else if (Entries is not null || Log is not null)
-            throw new ArgumentException("解析にはentries・logを指定できません。");
+        else if (Entries is not null || Log is not null || PruneDirs)
+            throw new ArgumentException("解析にはentries・log・prune-dirsを指定できません。");
     }
 
     private static void Absolute(string? path)
@@ -36,18 +36,21 @@ internal sealed record CliJob(CliOperation Operation, CliMode Mode, string Archi
 }
 
 // GUI owns these received values. No CLI/Core assembly types or display-normalized names.
+// PruneDirs is received for delete only; DirsSelected only when PruneDirs is true.
 internal sealed record CliRun(string Operation, string Mode, string Archive, string Target,
-    int EntriesTotal, int Selected, bool EntriesOption);
+    int EntriesTotal, int Selected, bool EntriesOption, bool? PruneDirs = null, int? DirsSelected = null);
 internal sealed record CliEntry(int Index, string Name, bool Directory, long Length, string Status,
     string? SkipReason, CliReason? Reason, bool? PossiblyDeleted);
+// One --prune-dirs directory result. Path is relative to the target and is not an entry name.
+internal sealed record CliDir(string Path, string Status, string? KeepReason, CliReason? Reason, bool? PossiblyDeleted);
 internal sealed record CliReason(string? Step, string Code, int? Win32Error, string Message);
 internal sealed record CliError(string Stage, string? Step, string Code, int? EntryIndex,
     string? EntryName, int? Line, int? Win32Error, bool? PossiblyDeleted, bool? DeletionStarted,
-    string? Message);
+    string? Message, string? DirPath = null);
 internal sealed record CliResult(string Outcome, int ExitCode, IReadOnlyDictionary<string, int>? Counts,
     CliError? Error);
 internal sealed record CliOutput(CliRun? Run, IReadOnlyList<CliEntry> Entries, CliResult? Result,
-    ProtocolIssue Issue, string? IssueMessage)
+    ProtocolIssue Issue, string? IssueMessage, IReadOnlyList<CliDir> Dirs)
 {
     public bool IsCompatible => Issue == ProtocolIssue.None;
 }

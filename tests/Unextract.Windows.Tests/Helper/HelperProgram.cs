@@ -22,6 +22,8 @@ internal static class HelperProgram
                 ["hold-delete-pending", var fixture, var path] => HoldDeletePending(fixture, path),
                 ["try-write", var path] => Try(() => new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete).Dispose()),
                 ["try-rename", var path] => Try(() => File.Move(path, path + ".renamed")),
+                ["try-rename-dir", var path] => Try(() => Directory.Move(path, path + ".renamed")),
+                ["hold-cwd", var path] => HoldCurrentDirectory(path),
                 ["try-open-delete", var path] => TryOpenForDelete(path),
                 _ => Usage(),
             };
@@ -43,6 +45,13 @@ internal static class HelperProgram
         }
 
         return 0;
+    }
+
+    // 別プロセスの作業フォルダー (FILE_SHARE_DELETE を許さないハンドル) を模擬する。終了まで保持する。
+    private static int HoldCurrentDirectory(string path)
+    {
+        Environment.CurrentDirectory = path;
+        return Hold(new MemoryStream());
     }
 
     // 別プロセスが削除を指示してハンドルを保持している状態 (削除保留中、PoC 7 #7)。ヘルパーの終了で対象は消える。

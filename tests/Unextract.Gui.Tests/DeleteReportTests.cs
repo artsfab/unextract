@@ -46,7 +46,7 @@ public sealed class DeleteReportTests
     [Fact]
     public void DeleteFailedOnlyEndWithExitOneIsAnErrorEndWithItsCountsAndFailures()
     {
-        string failed = Line(new { v = 1, type = "entry", index = 5, name = "日本語/失敗.txt", directory = false, length = 8, status = "DELETE_FAILED",
+        string failed = Line(new { v = 2, type = "entry", index = 5, name = "日本語/失敗.txt", directory = false, length = 8, status = "DELETE_FAILED",
             reason = new { step = "dispose", code = "FUTURE_CODE", message = "x" } });
         string text = Run(Delete, 10, 4) + Del("DELETED", 2, 1) + failed + Del("DELETED", 7, 1) + Del("DELETED", 9, 1) +
             Line(Result("completed", 1, deleted: 3, deleteFailed: 1, notSelected: 6));
@@ -65,11 +65,11 @@ public sealed class DeleteReportTests
     [Fact]
     public void StopShowsReasonCountsAndPossiblyDeletedEntriesWithoutGuessingMore()
     {
-        string stopped = Line(new { v = 1, type = "entry", index = 5, name = "stop\u202E.txt", directory = false, length = 8, status = "STOPPED",
+        string stopped = Line(new { v = 2, type = "entry", index = 5, name = "stop\u202E.txt", directory = false, length = 8, status = "STOPPED",
             reason = new { step = "confirm", code = "DELETE_NOT_CONFIRMED", message = "確認できません" }, possibly_deleted = true });
         string result = Line(new
         {
-            v = 1, type = "result", outcome = "stopped", exit_code = 1,
+            v = 2, type = "result", outcome = "stopped", exit_code = 1,
             counts = Counts(deleted: 1, unprocessed: 2, notSelected: 6),
             error = new { stage = "entry", step = "confirm", code = "DELETE_NOT_CONFIRMED", entry_index = 5, entry_name = "stop\u202E.txt",
                 possibly_deleted = true, message = "停止\u2066しました" },
@@ -92,7 +92,7 @@ public sealed class DeleteReportTests
     [Fact]
     public void PossiblyDeletedInResultErrorIsShownEvenWithoutAnEntryName()
     {
-        string result = Line(new { v = 1, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 2, notSelected: 6),
+        string result = Line(new { v = 2, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 2, notSelected: 6),
             error = new { stage = "internal", code = "FUTURE_CODE", entry_index = 5, possibly_deleted = true, deletion_started = false } });
         var report = Create(Approved, Finish(Run(Delete, 10, 4) + Del("DELETED", 2, 1) + result, 1));
         Assert.Equal(DeleteReportKind.WithResult, report.Kind);
@@ -103,7 +103,7 @@ public sealed class DeleteReportTests
     [Fact]
     public void CompatibleOutputWithoutRunMeansNothingWasDeletedAndShowsTheError()
     {
-        string text = Line(new { v = 1, type = "result", outcome = "input_error", exit_code = 1,
+        string text = Line(new { v = 2, type = "result", outcome = "input_error", exit_code = 1,
             error = new { stage = "prepare", code = "ENTRIES_NO_MATCH", line = 3, message = "一致しません" } });
         var report = Create(Approved, Finish(text, 1));
         Assert.Equal(DeleteReportKind.NoRun, report.Kind);
@@ -157,7 +157,7 @@ public sealed class DeleteReportTests
     [Fact]
     public void InternalErrorAfterDeletionStartedUsesTheSameRuleButBeforeItDoesNot()
     {
-        string started = Line(new { v = 1, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 3, notSelected: 6),
+        string started = Line(new { v = 2, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 3, notSelected: 6),
             error = new { stage = "internal", code = "OUTPUT_FAILED", deletion_started = true, message = "出力できません" } });
         var report = Create(Approved, Finish(Run(Delete, 10, 4) + Del("DELETED", 5, 1) + started, 1));
         Assert.Equal(DeleteReportKind.Interrupted, report.Kind);
@@ -212,7 +212,7 @@ public sealed class DeleteReportTests
     [Fact]
     public void AfterAZipChangeTheEntryTheCliReportsIsNamedAndOnlyTheOthersAreUnknown()
     {
-        string result = Line(new { v = 1, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 2, notSelected: 7),
+        string result = Line(new { v = 2, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 2, notSelected: 7),
             error = new { stage = "internal", code = "OUTPUT_FAILED", entry_index = 6, entry_name = "file5", possibly_deleted = true, deletion_started = true } });
         var report = Create(Approved, Finish(Run(Delete, 11, 4) + Del("DELETED", 2, 1) + result, 1));
         Assert.Equal(DeleteReportKind.Interrupted, report.Kind);
@@ -227,7 +227,7 @@ public sealed class DeleteReportTests
     public void WithoutAVisibleZipChangeTheEntryTheCliReportsWinsOverTheAnalysisOrderInference()
     {
         // Last received #2, so the inference alone would name #5. The CLI says #7 was the one in progress.
-        string result = Line(new { v = 1, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 1, notSelected: 6),
+        string result = Line(new { v = 2, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 1, notSelected: 6),
             error = new { stage = "internal", code = "OUTPUT_FAILED", entry_index = 7, entry_name = "file7", possibly_deleted = true, deletion_started = true } });
         var report = Create(Approved, Finish(Run(Delete, 10, 4) + Del("DELETED", 2, 1) + result, 1));
         Assert.Equal(DeleteReportKind.Interrupted, report.Kind);
@@ -243,7 +243,7 @@ public sealed class DeleteReportTests
     [Fact]
     public void AReportedEntryNameThatWasNotApprovedIsAnUnknownResult()
     {
-        string result = Line(new { v = 1, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 2, notSelected: 6),
+        string result = Line(new { v = 2, type = "result", outcome = "internal_error", exit_code = 1, counts = Counts(deleted: 1, unprocessed: 2, notSelected: 6),
             error = new { stage = "internal", code = "OUTPUT_FAILED", entry_index = 3, entry_name = "not-approved", possibly_deleted = true, deletion_started = true } });
         var report = Create(Approved, Finish(Run(Delete, 10, 4) + Del("DELETED", 2, 1) + result, 1));
         Assert.Equal(DeleteReportKind.Unknown, report.Kind);
@@ -274,7 +274,7 @@ public sealed class DeleteReportTests
     [Fact]
     public void IncompatibleOrBrokenOutputIsUnknownWithNoCountsFromPartialContent()
     {
-        foreach (string text in new[] { Line(new { v = 2, type = "run" }), Run(Delete, 10, 4) + Del("DELETED", 2, 1) + "not json\n",
+        foreach (string text in new[] { Line(new { v = 3, type = "run" }), Run(Delete, 10, 4) + Del("DELETED", 2, 1) + "not json\n",
             Run(Delete, 10, 4) + Del("DELETED", 2, 1) + Del("DELETED", 2, 1) })
         {
             var report = Create(Approved, Finish(text, 0));
@@ -287,7 +287,7 @@ public sealed class DeleteReportTests
             Assert.Contains("実行ログで確認してください", report.Detail, StringComparison.Ordinal);
             Assert.DoesNotContain("削除成功", report.Detail, StringComparison.Ordinal);
         }
-        Assert.False(Create(Approved, Finish(Line(new { v = 2, type = "run" }), 0)).LogConfirmed);
+        Assert.False(Create(Approved, Finish(Line(new { v = 3, type = "run" }), 0)).LogConfirmed);
         // Unfinished or unreadable stream: the process end or the output is not confirmed.
         var receiver = new JsonlReceiver(Delete);
         receiver.Feed(Encoding.ASCII.GetBytes(Run(Delete, 10, 4)));
@@ -350,7 +350,7 @@ public sealed class DeleteReportTests
     };
 
     private static object Result(string outcome, int exit, int deleted = 0, int modified = 0, int missing = 0, int deleteFailed = 0, int notSelected = 0) =>
-        new { v = 1, type = "result", outcome, exit_code = exit, counts = Counts(deleted, modified, missing, deleteFailed, notSelected) };
+        new { v = 2, type = "result", outcome, exit_code = exit, counts = Counts(deleted, modified, missing, deleteFailed, notSelected) };
 
     private static CliJobResult Finish(string text, int exit)
     {

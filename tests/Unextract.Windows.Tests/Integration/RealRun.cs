@@ -46,6 +46,14 @@ internal static class RealRun
             IdentityChecked.Add(path);
             return inner.CheckIdentity(path);
         }
+
+        public List<string> DirectoriesOpened { get; } = [];
+
+        public ProbeResult<IDirectoryDeletionHandle> OpenDirectoryForDeletion(string path)
+        {
+            DirectoriesOpened.Add(path);
+            return inner.OpenDirectoryForDeletion(path);
+        }
     }
 
     public sealed record Result(ExitStatus Status, AnalysisResult? AnalysisOrNull, DeleteReport? ReportOrNull, FatalError? PrepareError, string Output, string Error)
@@ -78,7 +86,8 @@ internal static class RealRun
     }
 
     // 実際に削除する実行。確認には answer (既定は y) と答え、その直前に awaiting を呼ぶ。entriesPath は --entries。
-    // hooks.BeforeDisposition の後に guard.Check を必ず呼ぶ (違反なら例外 → そのエントリで STOP し、削除しない)。
+    // hooks.BeforeDisposition (ディレクトリでは BeforeDirectoryDisposition) の後に guard.Check を必ず呼ぶ (違反なら例外 → そのエントリで STOP し、削除しない)。
+    // pruneDirs は --prune-dirs。
     public static Result Delete(
         string zipPath,
         string target,
@@ -87,10 +96,12 @@ internal static class RealRun
         DeleteHooks? hooks = null,
         string? entriesPath = null,
         Action? awaiting = null,
-        string? answer = "y")
+        string? answer = "y",
+        bool pruneDirs = false)
     {
         hooks ??= new DeleteHooks();
         var userBeforeDisposition = hooks.BeforeDisposition;
+        var userBeforeDirectoryDisposition = hooks.BeforeDirectoryDisposition;
         var guarded = new DeleteHooks
         {
             BeforeOpen = hooks.BeforeOpen,
@@ -102,12 +113,20 @@ internal static class RealRun
                 userBeforeDisposition?.Invoke(entry, handle);
                 guard.Check(handle);
             },
+            BeforeDirectoryOpen = hooks.BeforeDirectoryOpen,
+            BeforeDirectoryFinalCheck = hooks.BeforeDirectoryFinalCheck,
+            BeforeDirectoryDisposition = (path, handle) =>
+            {
+                userBeforeDirectoryDisposition?.Invoke(path, handle);
+                guard.Check(handle);
+            },
         };
         var probe = new RecordingDeletionProbe(new WindowsFileSystemProbe());
         var output = new StringWriter();
         var error = new StringWriter();
         var outcome = DeleteCommand.Run(new DeleteCommandRequest(
-            zipPath, target, mode, entriesPath, AssumeYes: false, probe, new ScriptedPrompt(answer, awaiting), Context(null, output, error), Hooks: guarded));
+            zipPath, target, mode, entriesPath, AssumeYes: false, probe, new ScriptedPrompt(answer, awaiting), Context(null, output, error), Hooks: guarded,
+            PruneDirs: pruneDirs));
         Assert.Empty(guard.Violations);
         return new Result(outcome.Status, null, outcome.Report, outcome.PrepareError, output.ToString(), error.ToString()) { Probe = probe };
     }

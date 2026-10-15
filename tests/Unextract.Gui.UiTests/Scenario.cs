@@ -3,12 +3,14 @@ using System.Text.Json;
 
 namespace Unextract.Gui.UiTests;
 
-// Builds JSONL v1 lines (machine-output.md) for the fake CLI. Independent of the GUI's own receiver types.
+// Builds JSONL v2 lines (machine-output.md) for the fake CLI. Independent of the GUI's own receiver types.
 // Output is ASCII (System.Text.Json escapes non-ASCII), like the real CLI. FakeCliShapeTests compares these
 // lines with what the bundled real CLI writes for the same fixtures.
 internal static class Jsonl
 {
-    public static string Run(string operation, string mode, string archive, string target, int entriesTotal, int selected, bool entriesOption) =>
+    // A delete run always carries prune_dirs, and dirs_selected when it is true (`dirsSelected` given).
+    public static string Run(string operation, string mode, string archive, string target, int entriesTotal, int selected, bool entriesOption,
+        int? dirsSelected = null) =>
         Line(w =>
         {
             w.WriteString("type", "run");
@@ -19,6 +21,18 @@ internal static class Jsonl
             w.WriteNumber("entries_total", entriesTotal);
             w.WriteNumber("selected", selected);
             w.WriteBoolean("entries_option", entriesOption);
+            if (operation == "delete") w.WriteBoolean("prune_dirs", dirsSelected is not null);
+            if (dirsSelected is not null) w.WriteNumber("dirs_selected", dirsSelected.Value);
+        });
+
+    // One --prune-dirs directory result (path relative to the target, components joined by "\").
+    public static string Dir(string path, string status, string? keepReason = null) =>
+        Line(w =>
+        {
+            w.WriteString("type", "dir");
+            w.WriteString("path", path);
+            w.WriteString("status", status);
+            if (keepReason is not null) w.WriteString("keep_reason", keepReason);
         });
 
     public static string Entry(int index, string name, string status, long length = 0, bool directory = false,
@@ -74,7 +88,7 @@ internal static class Jsonl
         using (var w = new Utf8JsonWriter(buffer))
         {
             w.WriteStartObject();
-            w.WriteNumber("v", 1);
+            w.WriteNumber("v", 2);
             body(w);
             w.WriteEndObject();
         }

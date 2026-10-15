@@ -18,7 +18,7 @@ internal sealed record MachineProcessResult(int ExitCode, byte[] Output, string 
         {
             using var document = JsonDocument.Parse(line);
             var record = document.RootElement.Clone();
-            Assert.Equal(1, record.GetProperty("v").GetInt32());
+            Assert.Equal(2, record.GetProperty("v").GetInt32());
             return record;
         }).ToArray();
     }

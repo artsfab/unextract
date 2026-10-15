@@ -591,7 +591,7 @@ internal sealed class MachineCliFixture
         var records = Encoding.ASCII.GetString(bytes).Split('\n').SkipLast(1).Select(line =>
         {
             using var json = JsonDocument.Parse(line);
-            Assert.Equal(1, json.RootElement.GetProperty("v").GetInt32());
+            Assert.Equal(2, json.RootElement.GetProperty("v").GetInt32());
             return json.RootElement.Clone();
         }).ToArray();
         return new(status, bytes, stderr.ToString(), records);

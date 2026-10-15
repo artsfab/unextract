@@ -59,7 +59,7 @@ public sealed class CliProcessRunnerTests
     {
         var job = Job(CliOperation.Delete);
         string failure = Change(Entry("DELETE_FAILED"), "reason", System.Text.Json.Nodes.JsonNode.Parse("{\"code\":\"FUTURE\",\"message\":\"表示\"}"));
-        string result = Line(new { v = 1, type = "result", outcome = "completed", exit_code = 1,
+        string result = Line(new { v = 2, type = "result", outcome = "completed", exit_code = 1,
             counts = new { deleted = 0, modified = 0, missing = 0, skipped_special_file = 0,
                 directory = 0, delete_failed = 1, not_selected = 0, unprocessed = 0 } });
         using var child = new FakeChild(Run(job) + failure + result, exit: 1);
@@ -290,7 +290,7 @@ public sealed class CliProcessRunnerTests
     {
         var job = Job(CliOperation.Delete);
         string run = Run(job, 0), result = Completed(job, 0);
-        if (kind == "version") run = Change(run, "v", System.Text.Json.Nodes.JsonValue.Create(2));
+        if (kind == "version") run = Change(run, "v", System.Text.Json.Nodes.JsonValue.Create(3));
         if (kind == "mode") run = Change(run, "mode", System.Text.Json.Nodes.JsonValue.Create("fast"));
         if (kind == "fragment") result = result.TrimEnd('\n');
         var runner = ScriptRunner(Emit(run + result) + "exit 0");

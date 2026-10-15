@@ -8,8 +8,8 @@ public enum CommandKind
     Delete,
 }
 
-// EntriesPath と AssumeYes と LogPath は delete だけ。LogPath は Jsonl の場合だけ。
-public sealed record CommandLineOptions(CommandKind Command, string ArchivePath, string TargetPath, RunMode Mode, string? EntriesPath, bool AssumeYes, bool Jsonl = false, string? LogPath = null);
+// EntriesPath と AssumeYes と LogPath と PruneDirs は delete だけ。LogPath は Jsonl の場合だけ。
+public sealed record CommandLineOptions(CommandKind Command, string ArchivePath, string TargetPath, RunMode Mode, string? EntriesPath, bool AssumeYes, bool Jsonl = false, string? LogPath = null, bool PruneDirs = false);
 
 public sealed record CommandLineParseResult(CommandLineOptions? Options, string? Error)
 {
@@ -25,7 +25,7 @@ public static class CommandLineParser
     public static readonly IReadOnlyList<string> UsageLines =
     [
         "使い方: unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]",
-        "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]",
+        "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--prune-dirs] [--yes|-y] [--jsonl] [--log <file>]",
     ];
 
     public const string DryRunRemoved = "--dry-run は廃止しました。削除せずに結果を確認するには unextract analyze を使ってください。";
@@ -71,6 +71,7 @@ public static class CommandLineParser
         var fast = false;
         var yes = false;
         var jsonl = false;
+        var pruneDirs = false;
 
         for (var i = 1; i < args.Count; i++)
         {
@@ -147,6 +148,20 @@ public static class CommandLineParser
                     entries = args[++i];
                     break;
 
+                case "--prune-dirs":
+                    if (command == CommandKind.Analyze)
+                    {
+                        return CommandLineParseResult.Fail("analyze では --prune-dirs を指定できません");
+                    }
+
+                    if (pruneDirs)
+                    {
+                        return CommandLineParseResult.Fail("--prune-dirs が複数回指定されています");
+                    }
+
+                    pruneDirs = true;
+                    break;
+
                 case "--yes":
                 case "-y":
                     if (command == CommandKind.Analyze)
@@ -203,7 +218,7 @@ public static class CommandLineParser
             return CommandLineParseResult.Fail("--jsonl を指定した delete では --yes または -y が必須です");
         }
 
-        return CommandLineParseResult.Ok(new CommandLineOptions(command, archive, target, fast ? RunMode.Fast : RunMode.Strict, entries, yes, jsonl, log));
+        return CommandLineParseResult.Ok(new CommandLineOptions(command, archive, target, fast ? RunMode.Fast : RunMode.Strict, entries, yes, jsonl, log, pruneDirs));
     }
 
     // オプションの値は次の引数。無い、空、- で始まる場合は値なしとする。

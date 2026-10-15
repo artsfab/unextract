@@ -44,6 +44,13 @@ internal sealed class DeleteHarness : IDisposable
 
     public List<DeleteEntryResult> Notified { get; } = [];
 
+    // --prune-dirs (docs/spec/filesystem.md#prune-dirs)。対象は PruneSet で処理対象 (と Selected の有無) から作る。
+    public bool PruneDirs { get; set; }
+
+    public IReadOnlyList<PruneDirectory>? PruneTargets { get; private set; }
+
+    public List<DirectoryResult> NotifiedDirectories { get; } = [];
+
     public DeleteRun? LastRun { get; private set; }
 
     public FakeNode File(string name, byte[]? content = null) => Fs.AddFile($@"C:\target\{name}", content ?? Hello);
@@ -67,6 +74,7 @@ internal sealed class DeleteHarness : IDisposable
 
         var start = Fs.Calls.Count;
         var comparisons = Fs.ComparisonOpenCount;
+        PruneTargets = PruneDirs ? PruneSet.Build(entries, Selected is not null) : null;
         var run = new DeleteRun(new DeleteRequest(
             entries,
             ContentsOverride ?? Contents,
@@ -78,7 +86,9 @@ internal sealed class DeleteHarness : IDisposable
             Mode,
             (c, t) => Progress.Add((c, t)),
             Notified.Add,
-            Hooks));
+            Hooks,
+            PruneDirectories: PruneTargets,
+            OnDirectoryResult: NotifiedDirectories.Add));
         LastRun = run;
         var report = run.Execute();
 
@@ -86,20 +96,25 @@ internal sealed class DeleteHarness : IDisposable
         Assert.Equal(0, Fs.OpenDeletionHandleCount);
         Assert.Equal(Fs.DeletionOpenCount, Fs.DeletionCloseCount);
         Assert.True(Fs.MaxConcurrentDeletions <= 1);
+        Assert.Equal(0, Fs.OpenDirectoryDeletionHandleCount);
+        Assert.True(Fs.MaxConcurrentDirectoryDeletions <= 1);
         Assert.Equal(1, Fs.OpenHandleCount);
 
         // delete は比較用ハンドルを開かない。パスを使う呼び出しは、各エントリの OpenForDeletion 1回 (と、その失敗時の
-        // CheckIdentity 1回) だけ (docs/TESTING.md#principles の「同じハンドル」)。
+        // CheckIdentity 1回)、各ディレクトリの OpenDirectoryForDeletion 1回 (と失敗時の CheckIdentity 1回) だけ (docs/TESTING.md#principles の「同じハンドル」)。
         var calls = Fs.Calls.Skip(start).ToList();
         Assert.DoesNotContain(calls, c => c.StartsWith("OpenComparison ", StringComparison.Ordinal));
         Assert.Equal(comparisons, Fs.ComparisonOpenCount);
-        foreach (var group in calls.Where(c => c.StartsWith("OpenDeletion ", StringComparison.Ordinal) || c.StartsWith("CheckIdentity ", StringComparison.Ordinal)).GroupBy(c => c))
+        foreach (var group in calls.Where(c => c.StartsWith("OpenDeletion ", StringComparison.Ordinal) || c.StartsWith("OpenDirectoryDeletion ", StringComparison.Ordinal)
+            || c.StartsWith("CheckIdentity ", StringComparison.Ordinal)).GroupBy(c => c))
         {
             Assert.Single(group);
         }
 
         // 結果はエントリの処理ごとに通知され、通知の順と結果の順が一致する (逐次表示、O13)。
         Assert.Equal(report.Results, Notified);
+        Assert.Equal(report.Prune?.Results ?? [], NotifiedDirectories);
+        Assert.Equal(PruneDirs, report.Prune is not null);
         return report;
     }
 

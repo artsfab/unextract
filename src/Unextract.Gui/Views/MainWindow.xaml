@@ -310,14 +310,20 @@
             </Grid>
         </Border>
 
-        <!-- 2. Verification mode for the whole session. One tab stop; arrows or Space change it (with the same confirmation as a click). -->
+        <!-- 2. Session-wide settings: the verification mode (one tab stop; arrows or Space change it, with the same confirmation as a
+             click) and whether delete also removes emptied folders (the CLI prune-dirs option; off, not saved, keeps analysis results).
+             Only the description and the CLI status shrink (trimmed, full text in the tooltip). -->
         <Border Grid.Row="1" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="14,5">
-            <DockPanel>
-                <TextBlock x:Name="CliStatusText" DockPanel.Dock="Right" Text="{Binding CliMessage}" Style="{StaticResource Subtle}" FontSize="12"
-                           VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxWidth="260" Margin="12,0,0,0"
-                           ToolTip="{Binding CliPath}" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" MaxWidth="272" />
+                </Grid.ColumnDefinitions>
                 <TextBlock Text="検証モード" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0" />
-                <StackPanel x:Name="ModeGroup" Orientation="Horizontal" IsEnabled="{Binding IsSettingsEditable}" VerticalAlignment="Center"
+                <StackPanel x:Name="ModeGroup" Grid.Column="1" Orientation="Horizontal" IsEnabled="{Binding IsSettingsEditable}" VerticalAlignment="Center"
                             KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Cycle"
                             PreviewKeyDown="ModeGroupKeyDown" GotKeyboardFocus="ModeGroupGotFocus">
                     <RadioButton x:Name="StrictRadio" Content="Strict（全バイト比較）" Tag="Strict" GroupName="Mode" IsChecked="{Binding IsStrict, Mode=OneWay}"
@@ -325,11 +331,17 @@
                     <RadioButton x:Name="FastRadio" Content="Fast（パスとサイズのみ）" Tag="Fast" GroupName="Mode" IsChecked="{Binding IsFast, Mode=OneWay}"
                                  Click="ModeClicked" />
                 </StackPanel>
-                <TextBlock x:Name="ModeDescriptionText" Style="{StaticResource Subtle}" VerticalAlignment="Center" Margin="16,0,0,0" FontSize="12"
+                <TextBlock x:Name="ModeDescriptionText" Grid.Column="2" Style="{StaticResource Subtle}" VerticalAlignment="Center" Margin="16,0,0,0" FontSize="12"
                            TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
                            Text="アーカイブの内容と全バイト一致したファイルだけを削除候補にします。"
                            Visibility="{Binding IsStrict, Converter={StaticResource VisibleWhen}}" />
-            </DockPanel>
+                <CheckBox x:Name="PruneDirsCheckBox" Grid.Column="3" Content="空になったフォルダーも削除" IsChecked="{Binding PruneDirs}"
+                          IsEnabled="{Binding IsSettingsEditable}" VerticalAlignment="Center" Margin="12,0,0,0"
+                          ToolTip="削除のときだけ使います。ONにすると、削除候補のファイルを含むフォルダーのうち、処理後に空のもの（もとから空のものを含む）もCLIが検証して削除します。" />
+                <TextBlock x:Name="CliStatusText" Grid.Column="4" Text="{Binding CliMessage}" Style="{StaticResource Subtle}" FontSize="12"
+                           VerticalAlignment="Center" HorizontalAlignment="Right" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="12,0,0,0"
+                           ToolTip="{Binding CliPath}" />
+            </Grid>
         </Border>
         <Border x:Name="FastWarning" Grid.Row="2" Style="{StaticResource WarningPanel}" Margin="14,6,14,0"
                 Visibility="{Binding IsFast, Converter={StaticResource VisibleWhen}}">

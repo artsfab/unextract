@@ -315,7 +315,18 @@ public class MachineRecordTests
     {
         var info = Info with { ArchivePath = @"relative\日本語.zip", TargetFinalPath = @"\\?\C:\日本語\u202E", Mode = mode };
         var run = MachineOutput.Run(command, info);
-        Assert.Equal(new MachineRunRecord(operation, modeName, info.ArchivePath, @"C:\日本語\u202E", 5, 2, true), run);
+        // prune_dirs は delete だけ (--prune-dirs なしでも false を書く)。dirs_selected は prune_dirs が true のときだけ。
+        Assert.Equal(new MachineRunRecord(operation, modeName, info.ArchivePath, @"C:\日本語\u202E", 5, 2, true,
+            command == CommandKind.Delete ? false : null), run);
+    }
+
+    [Fact]
+    public void J11_RunCarriesPruneDirsAndSelectedDirectoriesOnlyForPruningDelete()
+    {
+        var info = Info with { PruneDirs = true, DirectoriesSelected = 3 };
+        Assert.Equal(new MachineRunRecord("delete", "strict", info.ArchivePath, ReportText.WithoutDevicePrefix(info.TargetFinalPath), 5, 2, true, true, 3),
+            MachineOutput.Run(CommandKind.Delete, info));
+        Assert.Null(MachineOutput.Run(CommandKind.Analyze, info).PruneDirs);
     }
 
     [Theory]

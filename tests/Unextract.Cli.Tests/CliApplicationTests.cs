@@ -58,6 +58,55 @@ public class CliApplicationTests
 
         public ProbeResult<IdentityCheckInfo> CheckIdentity(string path) => inner.CheckIdentity(path);
 
+        // ディレクトリ削除用ハンドルも実際に開き、削除の指示は記録するだけにする (ファイルと同じ)。
+        public ProbeResult<IDirectoryDeletionHandle> OpenDirectoryForDeletion(string path)
+        {
+            Opened.Add(path);
+            var opened = inner.OpenDirectoryForDeletion(path);
+            return opened.Succeeded ? ProbeResult<IDirectoryDeletionHandle>.Ok(new DirectoryHandle(opened.Value, this)) : opened;
+        }
+
+        private sealed class DirectoryHandle(IDirectoryDeletionHandle inner, SimulatedDeletionProbe owner) : IDirectoryDeletionHandle
+        {
+            private bool _pending;
+
+            public ProbeResult<VolumeFileId> GetVolumeFileId() => inner.GetVolumeFileId();
+
+            public ProbeResult<StandardInformation> GetStandardInformation()
+            {
+                var result = inner.GetStandardInformation();
+                return result.Succeeded && _pending
+                    ? ProbeResult<StandardInformation>.Ok(result.Value with { DeletePending = true })
+                    : result;
+            }
+
+            public ProbeResult<BasicInformation> GetBasicInformation() => inner.GetBasicInformation();
+
+            public ProbeResult<AttributeTagInformation> GetAttributeTagInformation() => inner.GetAttributeTagInformation();
+
+            public ProbeResult<IReadOnlyList<StreamEntry>> GetStreams() => inner.GetStreams();
+
+            public ProbeResult<FileId> GetParentFileId() => inner.GetParentFileId();
+
+            public ProbeResult<string> GetFinalPath() => inner.GetFinalPath();
+
+            public IDirectoryEnumeration Enumerate() => inner.Enumerate();
+
+            public ProbeResult<bool> SetDispositionEx(uint flags)
+            {
+                owner.Dispositions.Add(flags);
+                if (owner.DispositionError != 0)
+                {
+                    return ProbeResult<bool>.Fail(owner.DispositionError, "Disposition");
+                }
+
+                _pending = (flags & 0x1) != 0;
+                return ProbeResult<bool>.Ok(true);
+            }
+
+            public void Dispose() => inner.Dispose();
+        }
+
         private sealed class Handle(IDeletionHandle inner, SimulatedDeletionProbe owner) : IDeletionHandle
         {
             private bool _pending;

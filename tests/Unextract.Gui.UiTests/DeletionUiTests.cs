@@ -1,4 +1,5 @@
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
 using FlaUI.Core.WindowsAPI;
 using Xunit.Abstractions;
@@ -55,6 +56,7 @@ public sealed class DeletionUiTests(ITestOutputHelper output) : UiTestBase(outpu
         Assert.StartsWith("30 bytes（論理サイズの合計", ui.TextOf("DeletionConfirmSize", dialog));
         Assert.DoesNotContain("Fastは内容の一致", body);
         Assert.Null(ui.Find("DeletionConfirmFastWarning", dialog));
+        Assert.StartsWith("フォルダーは削除しません", ui.TextOf("DeletionConfirmPruneDirs", dialog));
         Assert.DoesNotContain(ui.Invocations, i => i.Operation == "delete");
 
         ui.Invoke("DeletionConfirmDeleteButton", dialog);
@@ -71,6 +73,7 @@ public sealed class DeletionUiTests(ITestOutputHelper output) : UiTestBase(outpu
             Assert.Contains("--yes", d.Args);
             Assert.Contains("--jsonl", d.Args);
             Assert.DoesNotContain("--fast", d.Args);
+            Assert.DoesNotContain("--prune-dirs", d.Args);
             Assert.Equal(ui.TempDirectory, Path.GetDirectoryName(d.Option("--entries")));
             Assert.StartsWith("unextract-entries-", Path.GetFileName(d.Option("--entries")), StringComparison.Ordinal);
             Assert.False(File.Exists(d.Option("--entries")), "the temporary entries file is removed after the CLI exits");
@@ -80,6 +83,43 @@ public sealed class DeletionUiTests(ITestOutputHelper output) : UiTestBase(outpu
         Assert.Matches(@"^delete-\d{8}-\d{6}-002\.jsonl$", Path.GetFileName(deletes[1].Option("--log"))!);
         Assert.True(File.Exists(deletes[0].Option("--log")));
         Assert.Empty(Directory.EnumerateFileSystemEntries(ui.TempDirectory));
+    }
+
+    [UiFact]
+    public void TheEmptyFolderSettingIsConfirmedPassedToTheCliAndItsFolderResultsAreShown()
+    {
+        var ui = Start();
+        string a = Path.Combine(ui.Fixtures, "a.zip"), ta = Path.Combine(ui.Fixtures, "out-a");
+        Files.Zip(a, ("d/f1.txt", "x"), ("d/f2.txt", "y"));
+        Directory.CreateDirectory(ta);
+        ui.FakeAnalyze(a, ta, "strict", [new(1, "d/f1.txt", "MATCHED", 10), new(2, "d/f2.txt", "MODIFIED", 10)]);
+        ui.FakeDelete(a, ta, "strict", 2, 1, [new(1, "d/f1.txt", "DELETED", 10)], notSelected: 1, dirs: [new("d", "DIR_KEPT", "NOT_EMPTY")]);
+        ui.Search();
+        ui.BulkAdd(@"{{archive.dir}}\out-{{archive.name}}");
+        ui.AnalyzeSelected();
+
+        // Off by default; switching it on keeps the analysis result.
+        var setting = ui.Get("PruneDirsCheckBox");
+        Assert.Equal(ToggleState.Off, ui.ToggleOf(setting));
+        ui.Toggle(setting);
+        Wait.Until(() => ui.ToggleOf(ui.Get("PruneDirsCheckBox")) == ToggleState.On, "the setting to turn on");
+        Assert.StartsWith("解析済み (Strict)", ui.StateOf(ta));
+
+        var dialog = ui.OpenDeleteConfirmation();
+        Assert.StartsWith("空のフォルダーも削除します", ui.TextOf("DeletionConfirmPruneDirs", dialog));
+        Assert.Contains("もとから空だったものを含む", ui.TextOf("DeletionConfirmPruneDirs", dialog));
+        ui.Invoke("DeletionConfirmDeleteButton", dialog);
+        ui.WaitStatus("削除終了");
+        ui.WaitIdle();
+
+        var delete = Assert.Single(ui.Invocations, i => i.Operation == "delete");
+        Assert.Equal(["d/f1.txt"], delete.EntryLines);
+        int prune = Array.IndexOf(delete.Args, "--prune-dirs");
+        Assert.True(prune > 0 && prune < Array.IndexOf(delete.Args, "--yes"), string.Join(" ", delete.Args));
+        Assert.StartsWith("削除実行済み: 削除完了", ui.StateOf(ta), StringComparison.Ordinal);
+        string detail = ui.DetailOf(ta);
+        Assert.Contains("空のフォルダー: 削除 0 件 / 残した 1 件 / 存在しない 0 件", detail);
+        Assert.Contains("残したフォルダーの理由: 空でない 1", detail);
     }
 
     [UiFact]

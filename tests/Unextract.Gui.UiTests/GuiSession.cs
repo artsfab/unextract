@@ -18,7 +18,8 @@ internal static class Startup
 }
 
 // Polls a condition until it holds, with a deadline; never a fixed sleep. Waits longer than one second are written to the
-// test output with what was awaited; a timeout names the exception types (and counts) seen while polling.
+// test output with what was awaited; a timeout names the exception types (and counts) seen while polling. Both also give the
+// number of probes and the longest single probe, which tells a blocked UI Automation call apart from many quick misses.
 internal static class Wait
 {
     public static readonly TimeSpan Default = TimeSpan.FromSeconds(20);
@@ -33,20 +34,29 @@ internal static class Wait
         var deadline = started + (limit ?? Default);
         var seen = new Dictionary<string, int>();
         Exception? last = null;
+        int probes = 0;
+        var longest = TimeSpan.Zero;
+        string Probes() => $"{probes} probes, longest {longest.TotalSeconds:F1} s";
         while (true)
         {
+            var probeStarted = DateTime.UtcNow;
             try
             {
-                if (probe() is { } value)
+                var result = probe();
+                probes++;
+                if (DateTime.UtcNow - probeStarted > longest) longest = DateTime.UtcNow - probeStarted;
+                if (result is { } value)
                 {
                     var elapsed = DateTime.UtcNow - started;
-                    if (elapsed > Reported) Log?.Invoke($"wait {elapsed.TotalSeconds:F1} s: {what}");
+                    if (elapsed > Reported) Log?.Invoke($"wait {elapsed.TotalSeconds:F1} s ({Probes()}): {what}");
                     return value;
                 }
                 last = null;
             }
             catch (Exception e)
             {
+                probes++;
+                if (DateTime.UtcNow - probeStarted > longest) longest = DateTime.UtcNow - probeStarted;
                 // UI Automation reports transient states (element gone, not ready) as various exception types: retry until the deadline.
                 last = e;
                 seen[e.GetType().Name] = seen.GetValueOrDefault(e.GetType().Name) + 1;
@@ -54,7 +64,7 @@ internal static class Wait
             if (DateTime.UtcNow > deadline)
             {
                 string exceptions = seen.Count == 0 ? "" : "\nExceptions while waiting: " + string.Join(", ", seen.Select(p => $"{p.Key} x{p.Value}"));
-                throw new TimeoutException($"Timed out after {(DateTime.UtcNow - started).TotalSeconds:F1} s waiting for: {what}{exceptions}" +
+                throw new TimeoutException($"Timed out after {(DateTime.UtcNow - started).TotalSeconds:F1} s ({Probes()}) waiting for: {what}{exceptions}" +
                     (last is null ? "" : "\nLast: " + last.Message));
             }
             Thread.Sleep(30);

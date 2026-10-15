@@ -6,10 +6,10 @@ using Unextract.Gui.Services;
 
 namespace Unextract.Gui.Tests;
 
-// The JSONL v1 receiver: byte-split and multi-line chunks, raw Unicode names and 64-bit lengths, an unterminated last fragment,
+// The JSONL v2 receiver: byte-split and multi-line chunks, raw Unicode names and 64-bit lengths, an unterminated last fragment,
 // accepted unknown fields and diagnostic codes, and rejected versions, types, order, required fields and completed counts. The
 // undetermined count that a normal analyze omits is told apart from the fields required after an early end. A delete keeps index
-// gaps, STOPPED and the uncertainty of internal_error.
+// gaps, STOPPED and the uncertainty of internal_error. The --prune-dirs records (run fields, dir) are in PruneDirsGuiTests.
 public sealed class JsonlReceiverTests
 {
     internal static CliJob Job(CliOperation operation = CliOperation.Analyze, CliMode mode = CliMode.Strict) =>
@@ -17,18 +17,25 @@ public sealed class JsonlReceiverTests
             operation == CliOperation.Delete ? @"C:\entries.txt" : null,
             operation == CliOperation.Delete ? @"C:\log.jsonl" : null);
 
-    internal static string Run(CliJob job, int total = 1, int? selected = null) => Line(new
+    // delete always carries prune_dirs, and dirs_selected when it is true.
+    internal static string Run(CliJob job, int total = 1, int? selected = null, int dirs = 0)
     {
-        v = 1, type = "run", operation = job.OperationValue, mode = job.ModeValue,
-        archive = job.Archive, target = job.Target, entries_total = total,
-        selected = selected ?? total, entries_option = job.Entries is not null,
-    });
+        var run = new JsonObject
+        {
+            ["v"] = 2, ["type"] = "run", ["operation"] = job.OperationValue, ["mode"] = job.ModeValue,
+            ["archive"] = job.Archive, ["target"] = job.Target, ["entries_total"] = total,
+            ["selected"] = selected ?? total, ["entries_option"] = job.Entries is not null,
+        };
+        if (job.Operation == CliOperation.Delete) run["prune_dirs"] = job.PruneDirs;
+        if (job.PruneDirs) run["dirs_selected"] = dirs;
+        return run.ToJsonString() + "\n";
+    }
     internal static string Entry(string status = "MATCHED", int index = 1, long length = 123, string name = "日本語/顔-\U0001F642.txt") =>
-        Line(new { v = 1, type = "entry", index, name, directory = status == "DIRECTORY", length, status });
+        Line(new { v = 2, type = "entry", index, name, directory = status == "DIRECTORY", length, status });
     internal static string Completed(CliJob job, int files = 1, int directories = 0, int notSelected = 0) =>
         Line(new
         {
-            v = 1, type = "result", outcome = "completed", exit_code = 0,
+            v = 2, type = "result", outcome = "completed", exit_code = 0,
             counts = job.Operation == CliOperation.Analyze
                 ? new Dictionary<string, int> { [job.Mode == CliMode.Strict ? "matched" : "same_size"] = files,
                     ["modified"] = 0, ["missing"] = 0, ["skipped_special_file"] = 0, ["directory"] = directories }
@@ -38,7 +45,7 @@ public sealed class JsonlReceiverTests
         });
     internal static string Error(string outcome = "fatal", string stage = "prepare") => Line(new
     {
-        v = 1, type = "result", outcome, exit_code = 1,
+        v = 2, type = "result", outcome, exit_code = 1,
         error = new { stage, step = "future_step", code = "FUTURE_CODE", message = "診断の文言" },
     });
     internal static string WithCounts(string error, CliJob job)
@@ -133,10 +140,11 @@ public sealed class JsonlReceiverTests
         yield return ["malformed", "not-json\n", ProtocolIssue.InvalidOutput];
         yield return ["array", "[]\n", ProtocolIssue.InvalidOutput];
         yield return ["non-ASCII", "{\"text\":\"顔\"}\n", ProtocolIssue.InvalidOutput];
-        yield return ["unknown version", Change(run, "v", JsonValue.Create(2)), ProtocolIssue.IncompatibleVersion];
+        yield return ["unknown version", Change(run, "v", JsonValue.Create(3)), ProtocolIssue.IncompatibleVersion];
+        yield return ["previous version", Change(run, "v", JsonValue.Create(1)), ProtocolIssue.IncompatibleVersion];
         foreach (var (field, value) in new (string, JsonNode?)[]
         {
-            ("v", JsonValue.Create("1")), ("type", JsonValue.Create("future")), ("operation", JsonValue.Create("delete")),
+            ("v", JsonValue.Create("2")), ("type", JsonValue.Create("future")), ("operation", JsonValue.Create("delete")),
             ("mode", JsonValue.Create("fast")), ("target", null), ("entries_total", JsonValue.Create(-1)),
             ("selected", JsonValue.Create(2)), ("selected", JsonValue.Create(0)), ("entries_option", JsonValue.Create(true)),
             ("entries_total", JsonValue.Create(1.5)), ("archive", JsonValue.Create(42)),
@@ -155,9 +163,9 @@ public sealed class JsonlReceiverTests
         yield return ["unknown outcome", Change(Error(), "outcome", JsonValue.Create("future")), ProtocolIssue.InvalidOutput];
         yield return ["failure exit0", Change(Error(), "exit_code", JsonValue.Create(0)), ProtocolIssue.InvalidOutput];
         yield return ["null error", Change(Error(), "error", null), ProtocolIssue.InvalidOutput];
-        yield return ["missing error", "{\"v\":1,\"type\":\"result\",\"outcome\":\"fatal\",\"exit_code\":1}\n", ProtocolIssue.InvalidOutput];
+        yield return ["missing error", "{\"v\":2,\"type\":\"result\",\"outcome\":\"fatal\",\"exit_code\":1}\n", ProtocolIssue.InvalidOutput];
         yield return ["input after run", run + Error("input_error"), ProtocolIssue.InvalidOutput];
-        yield return ["duplicate property", run.Replace("\"v\":1", "\"v\":1,\"v\":1", StringComparison.Ordinal), ProtocolIssue.InvalidOutput];
+        yield return ["duplicate property", run.Replace("\"v\":2", "\"v\":2,\"v\":2", StringComparison.Ordinal), ProtocolIssue.InvalidOutput];
         yield return ["unpaired surrogate", run + entry.Replace("\"name\":", "\"name\":\"\\uD800\",\"ignored\":", StringComparison.Ordinal), ProtocolIssue.InvalidOutput];
         yield return ["missing failure counts", run + Error("fatal", "entry"), ProtocolIssue.InvalidOutput];
         yield return ["missing completed counts", run + entry + Change(result, "counts", null), ProtocolIssue.InvalidOutput];
@@ -188,7 +196,7 @@ public sealed class JsonlReceiverTests
     {
         var job = Job(CliOperation.Delete);
         string failure = Change(Entry("DELETE_FAILED", 3), "reason", JsonNode.Parse("{\"code\":\"FUTURE_CODE\",\"message\":\"表示\"}"));
-        string result = Line(new { v = 1, type = "result", outcome = "completed", exit_code = 1,
+        string result = Line(new { v = 2, type = "result", outcome = "completed", exit_code = 1,
             counts = new { deleted = 1, modified = 0, missing = 0, skipped_special_file = 0, directory = 0,
                 delete_failed = 1, not_selected = 2, unprocessed = 0 } });
         var output = Receive(Run(job, 4, 2) + Entry("DELETED", 1) + failure + result, job);
@@ -208,7 +216,7 @@ public sealed class JsonlReceiverTests
         Assert.True(output.Entries[0].PossiblyDeleted);
         output = Receive(Run(job, 4, 2) + stopped + Entry("DELETED", 4), job);
         Assert.False(output.IsCompatible);
-        string internalError = Line(new { v = 1, type = "result", outcome = "internal_error", exit_code = 1,
+        string internalError = Line(new { v = 2, type = "result", outcome = "internal_error", exit_code = 1,
             error = new { stage = "internal", code = "FUTURE_CODE", deletion_started = true, possibly_deleted = true } });
         output = Receive(Run(job, 4, 2) + WithCounts(internalError, job), job);
         Assert.True(output.IsCompatible);

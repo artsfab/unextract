@@ -176,6 +176,7 @@ internal sealed class CliProcessRunner(CliLocation location) : ICliProcessRunner
         {
             info.ArgumentList.Add("--entries");
             info.ArgumentList.Add(job.Entries!);
+            if (job.PruneDirs) info.ArgumentList.Add("--prune-dirs");
             info.ArgumentList.Add("--yes");
         }
         info.ArgumentList.Add("--jsonl");

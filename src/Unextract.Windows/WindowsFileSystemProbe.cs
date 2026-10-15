@@ -7,8 +7,8 @@ namespace Unextract.Windows;
 // DirectoryEnumerator を包むだけで、判定 (reparse・File ID の一致・NTFS・拒否対象など) は Core の
 // TargetRootValidator、TargetResolver、HandleInspector が行う。オープン失敗は Win32 エラーコードのまま返す。
 // 取得の失敗・想定外の応答形式は部分的な値を返さずに失敗を返す。
-// 削除フェーズ (IDeletionProbe) では、削除用ハンドルと識別確認のハンドルを開くだけで、判定 (再検証・エラーの分類) は Core の
-// SequentialDeleter が行う。削除は削除用ハンドルへの指示 (WindowsDeletionHandle.SetDispositionEx) だけで、パスベースの削除・改名の API は使わない。
+// 削除フェーズ (IDeletionProbe) では、削除用・ディレクトリ削除用ハンドルと識別確認のハンドルを開くだけで、判定 (再検証・エラーの分類) は Core の
+// SequentialDeleter・PruneRun が行う。削除は削除用・ディレクトリ削除用ハンドルへの指示 (Disposition.SetDispositionEx) だけで、パスベースの削除・改名の API は使わない。
 // Windows 層と Core に同名の型 (VolumeFileId など) があるため、Core の型は CoreTarget. で明示する。
 public sealed class WindowsFileSystemProbe : CoreTarget.IFileSystemProbe, CoreTarget.IDeletionProbe
 {
@@ -18,6 +18,14 @@ public sealed class WindowsFileSystemProbe : CoreTarget.IFileSystemProbe, CoreTa
         return opened.Succeeded
             ? CoreTarget.ProbeResult<CoreTarget.IDeletionHandle>.Ok(new WindowsDeletionHandle(opened.Value))
             : opened.Fail<CoreTarget.IDeletionHandle, SafeFileHandle>();
+    }
+
+    public CoreTarget.ProbeResult<CoreTarget.IDirectoryDeletionHandle> OpenDirectoryForDeletion(string path)
+    {
+        var opened = HandleOpener.OpenDirectoryForDeletion(path);
+        return opened.Succeeded
+            ? CoreTarget.ProbeResult<CoreTarget.IDirectoryDeletionHandle>.Ok(new WindowsDirectoryDeletionHandle(opened.Value))
+            : opened.Fail<CoreTarget.IDirectoryDeletionHandle, SafeFileHandle>();
     }
 
     // 識別確認 (docs/spec/filesystem.md#failure-boundary)。比較する項目 (File ID、親 File ID、最終パス、Directory、reparse、DeletePending) を取得して閉じる。

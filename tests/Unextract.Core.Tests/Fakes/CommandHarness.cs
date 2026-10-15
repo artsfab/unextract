@@ -109,7 +109,8 @@ internal sealed class CommandHarness
         IConfirmationPrompt? prompt = null,
         DeleteHooks? hooks = null,
         Action? awaitingConfirmation = null,
-        Action? deletionStarting = null)
+        Action? deletionStarting = null,
+        bool pruneDirs = false)
     {
         var (output, error, context) = Context();
         var start = Fs.Calls.Count;
@@ -125,13 +126,15 @@ internal sealed class CommandHarness
             context,
             awaitingConfirmation,
             hooks,
-            deletionStarting));
+            deletionStarting,
+            pruneDirs));
 
         // delete は比較用ハンドルを開かない。削除用ハンドルは各エントリの処理の中で閉じ、同時に1つまで。終了時に target のハンドルは無い。
         Assert.Equal(comparisons, Fs.ComparisonOpenCount);
         Assert.DoesNotContain(Fs.Calls.Skip(start), c => c.StartsWith("OpenComparison ", StringComparison.Ordinal));
         Assert.Equal(Fs.DeletionOpenCount, Fs.DeletionCloseCount);
         Assert.True(Fs.MaxConcurrentDeletions <= 1);
+        Assert.True(Fs.MaxConcurrentDirectoryDeletions <= 1);
         Assert.Equal(0, Fs.OpenHandleCount);
         return new CommandRun<DeleteCommandOutcome>(outcome, output.ToString(), error.ToString());
     }
@@ -142,6 +145,7 @@ internal sealed class CommandHarness
         || c.StartsWith("Enumerate ", StringComparison.Ordinal)
         || c.StartsWith("OpenComparison ", StringComparison.Ordinal)
         || c.StartsWith("OpenDeletion ", StringComparison.Ordinal)
+        || c.StartsWith("OpenDirectoryDeletion ", StringComparison.Ordinal)
         || c.StartsWith("CheckIdentity ", StringComparison.Ordinal));
 
     private (StringWriter Output, StringWriter Error, CommandContext Context) Context()

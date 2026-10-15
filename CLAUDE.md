@@ -7,6 +7,7 @@
 - unextract は、アーカイブ (ZIP・RAR) 内のファイルに対応する target 内のファイルだけを削除する Windows 11 用 CLI。RAR は単一・非 Solid の RAR4/RAR5 だけで、UnRAR.dll で読む ([RAR仕様](docs/spec/rar.md))。モードは2つ ([モード契約](docs/SPEC.md#modes))。
   - Strict (既定): アーカイブの内容と全バイト一致したファイル (`MATCHED`) だけを削除する。全バイト一致が削除の根拠。
   - Fast (`--fast` による明示的な opt-in): パスとサイズの一致 (`SAME_SIZE`) を削除候補とし、内容は読まない・比較しない。内容の一致は保証しない。
+- ディレクトリは既定で削除しない。`delete --prune-dirs` (opt-in) だけが、ファイルの処理の後にアーカイブ由来のパスの空ディレクトリを削除する ([空ディレクトリ](docs/spec/filesystem.md#prune-dirs))。
 - ファイルシステムの安全性 (パス検証、実名解決、reparse・hardlink・ADS、File ID・最終パスによる同一性、TOCTOU 対策、削除方式) は両モード共通。Fast を理由に弱めない。
 - 「そのアーカイブから展開された」という来歴は証明しない。不明・判定不能なら削除しない (両モード)。
 - 同梱の GUI (`unextract-gui.exe`、WPF) はアーカイブ検索と複数 Target の順次実行を担うラッパー。CLI を子プロセスとして起動して機械可読出力を使い、一致判定・削除の安全性を実装しない ([GUI仕様](docs/spec/gui.md))。
@@ -20,7 +21,7 @@
 
 ## 3. 絶対に守る安全規則
 
-- 削除は、照合・検査 (Strict では全バイト比較も) と最終確認をした同じ削除用ハンドルへの `SetFileInformationByHandle(FileDispositionInfoEx)` の1か所だけ ([削除順序](docs/spec/filesystem.md#delete-flow))。`analyze` は削除用ハンドルを開かない。
+- 削除の手順はファイル用とディレクトリ用 (`delete --prune-dirs`) の2つだけ。どちらも、照合・検査 (ファイルの Strict では全バイト比較、ディレクトリでは空の確認も) と最終確認をした同じ削除用ハンドルへ `SetFileInformationByHandle(FileDispositionInfoEx)` で指示する ([削除順序](docs/spec/filesystem.md#delete-flow)、[ディレクトリ](docs/spec/filesystem.md#prune-flow))。この呼び出しは `src/Unextract.Windows/WindowsHandles.cs` の既存の1つの関数だけに置き、両方の手順で共有する。`analyze` は削除用ハンドルを開かない。
 - flags は 0x3 (`DELETE | POSIX_SEMANTICS`)。`IGNORE_READONLY_ATTRIBUTE` は使わない。
 - パスベースの削除・改名 API (`File.Delete`、`DeleteFile`、`Directory.Delete`、`RemoveDirectory`、`MoveFile*` など) を `src/` に書かない。
   - 唯一の例外: GUI が自分で一意な名前で新規作成した一時 `--entries` ファイルを、CLI プロセスの終了後 (起動失敗の場合はその判断後) に GUI が `File.Delete` で削除する1か所。target 内のファイル、利用者のファイル、ディレクトリ、それ以外の一時ファイルには使わず、Core・Windows・Cli には書かない。

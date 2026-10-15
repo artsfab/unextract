@@ -11,10 +11,14 @@ using Unextract.Core.Results;
 
 namespace Unextract.Cli;
 
-// protocol v1 の出力値。Core の型からの対応は CLI が担当する。
-// Name は生の FullName、Message は表示用に整えた文字列を受け取る。
+// protocol v2 の出力値 (docs/spec/machine-output.md#records)。Core の型からの対応は CLI が担当する。
+// Name は生の FullName、Message は表示用に整えた文字列を受け取る。PruneDirs は delete だけ、DirsSelected は PruneDirs が true のときだけ。
 internal sealed record MachineRunRecord(string Operation, string Mode, string Archive, string Target,
-    int EntriesTotal, int Selected, bool EntriesOption);
+    int EntriesTotal, int Selected, bool EntriesOption, bool? PruneDirs = null, int? DirsSelected = null);
+
+// --prune-dirs のディレクトリ段階の1件。Path は target ルートからの相対パス (成分を "\" で連結した生の文字列)。
+internal sealed record MachineDirRecord(string Path, string Status, string? KeepReason = null, MachineReason? Reason = null,
+    bool? PossiblyDeleted = null);
 
 internal sealed record MachineEntryRecord(int Index, string Name, bool Directory, long Length, string Status,
     string? SkipReason = null, MachineReason? Reason = null, bool? PossiblyDeleted = null);
@@ -26,19 +30,31 @@ internal sealed record MachineReason(string Code, string Message, string? Step =
 
 internal sealed record MachineError(string Stage, string Code, string? Message = null, string? Step = null,
     int? EntryIndex = null, string? EntryName = null, int? Line = null, int? Win32Error = null,
-    bool? PossiblyDeleted = null, bool? DeletionStarted = null);
+    bool? PossiblyDeleted = null, bool? DeletionStarted = null, string? DirPath = null);
 
 internal sealed record MachineCounts(int? Matched = null, int? SameSize = null, int? Modified = null,
     int? Missing = null, int? SkippedSpecialFile = null, int? Directory = null, int? Undetermined = null,
-    int? Deleted = null, int? DeleteFailed = null, int? NotSelected = null, int? Unprocessed = null);
+    int? Deleted = null, int? DeleteFailed = null, int? NotSelected = null, int? Unprocessed = null,
+    int? DirDeleted = null, int? DirKept = null, int? DirMissing = null, int? DirUnprocessed = null);
 
-// Core の型から v1 へ明示的に対応付け、reflection を使わず各フィールド・省略・数値/bool 型を書く。
+// Core の型から v2 へ明示的に対応付け、reflection を使わず各フィールド・省略・数値/bool 型を書く。
 // 1 レコードを一度だけ ASCII の UTF-8 byte 列にし、LF を付けて同期配送へ渡す。
 internal static class MachineOutput
 {
+    // protocol version (docs/spec/machine-output.md#versioning)。--prune-dirs で type・status の集合が変わったため 2。
+    public const int Version = 2;
+
     public static MachineRunRecord Run(CommandKind command, PreparedCommandInfo info) => new(
         Operation(command), Mode(info.Mode), info.ArchivePath, ReportText.WithoutDevicePrefix(info.TargetFinalPath),
-        info.TotalEntries, info.SelectedEntries, info.EntriesOption);
+        info.TotalEntries, info.SelectedEntries, info.EntriesOption,
+        command == CommandKind.Delete ? info.PruneDirs : null,
+        command == CommandKind.Delete && info.PruneDirs ? info.DirectoriesSelected : null);
+
+    public static MachineDirRecord Directory(DirectoryResult result) => new(
+        result.Directory.Path, DirectoryStatus(result.Status),
+        result.KeepReason is { } keep ? KeepCode(keep) : null,
+        result.Status == Core.Deletion.DirectoryStatus.Stopped ? Reason(result.Failure, result.Reason) : null,
+        result.Status == Core.Deletion.DirectoryStatus.Stopped ? result.PossiblyDeleted : null);
 
     public static MachineEntryRecord Entry(EntryResult result) => new(
         result.Entry.Number, result.Entry.Name, result.Classification == Classification.Directory,
@@ -71,11 +87,11 @@ internal static class MachineOutput
         if (outcome.PreparationFailure is { } failure) return PreparationResult(failure);
         var report = outcome.Report ?? throw new InvalidOperationException("削除結果がありません。");
         var prepared = info ?? throw new InvalidOperationException("Prepare 成功情報がありません。");
-        var stop = report.Stop;
-        return new(stop is null ? "completed" : "stopped",
-            stop is null && report.Count(DeleteStatus.DeleteFailed) == 0 ? 0 : 1,
+        var error = report.Stop is { } stop ? StopError(stop) : report.Prune?.Stop is { } directoryStop ? StopError(directoryStop) : null;
+        return new(report.Stopped ? "stopped" : "completed",
+            !report.Stopped && report.Count(DeleteStatus.DeleteFailed) == 0 ? 0 : 1,
             DeleteCounts(report, prepared.TotalEntries - prepared.SelectedEntries),
-            stop is null ? null : StopError(stop));
+            error);
     }
 
     public static MachineResultRecord UsageError(string message) => new("input_error", 1,
@@ -94,11 +110,13 @@ internal static class MachineOutput
     {
         var delete = command == CommandKind.Delete;
         var stop = delete ? progress?.Stop : null;
+        var directoryStop = delete ? progress?.DirectoryStop : null;
         return new("internal_error", 1, delete ? progress?.Counts : null,
             new MachineError("internal", exception is MachineOutputException ? "OUTPUT_FAILED" : "UNEXPECTED_EXCEPTION",
                 $"{exception.GetType().Name}: {SafeDisplay.Escape(exception.Message)}",
                 EntryIndex: stop?.Entry.Number, EntryName: stop?.Entry.Name,
-                PossiblyDeleted: stop?.PossiblyDeleted, DeletionStarted: delete ? deletionStarted : null));
+                PossiblyDeleted: stop?.PossiblyDeleted ?? directoryStop?.PossiblyDeleted, DeletionStarted: delete ? deletionStarted : null,
+                DirPath: directoryStop?.Directory.Path));
     }
 
     private static MachineResultRecord PreparationResult(PrepareFailure failure, MachineCounts? counts = null)
@@ -112,11 +130,13 @@ internal static class MachineOutput
     private static MachineError Error(FatalError fatal, string stage) => new(stage, Code(fatal.Kind), fatal.Describe(),
         stage == "entry" ? Step(fatal.Step) : null, fatal.Entry?.Number, fatal.Entry?.Name, Win32Error: fatal.Win32Error);
 
-    private static MachineReason Reason(DeleteEntryResult result)
+    private static MachineReason Reason(DeleteEntryResult result) => Reason(result.Failure, result.Reason);
+
+    private static MachineReason Reason(DeleteFailure? diagnostic, string? message)
     {
-        var failure = result.Failure ?? throw new InvalidOperationException("削除の失敗原因がありません。");
+        var failure = diagnostic ?? throw new InvalidOperationException("削除の失敗原因がありません。");
         return new(failure.FatalKind is { } common ? Code(common) : Code(failure.Kind!.Value),
-            SafeDisplay.Escape(result.Reason ?? string.Empty), Step(failure.Step), failure.Win32Error);
+            SafeDisplay.Escape(message ?? string.Empty), Step(failure.Step), failure.Win32Error);
     }
 
     private static MachineError StopError(DeleteEntryResult stop)
@@ -124,6 +144,14 @@ internal static class MachineOutput
         var reason = Reason(stop);
         return new("entry", reason.Code, reason.Message, reason.Step, stop.Entry.Number, stop.Entry.Name,
             Win32Error: reason.Win32Error, PossiblyDeleted: stop.PossiblyDeleted);
+    }
+
+    // ディレクトリ段階の STOP (docs/spec/machine-output.md#result の dir_path)。stage は entry と同じ。
+    private static MachineError StopError(DirectoryResult stop)
+    {
+        var reason = Reason(stop.Failure, stop.Reason);
+        return new("entry", reason.Code, reason.Message, reason.Step,
+            Win32Error: reason.Win32Error, PossiblyDeleted: stop.PossiblyDeleted, DirPath: stop.Directory.Path);
     }
 
     private static MachineCounts AnalysisCounts(AnalysisResult result, RunMode mode) => new(
@@ -137,7 +165,9 @@ internal static class MachineOutput
         Deleted: report.Count(DeleteStatus.Deleted), Modified: report.Count(DeleteStatus.Modified),
         Missing: report.Count(DeleteStatus.Missing), SkippedSpecialFile: report.Count(DeleteStatus.SkippedSpecialFile),
         Directory: report.DirectoryCount, DeleteFailed: report.Count(DeleteStatus.DeleteFailed),
-        NotSelected: excluded, Unprocessed: report.NotProcessedCount);
+        NotSelected: excluded, Unprocessed: report.NotProcessedCount,
+        DirDeleted: report.Prune?.Count(Core.Deletion.DirectoryStatus.Deleted), DirKept: report.Prune?.Count(Core.Deletion.DirectoryStatus.Kept),
+        DirMissing: report.Prune?.Count(Core.Deletion.DirectoryStatus.Missing), DirUnprocessed: report.Prune?.NotProcessedCount);
 
     private static string Operation(CommandKind command) => command switch
     {
@@ -173,6 +203,26 @@ internal static class MachineOutput
         DeleteStatus.DeleteFailed => "DELETE_FAILED",
         DeleteStatus.Stopped => "STOPPED",
         _ => throw new ArgumentOutOfRangeException(nameof(status)),
+    };
+
+    private static string DirectoryStatus(Core.Deletion.DirectoryStatus status) => status switch
+    {
+        Core.Deletion.DirectoryStatus.Deleted => "DIR_DELETED",
+        Core.Deletion.DirectoryStatus.Kept => "DIR_KEPT",
+        Core.Deletion.DirectoryStatus.Missing => "DIR_MISSING",
+        Core.Deletion.DirectoryStatus.Stopped => "STOPPED",
+        _ => throw new ArgumentOutOfRangeException(nameof(status)),
+    };
+
+    private static string KeepCode(DirectoryKeepReason reason) => reason switch
+    {
+        DirectoryKeepReason.NotEmpty => "NOT_EMPTY",
+        DirectoryKeepReason.ParentReparsePoint => "PARENT_REPARSE",
+        DirectoryKeepReason.ReparsePoint => "REPARSE",
+        DirectoryKeepReason.Attributes => "ATTRIBUTES",
+        DirectoryKeepReason.AlternateDataStream => "ADS",
+        DirectoryKeepReason.InUse => "IN_USE",
+        _ => throw new ArgumentOutOfRangeException(nameof(reason)),
     };
 
     private static string SkipCode(SkipReason reason) => reason switch
@@ -319,6 +369,8 @@ internal static class MachineOutput
         writer.WriteNumber("entries_total", record.EntriesTotal);
         writer.WriteNumber("selected", record.Selected);
         writer.WriteBoolean("entries_option", record.EntriesOption);
+        Boolean(writer, "prune_dirs", record.PruneDirs);
+        Number(writer, "dirs_selected", record.DirsSelected);
     });
 
     public static byte[] Serialize(MachineEntryRecord record) => Encode("entry", writer =>
@@ -329,15 +381,16 @@ internal static class MachineOutput
         writer.WriteNumber("length", record.Length);
         writer.WriteString("status", record.Status);
         String(writer, "skip_reason", record.SkipReason);
-        if (record.Reason is { } reason)
-        {
-            writer.WriteStartObject("reason");
-            String(writer, "step", reason.Step);
-            writer.WriteString("code", reason.Code);
-            Number(writer, "win32_error", reason.Win32Error);
-            writer.WriteString("message", reason.Message);
-            writer.WriteEndObject();
-        }
+        WriteReason(writer, record.Reason);
+        Boolean(writer, "possibly_deleted", record.PossiblyDeleted);
+    });
+
+    public static byte[] Serialize(MachineDirRecord record) => Encode("dir", writer =>
+    {
+        writer.WriteString("path", record.Path);
+        writer.WriteString("status", record.Status);
+        String(writer, "keep_reason", record.KeepReason);
+        WriteReason(writer, record.Reason);
         Boolean(writer, "possibly_deleted", record.PossiblyDeleted);
     });
 
@@ -359,6 +412,10 @@ internal static class MachineOutput
             Number(writer, "delete_failed", counts.DeleteFailed);
             Number(writer, "not_selected", counts.NotSelected);
             Number(writer, "unprocessed", counts.Unprocessed);
+            Number(writer, "dir_deleted", counts.DirDeleted);
+            Number(writer, "dir_kept", counts.DirKept);
+            Number(writer, "dir_missing", counts.DirMissing);
+            Number(writer, "dir_unprocessed", counts.DirUnprocessed);
             writer.WriteEndObject();
         }
         if (record.Error is { } error)
@@ -369,6 +426,7 @@ internal static class MachineOutput
             writer.WriteString("code", error.Code);
             Number(writer, "entry_index", error.EntryIndex);
             String(writer, "entry_name", error.EntryName);
+            String(writer, "dir_path", error.DirPath);
             Number(writer, "line", error.Line);
             Number(writer, "win32_error", error.Win32Error);
             Boolean(writer, "possibly_deleted", error.PossiblyDeleted);
@@ -384,7 +442,7 @@ internal static class MachineOutput
         using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.Default }))
         {
             writer.WriteStartObject();
-            writer.WriteNumber("v", 1);
+            writer.WriteNumber("v", Version);
             writer.WriteString("type", type);
             fields(writer);
             writer.WriteEndObject();
@@ -392,6 +450,17 @@ internal static class MachineOutput
         buffer.GetSpan(1)[0] = (byte)'\n';
         buffer.Advance(1);
         return buffer.WrittenSpan.ToArray();
+    }
+
+    private static void WriteReason(Utf8JsonWriter writer, MachineReason? value)
+    {
+        if (value is not { } reason) return;
+        writer.WriteStartObject("reason");
+        String(writer, "step", reason.Step);
+        writer.WriteString("code", reason.Code);
+        Number(writer, "win32_error", reason.Win32Error);
+        writer.WriteString("message", reason.Message);
+        writer.WriteEndObject();
     }
 
     private static void String(Utf8JsonWriter writer, string name, string? value)
@@ -422,10 +491,29 @@ internal sealed class MachineDeleteProgress
     private int _skipped;
     private int _failed;
     private int _directories;
+    private int _processedDirs;
+    private int _dirDeleted;
+    private int _dirKept;
+    private int _dirMissing;
 
     public DeleteEntryResult? Stop { get; private set; }
 
+    public DirectoryResult? DirectoryStop { get; private set; }
+
     public void Prepared(PreparedCommandInfo info) => _prepared = info;
+
+    public void Observe(DirectoryResult result)
+    {
+        _processedDirs++;
+        switch (result.Status)
+        {
+            case Core.Deletion.DirectoryStatus.Deleted: _dirDeleted++; break;
+            case Core.Deletion.DirectoryStatus.Kept: _dirKept++; break;
+            case Core.Deletion.DirectoryStatus.Missing: _dirMissing++; break;
+            case Core.Deletion.DirectoryStatus.Stopped: DirectoryStop = result; break;
+            default: throw new ArgumentOutOfRangeException(nameof(result));
+        }
+    }
 
     public void Observe(DeleteEntryResult result)
     {
@@ -444,8 +532,11 @@ internal sealed class MachineDeleteProgress
 
     public void ObserveDirectoryCount(int count) => _directories = count;
 
+    // ディレクトリ段階の未処理は、出力に失敗した対象も処理済みとして数えた残り (段階を開始していなければ全件)。
     public MachineCounts? Counts => _prepared is { } info ? new(
         Deleted: _deleted, Modified: _modified, Missing: _missing, SkippedSpecialFile: _skipped,
         Directory: _directories, DeleteFailed: _failed, NotSelected: info.TotalEntries - info.SelectedEntries,
-        Unprocessed: info.SelectedEntries - _processedFiles - _directories) : null;
+        Unprocessed: info.SelectedEntries - _processedFiles - _directories,
+        DirDeleted: info.PruneDirs ? _dirDeleted : null, DirKept: info.PruneDirs ? _dirKept : null,
+        DirMissing: info.PruneDirs ? _dirMissing : null, DirUnprocessed: info.PruneDirs ? info.DirectoriesSelected - _processedDirs : null) : null;
 }

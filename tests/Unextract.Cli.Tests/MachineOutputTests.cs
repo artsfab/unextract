@@ -143,7 +143,7 @@ public class MachineOutputTests
         Assert.DoesNotContain(":null", Encoding.ASCII.GetString(bytes));
         var document = JsonDocument.Parse(bytes);
         Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
-        Assert.Equal(1, document.RootElement.GetProperty("v").GetInt32());
+        Assert.Equal(2, document.RootElement.GetProperty("v").GetInt32());
         Assert.Equal(type, document.RootElement.GetProperty("type").GetString());
         return document;
     }

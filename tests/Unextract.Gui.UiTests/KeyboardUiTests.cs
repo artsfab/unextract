@@ -49,23 +49,24 @@ public sealed class KeyboardUiTests(ITestOutputHelper output) : UiTestBase(outpu
         var ui = Start();
         Focus(ui, "SearchDirectoryBox");
         var order = new List<string>();
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 8; i++)
         {
             PressAndWaitForFocusChange(ui, VirtualKeyShort.TAB);
             order.Add(FocusId(ui));
         }
         // Search row: input -> Search -> Choose folder -> recursive; the two mode radio buttons are one stop (the selected
-        // mode); then the work list's filter and tools.
-        Assert.Equal(["SearchButton", "ChooseFolderButton", "RecursiveCheckBox", "StrictRadio", "ArchiveFilterBox", "BulkAddButton", "SelectionMenuButton"], order);
+        // mode), then the empty-folder setting on the same row; then the work list's filter and tools.
+        Assert.Equal(["SearchButton", "ChooseFolderButton", "RecursiveCheckBox", "StrictRadio", "PruneDirsCheckBox", "ArchiveFilterBox", "BulkAddButton",
+            "SelectionMenuButton"], order);
 
         // Reverse direction is the exact inverse.
         var back = new List<string>();
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < 7; i++)
         {
             PressAndWaitForFocusChange(ui, VirtualKeyShort.TAB, shift: true);
             back.Add(FocusId(ui));
         }
-        Assert.Equal(["BulkAddButton", "ArchiveFilterBox", "StrictRadio", "RecursiveCheckBox", "ChooseFolderButton", "SearchButton"], back);
+        Assert.Equal(["BulkAddButton", "ArchiveFilterBox", "PruneDirsCheckBox", "StrictRadio", "RecursiveCheckBox", "ChooseFolderButton", "SearchButton"], back);
     }
 
     [UiFact]

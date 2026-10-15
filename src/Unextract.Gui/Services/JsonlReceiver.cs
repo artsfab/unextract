@@ -10,6 +10,8 @@ internal sealed class JsonlReceiver(CliJob job)
 {
     private readonly ArrayBufferWriter<byte> _line = new();
     private readonly List<CliEntry> _entries = [];
+    private readonly List<CliDir> _dirs = [];
+    private readonly HashSet<string> _dirPaths = new(StringComparer.Ordinal);
     private CliRun? _run;
     private CliResult? _result;
     private ProtocolIssue _issue;
@@ -38,7 +40,7 @@ internal sealed class JsonlReceiver(CliJob job)
     {
         // An unterminated last fragment is never a record, including after a valid result.
         _line.Clear();
-        return new(_run, _entries.AsReadOnly(), _result, _issue, _message);
+        return new(_run, _entries.AsReadOnly(), _result, _issue, _message, _dirs.AsReadOnly());
     }
 
     public void ReadFailed(string message) => Fail(ProtocolIssue.InvalidOutput, message);
@@ -52,7 +54,7 @@ internal sealed class JsonlReceiver(CliJob job)
             var root = document.RootElement;
             Object(root);
             long version = Integer(root, "v");
-            if (version != 1)
+            if (version != 2)
             {
                 Fail(ProtocolIssue.IncompatibleVersion, $"未対応のJSONL版です: {version}");
                 return;
@@ -62,6 +64,7 @@ internal sealed class JsonlReceiver(CliJob job)
             {
                 case "run": ReadRun(root); break;
                 case "entry": ReadEntry(root); break;
+                case "dir": ReadDir(root); break;
                 case "result": ReadResult(root); break;
                 default: throw new FormatException("未知のレコード種別です。");
             }
@@ -81,12 +84,21 @@ internal sealed class JsonlReceiver(CliJob job)
         Require(run.EntriesOption == (job.Entries is not null), "entries_optionが起動指定と異なります。");
         Require(run.Selected <= run.EntriesTotal, "selectedが全エントリ数を超えています。");
         Require(job.Operation != CliOperation.Analyze || run.Selected == run.EntriesTotal, "解析のselectedが不正です。");
+        if (job.Operation == CliOperation.Delete)
+        {
+            bool prune = Bool(root, "prune_dirs");
+            Require(prune == job.PruneDirs, "prune_dirsが起動指定と異なります。");
+            Require(prune || !root.TryGetProperty("dirs_selected", out _), "prune_dirsなしでdirs_selectedがあります。");
+            run = run with { PruneDirs = prune, DirsSelected = prune ? Count(root, "dirs_selected") : null };
+        }
+        else Require(!root.TryGetProperty("prune_dirs", out _) && !root.TryGetProperty("dirs_selected", out _), "解析にprune_dirsがあります。");
         _run = run;
     }
 
     private void ReadEntry(JsonElement root)
     {
         Require(_run is not null, "runより前にentryがあります。");
+        Require(_dirs.Count == 0, "dirの後にentryがあります。");
         var run = _run!;
         int index = Positive(root, "index");
         string name = String(root, "name");
@@ -118,6 +130,28 @@ internal sealed class JsonlReceiver(CliJob job)
         _entries.Add(new(index, name, directory, length, status, skip, reason, possible));
     }
 
+    // The directory stage starts only after every selected file has an entry and none STOPPED (docs/spec/filesystem.md#prune-set).
+    // The GUI always passes --entries, so selected counts files only.
+    private void ReadDir(JsonElement root)
+    {
+        Require(_run is not null, "runより前にdirがあります。");
+        var run = _run!;
+        Require(run.PruneDirs == true, "--prune-dirsを付けていない実行にdirがあります。");
+        Require(_entries.Count == run.Selected && (_entries.Count == 0 || _entries[^1].Status != "STOPPED"), "ファイルの処理が終わる前にdirがあります。");
+        Require(_dirs.Count < run.DirsSelected && (_dirs.Count == 0 || _dirs[^1].Status != "STOPPED"), "dirの順序・件数が不正です。");
+        string path = String(root, "path");
+        string status = String(root, "status");
+        Require(path.Length != 0 && _dirPaths.Add(path), "dirのpathが空か重複しています。");
+        Require(status is "DIR_DELETED" or "DIR_KEPT" or "DIR_MISSING" or "STOPPED", "dirのstatusが不正です。");
+        string? keep = OptionalString(root, "keep_reason");
+        CliReason? reason = root.TryGetProperty("reason", out var r) ? ReadReason(r) : null;
+        bool? possible = OptionalBool(root, "possibly_deleted");
+        Require((keep is not null) == (status == "DIR_KEPT"), "keep_reasonの有無が不正です。");
+        Require((reason is not null) == (status == "STOPPED"), "dirのreasonの有無が不正です。");
+        Require(possible.HasValue == (status == "STOPPED"), "dirのpossibly_deletedの有無が不正です。");
+        _dirs.Add(new(path, status, keep, reason, possible));
+    }
+
     private void ReadResult(JsonElement root)
     {
         string outcome = String(root, "outcome");
@@ -126,7 +160,7 @@ internal sealed class JsonlReceiver(CliJob job)
         Require(exit <= 1 && (outcome == "completed" || exit == 1), "result.exit_codeが不正です。");
         Require(outcome != "completed" || _run is not null, "runなしでcompletedになっています。");
         Require(outcome != "stopped" || job.Operation == CliOperation.Delete && _run is not null &&
-            _entries.Count > 0 && _entries[^1].Status == "STOPPED", "stoppedの順序が不正です。");
+            (_dirs.Count > 0 ? _dirs[^1].Status == "STOPPED" : _entries.Count > 0 && _entries[^1].Status == "STOPPED"), "stoppedの順序が不正です。");
         Require(outcome != "input_error" || _run is null, "run後にinput_errorがあります。");
         Require(outcome != "fatal" || job.Operation == CliOperation.Analyze || _run is null, "削除run後にfatalがあります。");
         CliError? error = root.TryGetProperty("error", out var e) ? ReadError(e) : null;
@@ -137,7 +171,7 @@ internal sealed class JsonlReceiver(CliJob job)
         {
             string[] required = job.Operation == CliOperation.Analyze
                 ? [job.Mode == CliMode.Strict ? "matched" : "same_size", "modified", "missing", "skipped_special_file", "directory", "undetermined"]
-                : ["deleted", "modified", "missing", "skipped_special_file", "directory", "delete_failed", "not_selected", "unprocessed"];
+                : DeleteKeys();
             Require(counts is not null && required.All(counts.ContainsKey), "途中結果のcountsに必要な項目がありません。");
         }
         if (job.Operation == CliOperation.Delete && outcome == "internal_error")
@@ -151,7 +185,7 @@ internal sealed class JsonlReceiver(CliJob job)
         Object(root);
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (string key in new[] { "matched", "same_size", "modified", "missing", "skipped_special_file", "directory",
-            "undetermined", "deleted", "delete_failed", "not_selected", "unprocessed" })
+            "undetermined", "deleted", "delete_failed", "not_selected", "unprocessed", "dir_deleted", "dir_kept", "dir_missing", "dir_unprocessed" })
         {
             if (root.TryGetProperty(key, out _)) counts.Add(key, Count(root, key));
         }
@@ -164,7 +198,7 @@ internal sealed class JsonlReceiver(CliJob job)
         string[] keys = job.Operation == CliOperation.Analyze
             ? [job.Mode == CliMode.Strict ? "matched" : "same_size", "modified", "missing", "skipped_special_file", "directory"]
             : ["deleted", "modified", "missing", "skipped_special_file", "directory", "delete_failed", "not_selected", "unprocessed"];
-        Require(keys.All(counts!.ContainsKey), "completedのcountsに必要な項目がありません。");
+        Require((job.Operation == CliOperation.Analyze ? keys : DeleteKeys()).All(counts!.ContainsKey), "completedのcountsに必要な項目がありません。");
         Require(!counts.TryGetValue("undetermined", out int undetermined) || undetermined == 0, "completedに未判定があります。");
         foreach (string key in keys)
         {
@@ -180,6 +214,12 @@ internal sealed class JsonlReceiver(CliJob job)
         {
             Require((long)_entries.Count + counts["directory"] == _run!.Selected, "削除completedの件数が不正です。");
             Require(exit == (counts["delete_failed"] == 0 ? 0 : 1), "削除completedのexit_codeが不正です。");
+            if (_run.PruneDirs == true)
+            {
+                Require(_dirs.Count == _run.DirsSelected && counts["dir_unprocessed"] == 0, "削除completedのdirの件数が不正です。");
+                foreach (var (key, status) in new[] { ("dir_deleted", "DIR_DELETED"), ("dir_kept", "DIR_KEPT"), ("dir_missing", "DIR_MISSING") })
+                    Require(counts[key] == _dirs.Count(x => x.Status == status), "countsとdirが異なります。");
+            }
         }
     }
 
@@ -196,8 +236,16 @@ internal sealed class JsonlReceiver(CliJob job)
         Require(stage is "usage" or "prepare" or "entry" or "internal", "error.stageが不正です。");
         return new(stage, OptionalString(root, "step"), String(root, "code"), OptionalPositive(root, "entry_index"),
             OptionalString(root, "entry_name"), OptionalPositive(root, "line"), OptionalInt(root, "win32_error"),
-            OptionalBool(root, "possibly_deleted"), OptionalBool(root, "deletion_started"), OptionalString(root, "message"));
+            OptionalBool(root, "possibly_deleted"), OptionalBool(root, "deletion_started"), OptionalString(root, "message"),
+            OptionalString(root, "dir_path"));
     }
+
+    // The delete counts; with prune_dirs the directory-stage counts are required as well.
+    private string[] DeleteKeys() =>
+    [
+        "deleted", "modified", "missing", "skipped_special_file", "directory", "delete_failed", "not_selected", "unprocessed",
+        .. _run?.PruneDirs == true ? new[] { "dir_deleted", "dir_kept", "dir_missing", "dir_unprocessed" } : [],
+    ];
 
     private void Fail(ProtocolIssue issue, string message)
     {

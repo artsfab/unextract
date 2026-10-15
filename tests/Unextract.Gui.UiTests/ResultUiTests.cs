@@ -46,7 +46,7 @@ public sealed class ResultUiTests(ITestOutputHelper output) : UiTestBase(output)
             ui.FakeAnalyze(Archive(n), Target(n), "strict", items);
         }
         ui.FakeDelete(Archive("a"), Target("a"), "strict", 2, 1, [new(1, "f1.txt", "DELETE_FAILED", 1)], notSelected: 1);
-        ui.FakeDeleteRaw(Archive("c"), Target("c"), [Jsonl.Run("delete", "strict", Archive("c"), Target("c"), 2, 1, true), "{\"v\":2,\"type\":\"entry\"}"], exitCode: 1);
+        ui.FakeDeleteRaw(Archive("c"), Target("c"), [Jsonl.Run("delete", "strict", Archive("c"), Target("c"), 2, 1, true), "{\"v\":3,\"type\":\"entry\"}"], exitCode: 1);
         // b's output stops after the first entry (no result record): an incomplete result.
         ui.FakeDeleteRaw(Archive("b"), Target("b"), [Jsonl.Run("delete", "strict", Archive("b"), Target("b"), 2, 1, true), Jsonl.Entry(1, "f1.txt", "DELETED", 1)], exitCode: 1);
         ui.Search();

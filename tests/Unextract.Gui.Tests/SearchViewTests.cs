@@ -142,7 +142,7 @@ public sealed class SearchViewTests
             Assert.True(input.Focus());
             await Layout(window);
             var order = new List<object?>();
-            for (int i = 0; i < 7; i++)
+            for (int i = 0; i < 8; i++)
             {
                 Assert.True(((UIElement)FocusManager.GetFocusedElement(window)).MoveFocus(new(FocusNavigationDirection.Next)));
                 order.Add(FocusManager.GetFocusedElement(window));
@@ -150,11 +150,12 @@ public sealed class SearchViewTests
             Assert.Same(search, order[0]);
             Assert.Same(choose, order[1]);
             Assert.Same(window.FindName("RecursiveCheckBox"), order[2]);
-            // Both mode radio buttons together are a single stop, on the selected mode.
+            // Both mode radio buttons together are a single stop, on the selected mode; the empty-folder setting follows on the same row.
             Assert.Same(window.FindName("StrictRadio"), order[3]);
-            Assert.Same(window.FindName("ArchiveFilterBox"), order[4]);
-            Assert.Same(window.FindName("BulkAddButton"), order[5]);
-            Assert.Same(window.FindName("SelectionMenuButton"), order[6]);
+            Assert.Same(window.FindName("PruneDirsCheckBox"), order[4]);
+            Assert.Same(window.FindName("ArchiveFilterBox"), order[5]);
+            Assert.Same(window.FindName("BulkAddButton"), order[6]);
+            Assert.Same(window.FindName("SelectionMenuButton"), order[7]);
             Assert.Empty(trace.Errors);
         }
         finally
@@ -193,7 +194,7 @@ public sealed class SearchViewTests
             foreach (string name in new[] { "SearchDirectoryBox", "SearchButton", "ChooseFolderButton", "RecursiveCheckBox", "StrictRadio",
                 "FastRadio", "FastWarning", "FastWarningText", "BulkAddButton", "SelectionMenuButton", "SelectAllButton", "ClearAllButton", "SelectVisibleButton",
                 "ClearVisibleButton", "ArchiveFilterBox", "ArchiveCountText", "OpenLogFolderButton", "CancelAnalysisButton", "AnalyzeSelectedButton",
-                "DeleteSelectedButton", "ArchiveList", "DetailPanel", "NextStepText", "SelectionSummaryText", "StatusText",
+                "PruneDirsCheckBox", "DeleteSelectedButton", "ArchiveList", "DetailPanel", "NextStepText", "SelectionSummaryText", "StatusText",
                 "CliStatusText", "DiagnosticsToggle", "DiagnosticsList", "ProgressPanel", "OverallProgressText", "CurrentArchiveText", "CurrentTargetText",
                 "EntryProgressText" })
                 Assert.NotNull(window.FindName(name));
@@ -232,7 +233,7 @@ public sealed class SearchViewTests
                 .Where(s => s.Length > 0 && !s.EndsWith("ScrollBar", StringComparison.Ordinal)).Distinct().Order().ToArray();
             Assert.Equal(new[] { "DeletionConfirmBody", "DeletionConfirmCancelButton", "DeletionConfirmDeleteButton", "DeletionConfirmExcludedCount",
                 "DeletionConfirmFastWarning", "DeletionConfirmFileCount", "DeletionConfirmHeading", "DeletionConfirmHidden", "DeletionConfirmIrreversible",
-                "DeletionConfirmMode", "DeletionConfirmSize", "DeletionConfirmTargetCount" }, Ids(confirm));
+                "DeletionConfirmMode", "DeletionConfirmPruneDirs", "DeletionConfirmSize", "DeletionConfirmTargetCount" }, Ids(confirm));
             Assert.Equal(new[] { "TargetEditorCancelButton", "TargetEditorHeading", "TargetEditorOkButton", "TargetEditorPresetCombo", "TargetEditorPreview",
                 "TargetEditorScope", "TargetEditorTemplateBox" }, Ids(editor));
         }

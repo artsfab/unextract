@@ -64,9 +64,9 @@ internal readonly record struct Inspection(
 internal static class HandleInspector
 {
     // File ID とボリュームシリアル、最終パスを基準と照合する。取得の失敗も失敗。
-    // delete の親 File ID 照合は、hardlink の非削除判定を可能にした後で行う。
+    // delete の親 File ID 照合は、hardlink の非削除判定を可能にした後で行う。ディレクトリ段階 (docs/spec/filesystem.md#prune-flow の手順4) も使う。
     public static (VolumeFileId Id, string FinalPath, HandleFailure? Failure) VerifyIdentity(
-        IComparisonHandle handle, IdentityBaseline baseline)
+        IHandleInformation handle, IdentityBaseline baseline)
     {
         var id = handle.GetVolumeFileId();
         if (!id.Succeeded)

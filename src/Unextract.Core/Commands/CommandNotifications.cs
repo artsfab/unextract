@@ -5,20 +5,25 @@ namespace Unextract.Core.Commands;
 
 // Prepare 成功時の値だけを渡す。Prepared・ハンドル・削除の基準は公開しない。
 // TargetFinalPath は root が取得した最終パス (\\?\ 形式)。表示への変換は呼び出し側が行う。
+// PruneDirs と DirectoriesSelected は delete の --prune-dirs の有無とディレクトリ段階の対象の件数。
 public sealed record PreparedCommandInfo(
     string ArchivePath,
     string TargetFinalPath,
     RunMode Mode,
     int TotalEntries,
     int SelectedEntries,
-    bool EntriesOption);
+    bool EntriesOption,
+    bool PruneDirs = false,
+    int DirectoriesSelected = 0);
 
 // 人間向け表示に代わる同期通知。JSON・ログ・protocol は CLI が担当する。
 // OnPrepared の成功後に処理を始め、結果はエントリのハンドルを閉じた後に通知する。
 // 通知例外は呼び出し元へ伝え、次のエントリへ進まない。
 // OnDirectoryCount は delete の完結した DIRECTORY の累計。結果配送に失敗しても途中件数を保持できる。
+// OnDirectoryResult は --prune-dirs のディレクトリ段階の1件の結果 (ディレクトリ削除用ハンドルを閉じた後)。
 public sealed record CommandNotifications(
     Action<PreparedCommandInfo>? OnPrepared = null,
     Action<EntryResult>? OnAnalysisResult = null,
     Action<DeleteEntryResult>? OnDeleteResult = null,
-    Action<int>? OnDirectoryCount = null);
+    Action<int>? OnDirectoryCount = null,
+    Action<DirectoryResult>? OnDirectoryResult = null);

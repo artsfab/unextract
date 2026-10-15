@@ -9,6 +9,7 @@ namespace Unextract.Core.Commands;
 
 // AwaitingConfirmation と Hooks はテスト用の差し込み口 (docs/TESTING.md#hooks: 確認プロンプトの直前、H1〜H5)。製品 CLI からは設定しない。
 // DeletionStarting は逐次処理開始の通知。CLI の最上位の例外処理で、開始前と開始後を区別するために使う。
+// PruneDirs は --prune-dirs (docs/spec/filesystem.md#prune-dirs)。
 public sealed record DeleteCommandRequest(
     string ArchivePath,
     string TargetPath,
@@ -20,7 +21,8 @@ public sealed record DeleteCommandRequest(
     CommandContext Context,
     Action? AwaitingConfirmation = null,
     DeleteHooks? Hooks = null,
-    Action? DeletionStarting = null);
+    Action? DeletionStarting = null,
+    bool PruneDirs = false);
 
 // Report は逐次処理の結果 (Prepare の失敗・確認での中止では null)。PrepareError は Prepare の失敗の原因
 // (entries の入力エラーでは null)。PreparationFailure は表示前の構造化された失敗情報。
@@ -75,19 +77,29 @@ public static class DeleteCommand
         {
             using (prepared)
             {
+                // ディレクトリ段階の対象と順序は Prepare を通過したエントリだけから決める (target に触れない。docs/SPEC.md#prepare の手順9)。
+                var pruneTargets = request.PruneDirs ? PruneSet.Build(prepared.Targets, prepared.EntriesSelected) : null;
                 if (notifications is null)
                 {
                     AnalyzeCommand.WriteLines(output, ReportText.Header(request.ArchivePath, prepared.Root.FinalPath, request.Mode));
                     output.WriteLine(DeleteOutput.Targets(prepared.Entries.Count, prepared.Targets.Count, prepared.EntriesSelected));
+                    if (pruneTargets is not null)
+                    {
+                        output.WriteLine(DeleteOutput.PruneTargets(pruneTargets.Count));
+                    }
                 }
                 else
                 {
-                    notifications.OnPrepared?.Invoke(prepared.Info(request.ArchivePath, request.Mode));
+                    notifications.OnPrepared?.Invoke(prepared.Info(request.ArchivePath, request.Mode) with
+                    {
+                        PruneDirs = request.PruneDirs,
+                        DirectoriesSelected = pruneTargets?.Count ?? 0,
+                    });
                 }
 
                 // 確認 (案 A): Prepare が全て成功した後、最初の target エントリの処理の前に1回だけ。確認待ちの間、個々の target ファイルの
                 // ハンドルは開いていない (開いているのは ZIP と target ルートだけ)。--yes は確認だけを省略する。
-                if (!request.AssumeYes && !Confirm(request, prepared.Targets.Count(e => !e.IsDirectory)))
+                if (!request.AssumeYes && !Confirm(request, prepared.Targets.Count(e => !e.IsDirectory), pruneTargets?.Count))
                 {
                     return new DeleteCommandOutcome(ExitStatus.UserCancelled, null);
                 }
@@ -112,7 +124,9 @@ public static class DeleteCommand
                     notifications is null ? result => output.WriteLine(DeleteOutput.Line(result, format)) : notifications.OnDeleteResult,
                     request.Hooks,
                     notifications?.OnDirectoryCount,
-                    prepared.SessionFor(request.Mode)));
+                    prepared.SessionFor(request.Mode),
+                    pruneTargets,
+                    notifications is null ? result => output.WriteLine(DeleteOutput.DirectoryLine(result)) : notifications.OnDirectoryResult));
 
                 if (notifications is null)
                 {
@@ -120,8 +134,9 @@ public static class DeleteCommand
                     WriteRemainingErrors(report);
                 }
 
-                // STOP、または STOP がなくても DELETE_FAILED が1件以上あればエラー (docs/spec/cli.md#arguments、docs/RATIONALE.md#open-failures)。
-                var status = report.Stop is null && report.Count(DeleteStatus.DeleteFailed) == 0 ? ExitStatus.Success : ExitStatus.Error;
+                // STOP (ディレクトリ段階を含む)、または STOP がなくても DELETE_FAILED が1件以上あればエラー (docs/spec/cli.md#arguments、docs/RATIONALE.md#open-failures)。
+                // DIR_KEPT・DIR_MISSING は終了状態を変えない。
+                var status = !report.Stopped && report.Count(DeleteStatus.DeleteFailed) == 0 ? ExitStatus.Success : ExitStatus.Error;
                 return new DeleteCommandOutcome(status, report);
             }
         }
@@ -143,7 +158,7 @@ public static class DeleteCommand
     // 確認入力は y / Y だけを開始とする。空入力、EOF、その他は中止。非対話で --yes がなければ中止 (docs/spec/cli.md#arguments)。
     public static bool IsConfirmation(string? answer) => answer is "y" or "Y";
 
-    private static bool Confirm(DeleteCommandRequest request, int fileEntries)
+    private static bool Confirm(DeleteCommandRequest request, int fileEntries, int? directories)
     {
         var output = request.Context.Output;
         if (!request.Prompt.IsInteractive)
@@ -154,7 +169,7 @@ public static class DeleteCommand
         }
 
         request.AwaitingConfirmation?.Invoke();
-        if (IsConfirmation(request.Prompt.Ask(DeleteOutput.ConfirmationPrompt(fileEntries, request.Mode, ArchiveFormats.FromPath(request.ArchivePath)))))
+        if (IsConfirmation(request.Prompt.Ask(DeleteOutput.ConfirmationPrompt(fileEntries, request.Mode, ArchiveFormats.FromPath(request.ArchivePath), directories))))
         {
             return true;
         }

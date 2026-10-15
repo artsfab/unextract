@@ -8,7 +8,7 @@ public sealed class LockUiTests(ITestOutputHelper output) : UiTestBase(output)
     private static readonly string[] LockedTopLevel =
     [
         "SearchDirectoryBox", "SearchButton", "ChooseFolderButton", "RecursiveCheckBox", "StrictRadio", "FastRadio",
-        "BulkAddButton", "SelectionMenuButton", "AnalyzeSelectedButton", "DeleteSelectedButton",
+        "PruneDirsCheckBox", "BulkAddButton", "SelectionMenuButton", "AnalyzeSelectedButton", "DeleteSelectedButton",
     ];
 
     // The row check boxes, and the operations in the details of the archive and of the Target (viewing them is allowed).

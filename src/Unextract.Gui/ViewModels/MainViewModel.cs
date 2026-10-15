@@ -12,6 +12,7 @@ internal sealed partial class MainViewModel : ObservableModel
     private readonly ICliProcessRunner _runner;
     private string _searchDirectory = "";
     private bool _recursive = true;
+    private bool _pruneDirs;
     private bool _busy;
     private bool _hasSession;
     private string _filter = "";
@@ -47,6 +48,12 @@ internal sealed partial class MainViewModel : ObservableModel
     {
         get => _recursive;
         set { if (IsSettingsEditable) Set(ref _recursive, value); }
+    }
+    // Delete-only setting (docs/spec/gui.md#prune-dirs). analyze does not change, so switching keeps analysis results.
+    public bool PruneDirs
+    {
+        get => _pruneDirs;
+        set { if (IsSettingsEditable) Set(ref _pruneDirs, value); }
     }
     public string ArchiveFilter
     {

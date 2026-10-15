@@ -40,6 +40,7 @@ internal static class CliJobText
                 if (e.Win32Error is not null) detail.Add($"win32_error={e.Win32Error}");
                 lines.Add("error: " + DisplayText.Escape(string.Join(" ", detail)));
                 if (e.EntryName is not null) lines.Add("エントリ: " + DisplayText.Escape(e.EntryName));
+                if (e.DirPath is not null) lines.Add("フォルダー: " + DisplayText.Escape(e.DirPath));
                 if (e.Message is not null) lines.Add(DisplayText.Escape(e.Message));
             }
         }

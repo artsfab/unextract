@@ -23,7 +23,7 @@ Windows 11 の CLI。単一のアーカイブ (ZIP、または [RAR](spec/rar.md
 
 **削除安全性の根拠は、`ZipArchive` (RAR では UnRAR.dll) から実際に読み出した内容と target の全バイト一致である。** CRC-32 (RAR では BLAKE2 も) は偶発的な破損・切り詰め・記録と実データの食い違いを検出する補助検査であり、削除の根拠でも、敵対的に作られたアーカイブへの防御でもない ([CRC](spec/zip.md#crc)、[RARの内容検証](spec/rar.md#verification))。
 
-ZIP にない target 内のファイルは表示・集計・分類・削除しない (完全に無視する)。実名を確認するために target 内のディレクトリの項目を走査することはあるが ([実名確認](spec/filesystem.md#real-names))、走査した名前は ZIP エントリの成分名との照合にだけ使い、照合しなかった名前は保持も出力もしない。ディレクトリは、ZIP に明示されていても、ファイル削除後に空になっても削除しない。target と ZIP 自身も削除しない。クラウド placeholder やクラウド同期の意味論は対象外とし、安全に通常ファイルと認定できない対象は削除しない。
+ZIP にない target 内のファイルは表示・集計・分類・削除しない (完全に無視する)。実名を確認するために target 内のディレクトリの項目を走査することはあるが ([実名確認](spec/filesystem.md#real-names))、走査した名前は ZIP エントリの成分名との照合にだけ使い、照合しなかった名前は保持も出力もしない。ディレクトリは、既定では ZIP に明示されていても、ファイル削除後に空になっても削除しない。`delete --prune-dirs` を指定した場合だけ、ファイルの処理の後に、アーカイブ由来のパスにある空のディレクトリを1件ずつ検証して削除する ([空ディレクトリ](spec/filesystem.md#prune-dirs))。再帰削除はしない。target と ZIP 自身も削除しない。クラウド placeholder やクラウド同期の意味論は対象外とし、安全に通常ファイルと認定できない対象は削除しない。
 
 同梱のGUI (`unextract-gui.exe`) は、アーカイブ (ZIP・RAR) の検索と複数Targetの管理・順次実行を担うラッパーで、このCLIを子プロセスとして起動し[機械可読出力](spec/machine-output.md)を使う。一致判定・削除の安全性はCLIだけが判断し、GUIの契約は[GUI](spec/gui.md)が定める。
 
@@ -40,7 +40,7 @@ ZIP にない target 内のファイルは表示・集計・分類・削除し�
 6. **ZIP の全エントリ**の名前、種類、重複・衝突、resource limits ([ZIP上限](spec/zip.md#limits)) を検査する ([ZIP名と構造](spec/zip.md#names))。RAR の全エントリは DLL が列挙したエントリで、RAR 固有の受理範囲 (Solid・前後の巻へ続くエントリ・暗号化・リンク・作成元 OS・辞書サイズなど) もここで検査する ([RARの列挙](spec/rar.md#listing))。RAR のボリュームのフラグと、エントリ総数・名前長・メタデータ総量は手順2で検査済みである (ZIP はこれらの上限もこの手順で検査する)。`--entries` の有無に関係なく全エントリに行う。この段階は target に触れず、target の状態に依存しない。1件でも不正または判定不能なら FATAL。
 7. ZIP 自身の個体 ([特殊ファイルと属性](spec/filesystem.md#special-files)) のボリュームシリアルと File ID を、ZIP のパスを `FILE_READ_ATTRIBUTES` のみで reparse をたどるハンドルで開いて得る (ZIP は保持済みで改名・削除されないため、実体の ID になる)。失敗は FATAL。
 8. (`--entries` を指定した場合) entries の各行を手順6を通過したエントリと照合する ([entries](spec/cli.md#entries))。
-9. 処理対象を決める: `analyze` は全エントリ。`delete` は全エントリ、または `--entries` で選んだエントリ (ZIP の順)。
+9. 処理対象を決める: `analyze` は全エントリ。`delete` は全エントリ、または `--entries` で選んだエントリ (ZIP の順)。`delete --prune-dirs` では、ディレクトリ段階の対象と順序もここで決める ([対象と順序](spec/filesystem.md#prune-set))。
 10. (Strict の RAR の場合) DLL でアーカイブを内容読み取り用に開き、実行終了まで保持する。ここで行うのは読み取りセッションの準備 (open) だけで、内容の読み取り・展開・全バイト検証はエントリの処理で行う ([RARの読む範囲と順序](spec/rar.md#session))。失敗は FATAL。
 
 実行全体で保持するハンドルはアーカイブと target ルートの2つだけである (`--log` を指定した場合はログファイルを加えた3つ)。Strict の RAR では、これに加えて手順10の DLL の読み取りセッション (DLL が自分で開いたアーカイブ) を保持する。
@@ -49,14 +49,14 @@ ZIP にない target 内のファイルは表示・集計・分類・削除し�
 ## エントリの処理
 
 - `analyze`: 処理対象を ZIP の順に1件ずつ target 側で解決・分類する ([target分類](spec/filesystem.md#classification)、[特殊ファイルと属性](spec/filesystem.md#special-files))。内容比較候補は Strict では全バイト比較し、Fast では内容を読まずに `SAME_SIZE` と分類する ([モード契約](#modes))。比較用ハンドルは**そのエントリの判定が終わった時点で閉じる**。最初の FATAL で打ち切り、以後は未判定とする。結果を表示して終了する ([表示](spec/cli.md#output))。
-- `delete`: 処理対象を ZIP の順に1件ずつ、[削除順序](spec/filesystem.md#delete-flow) の手順で処理する。各エントリで削除用ハンドルを1回だけ開き、同じハンドルで検査・(Strict の) 全バイト比較・最終確認・削除・成立確認を行い、閉じてから次へ進む。数千〜数万件のハンドルを同時に保持しない。結果は1件ごとに表示する ([表示](spec/cli.md#output))。STOP ([失敗の境界](spec/filesystem.md#failure-boundary)) した場合、以後のエントリは処理しない。指示前なら対象を残し、指示後に成立を確認できなければ削除された可能性を報告する。
+- `delete`: 処理対象を ZIP の順に1件ずつ、[削除順序](spec/filesystem.md#delete-flow) の手順で処理する。各エントリで削除用ハンドルを1回だけ開き、同じハンドルで検査・(Strict の) 全バイト比較・最終確認・削除・成立確認を行い、閉じてから次へ進む。数千〜数万件のハンドルを同時に保持しない。結果は1件ごとに表示する ([表示](spec/cli.md#output))。STOP ([失敗の境界](spec/filesystem.md#failure-boundary)) した場合、以後のエントリは処理しない。指示前なら対象を残し、指示後に成立を確認できなければ削除された可能性を報告する。`--prune-dirs` では、ファイルの処理が STOP なしで終わった後にだけディレクトリ段階を1回行う ([対象と順序](spec/filesystem.md#prune-set))。各ディレクトリでディレクトリ削除用ハンドルを1回だけ開き、同じハンドルで照合・検査・空の確認・最終確認・削除・成立確認を行う。
 
 <a id="zero-deletions"></a>
 ## 削除0件の範囲
 
 Prepareのどの段階の入力エラー・FATALでも、確認での中止でも削除0件である。entriesの全形式検査・照合もこの範囲に含む。analyzeは常に削除0件である。機械可読出力では `run` レコードの有無がこの境界を示す ([完了境界](spec/machine-output.md#boundary))。
 
-逐次delete開始後のSTOPでは、それ以前の削除は戻らず、以後は未処理となる。指示前のSTOPは対象を削除しない。指示後に成立を確認できない場合や指示後の例外では、対象は削除された可能性がある。[失敗の境界](spec/filesystem.md#failure-boundary)を参照する。
+逐次delete開始後のSTOPでは、それ以前の削除は戻らず、以後は未処理となる。指示前のSTOPは対象を削除しない。指示後に成立を確認できない場合や指示後の例外では、対象は削除された可能性がある。[失敗の境界](spec/filesystem.md#failure-boundary)を参照する。ディレクトリ段階の STOP も同じで、それまでに削除したファイル・ディレクトリは戻らない ([ディレクトリ段階の失敗](spec/filesystem.md#prune-failures))。
 
 <a id="failure-stages"></a>
 ## FATALとSTOPの段階境界
@@ -79,7 +79,7 @@ Prepareのどの段階の入力エラー・FATALでも、確認での中止で�
 <a id="delete-failures"></a>
 ### deleteのエントリ処理中のSTOP
 
-[失敗の境界](spec/filesystem.md#failure-boundary) に従う。[analyzeのFATAL](#analyze-failures)の各条件は、`delete` では STOP になる (共有違反・アクセス拒否のオープン失敗は、識別確認により `DELETE_FAILED` または STOP)。加えて、親 File ID の不一致 ([解決順序](spec/filesystem.md#resolution) の手順4)、最終確認の不一致 ([削除順序](spec/filesystem.md#delete-flow) の手順7)、削除の指示と成立確認の失敗が STOP になる。
+[失敗の境界](spec/filesystem.md#failure-boundary) に従う。[analyzeのFATAL](#analyze-failures)の各条件は、`delete` では STOP になる (共有違反・アクセス拒否のオープン失敗は、識別確認により `DELETE_FAILED` または STOP)。加えて、親 File ID の不一致 ([解決順序](spec/filesystem.md#resolution) の手順4)、最終確認の不一致 ([削除順序](spec/filesystem.md#delete-flow) の手順7)、削除の指示と成立確認の失敗が STOP になる。ディレクトリ段階の STOP と `DIR_KEPT` の境界は[ディレクトリ段階の失敗](spec/filesystem.md#prune-failures)による。
 
 `MISSING`・サイズ不一致の `MODIFIED`・`SKIPPED_SPECIAL_FILE` のエントリについては内容を読まないため、その圧縮データの破損・暗号化・未対応方式だけでは FATAL・STOP にならない。名前・パス・構造・特殊種別・宣言側の resource limits の検査は Prepare で全エントリに行う。
 

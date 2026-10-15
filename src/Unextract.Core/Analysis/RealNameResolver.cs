@@ -20,10 +20,16 @@ internal sealed class RealNameResolver
     private readonly Dictionary<string, Dictionary<string, DirectoryItem>> _matched = new(StringComparer.Ordinal);
 
     public RealNameResolver(IFileSystemProbe probe, TargetRoot root, IEnumerable<ValidatedZipEntry> entries)
+        : this(probe, root, CollectWantedNames(entries))
+    {
+    }
+
+    // wanted はディレクトリキーごとの探す成分名 (CollectWantedNames)。ディレクトリ段階は対象のディレクトリのパスから作る。
+    public RealNameResolver(IFileSystemProbe probe, TargetRoot root, Dictionary<string, HashSet<string>> wanted)
     {
         _probe = probe;
         _root = root;
-        _wanted = CollectWantedNames(entries);
+        _wanted = wanted;
     }
 
     // 列挙を終えたディレクトリで記録している名前の全て (照合しなかった名前を含まないことの確認用)。
@@ -33,20 +39,19 @@ internal sealed class RealNameResolver
     public IEnumerable<string> EnumeratedDirectories => _matched.Keys;
 
     // ディレクトリキーごとに、その直下で探す成分名の集合を作る。ディレクトリエントリは target を調べないため含めない。
-    public static Dictionary<string, HashSet<string>> CollectWantedNames(IEnumerable<ValidatedZipEntry> entries)
+    public static Dictionary<string, HashSet<string>> CollectWantedNames(IEnumerable<ValidatedZipEntry> entries) =>
+        CollectWantedNames(entries.Where(e => !e.IsDirectory).Select(e => e.Components));
+
+    // 各パスの全成分 (最終成分を含む) を、その親のディレクトリキーの下で探す名前として集める。
+    public static Dictionary<string, HashSet<string>> CollectWantedNames(IEnumerable<IReadOnlyList<string>> paths)
     {
         var wanted = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        foreach (var entry in entries)
+        foreach (var components in paths)
         {
-            if (entry.IsDirectory)
-            {
-                continue;
-            }
-
             var key = string.Empty;
-            for (var i = 0; i < entry.Components.Count; i++)
+            for (var i = 0; i < components.Count; i++)
             {
-                var name = entry.Components[i];
+                var name = components[i];
                 if (!wanted.TryGetValue(key, out var names))
                 {
                     names = new HashSet<string>(StringComparer.Ordinal);

@@ -76,6 +76,7 @@ Coreは副作用・API失敗を注入した判定、Winは実NTFS/Win32、CLIは
 | target・属性・実名 | T | [ClassificationTests](../tests/Unextract.Core.Tests/ClassificationTests.cs)、[FileAttributeRulesTests](../tests/Unextract.Core.Tests/FileAttributeRulesTests.cs)、[Win分類](../tests/Unextract.Windows.Tests/Integration/ClassificationIntegrationTests.cs)、[TargetRootTests](../tests/Unextract.Core.Tests/TargetRootTests.cs) |
 | analyze | A | [CommandTests](../tests/Unextract.Core.Tests/CommandTests.cs)、[ClassificationTests](../tests/Unextract.Core.Tests/ClassificationTests.cs)、[Win逐次](../tests/Unextract.Windows.Tests/Integration/SequentialDeleteIntegrationTests.cs) |
 | 削除・競合・エラー | S | [SequentialDeleteTests](../tests/Unextract.Core.Tests/SequentialDeleteTests.cs)、[Win逐次](../tests/Unextract.Windows.Tests/Integration/SequentialDeleteIntegrationTests.cs)、[DeletionHandleTests](../tests/Unextract.Windows.Tests/DeletionHandleTests.cs) |
+| 空ディレクトリの削除 (`--prune-dirs`) | D | [PruneDirectoryTests](../tests/Unextract.Core.Tests/PruneDirectoryTests.cs) (対象と順序、段階の開始条件、残す理由、最終成分のDEVICE、オープン失敗と識別確認、145 (DeletePendingがfalseと確認できない場合のSTOPを含む)、D0と最終確認 (同一性の不一致・取得失敗を含む)、指示・成立確認の失敗、呼び出し順、表示・確認・通知、引数)、[PruneDirectoryIntegrationTests](../tests/Unextract.Windows.Tests/Integration/PruneDirectoryIntegrationTests.cs) (実NTFS: READONLY・HIDDEN、junction・ADS、別プロセスの作業フォルダー、変更通知の監視との共存、空の確認後の作成、開いている間の改名、POSIX削除済みファイルの親、ハンドル構成)、[PruneMachineTests](../tests/Unextract.Cli.Tests/PruneMachineTests.cs) (`run`・`dir`・`counts`・`dir_path`)、[PruneE2ETests](../tests/Unextract.E2E.Tests/PruneE2ETests.cs) (D35・D36: exeの人間向け表示 (深い順、もとから空の明示ディレクトリ、DIR_MISSING、要約) と、`--entries` ありのJSONL・ログのbyte一致 (Strict/Fast))。GUIの経路は[GUI](#gui)のPruneDirsGuiTests |
 | entries | L | [EntriesListTests](../tests/Unextract.Core.Tests/EntriesListTests.cs)、[CommandTests](../tests/Unextract.Core.Tests/CommandTests.cs)、[Win逐次](../tests/Unextract.Windows.Tests/Integration/SequentialDeleteIntegrationTests.cs) |
 | 引数 | K | [CommandLineParserTests](../tests/Unextract.Core.Tests/CommandLineParserTests.cs)、[CliApplicationTests](../tests/Unextract.Cli.Tests/CliApplicationTests.cs) |
 | 機械モード引数・事前検出 | J01〜J03 | [CommandLineParserTests](../tests/Unextract.Core.Tests/CommandLineParserTests.cs) のJ01/J02、[MachineModeDetectionTests](../tests/Unextract.Cli.Tests/MachineModeDetectionTests.cs) のJ03 ([起動](spec/machine-output.md#invocation)) |
@@ -87,7 +88,7 @@ Coreは副作用・API失敗を注入した判定、Winは実NTFS/Win32、CLIは
 | ASCII/LFのシリアライズ | J08 | [MachineOutputTests](../tests/Unextract.Cli.Tests/MachineOutputTests.cs) |
 | 同期配送・出力失敗先の非再利用 | J09 | [MachineOutputWriterTests](../tests/Unextract.Cli.Tests/MachineOutputWriterTests.cs) |
 | ログの新規作成・実共有 | J10 | [ExecutionLogTests](../tests/Unextract.Cli.Tests/ExecutionLogTests.cs) |
-| Core型からv1レコードへの対応 | J11 | [MachineRecordTests](../tests/Unextract.Cli.Tests/MachineRecordTests.cs) |
+| Core型からv2レコードへの対応 | J11 | [MachineRecordTests](../tests/Unextract.Cli.Tests/MachineRecordTests.cs) |
 | CLIの機械経路・ログ所有・終端 | J12 | [MachineCliTests](../tests/Unextract.Cli.Tests/MachineCliTests.cs) |
 | 配送失敗と完了境界の結合 | J13 | [MachineBoundaryTests](../tests/Unextract.Cli.Tests/MachineBoundaryTests.cs) |
 | 機械出力のexe (通常build・publish版)、実行中のログ保持、実パイプ切断の観測 | J14〜J19 | [MachineOutputE2ETests](../tests/Unextract.E2E.Tests/MachineOutputE2ETests.cs)。J19の観測条件は[OPEN_ISSUES](OPEN_ISSUES.md#observations) |
@@ -114,24 +115,25 @@ A05はanalyzeへの--yes/-y/--entries/--dry-run拒否をK系と同じ条件で�
 | 画面の配置制約の正本 (全状態×寸法とダイアログ、STA) | [ScreenRenderTests](../tests/Unextract.Gui.Tests/ScreenRenderTests.cs)。描画は毎回、PNGの保存は `UNEXTRACT_GUI_SHOTS` 指定時だけ ([画面確認](#gui-review)) |
 | 解析キュー・結果表示・終了操作 | [AnalysisQueueTests](../tests/Unextract.Gui.Tests/AnalysisQueueTests.cs)、[AnalysisViewTests](../tests/Unextract.Gui.Tests/AnalysisViewTests.cs) |
 | 削除計画・起動・結果表示 | [DeletionPreparationTests](../tests/Unextract.Gui.Tests/DeletionPreparationTests.cs)、[DeleteReportTests](../tests/Unextract.Gui.Tests/DeleteReportTests.cs) |
+| 空のフォルダーの削除 (`--prune-dirs`: 受信、結果表示、設定・計画・引数、同梱の実CLI) | [PruneDirsGuiTests](../tests/Unextract.Gui.Tests/PruneDirsGuiTests.cs) |
 | 同梱の実CLIとの結合 (Fast・Strict・連番ログ・RAR) | [IntegrationTests](../tests/Unextract.Gui.Tests/IntegrationTests.cs) |
 | 性能 (模擬データ。実測値はテスト出力) | [PerformanceTests](../tests/Unextract.Gui.Tests/PerformanceTests.cs)、[LargeSessionPerformanceTests](../tests/Unextract.Gui.Tests/LargeSessionPerformanceTests.cs) |
 | UI E2E専用の保存先の切替 | [GuiDataRootTests](../tests/Unextract.Gui.Tests/GuiDataRootTests.cs) |
 
 [UI E2E](../tests/Unextract.Gui.UiTests)は、FlaUI UIA3とxUnitで、配布形態のGUI (publishした `unextract-gui.exe`) を別プロセスとして起動し、UI Automation経由で操作・観測する。製品はFlaUIを参照しない。既存のSTA上のWPFテストを置き換えるものではない。範囲は次のとおり。
 
-- Archive単位のまとめ選択 (作業一覧の行のチェック) と表示中の選択操作、閲覧 (詳細欄) と一括選択の独立 (絞り込みで隠れた閲覧対象、閲覧中のTargetの除去)、隠れた選択済みTargetの確認画面での印・件数と偽CLIの記録 (entriesに含まれる)、Target編集ロックと削除実行済みTargetの再解析まで続くロック、再検索の確認、Fast警告とモード変更の確認・Fastの両非保証の再表示、削除除外の理由と既定ボタン (Enter・Escで偽CLIが起動されない)、削除できるTargetが無いときの理由の一覧。
+- Archive単位のまとめ選択 (作業一覧の行のチェック) と表示中の選択操作、閲覧 (詳細欄) と一括選択の独立 (絞り込みで隠れた閲覧対象、閲覧中のTargetの除去)、隠れた選択済みTargetの確認画面での印・件数と偽CLIの記録 (entriesに含まれる)、Target編集ロックと削除実行済みTargetの再解析まで続くロック、再検索の確認、Fast警告とモード変更の確認・Fastの両非保証の再表示、空のフォルダーの削除の設定 (既定OFF、確認画面の表示、偽CLIの記録の `--prune-dirs`、フォルダーの結果の表示)、削除除外の理由と既定ボタン (Enter・Escで偽CLIが起動されない)、削除できるTargetが無いときの理由の一覧。
 - 失敗・結果不明の画面 (偽CLIの異常出力で到達させる): 解析失敗の詳細、`DELETE_FAILED`での停止と後続の未実行、未知の版による結果不明とログの案内、出力の途絶による不完全な結果。
 - キーボード操作 (Tab順が視覚順でウィンドウ自体に止まらないこと、モードは1停止位置で矢印でも同じ確認を経て変わること、[基本の流れ](spec/gui.md#quality)の全行程を明示承認までキーボードだけで行うこと、Target設定のEnter・Esc・不正テンプレート)。
 - 起動時の寸法で主要部品がウィンドウ内にあること (寸法は変えない。ウィンドウのDPIを出力する。状態×寸法の配置は上のScreenRenderTests)、不可視文字・260文字を超えるパスの表示 (読取専用のテキスト欄の値も含む)、実行中終了 (解析のキャンセル、deleteは現在Targetだけ完了して後続を起動しない)、保存フォルダー操作 (保存先の案内、フォルダー選択ダイアログのEsc)。
 
 - 実CLIの正常系1本 (配布物と自作GUID fixtureで、検索 → Strict解析 → 確認 → 削除。MATCHEDだけが消え、命名どおりのログができ、一時entriesが残らない)。
 
-各テストのGUIは、一意なfixtureをデータルート・`TMP`/`TEMP`・偽CLIシナリオにして起動する。全体の前後で利用者の `%LOCALAPPDATA%\unextract` が変わらないことを、読み取りだけで確認する。待機は期限付きの条件確認で、固定sleepは否定の確認の短い待ちだけに使う。入力は原則UIAのパターンで、実マウス・実キーはキーボード操作とクリックの確認 (モードのラジオボタンなど) に限り、効果が見えるまで再試行する。1秒を超えた待機は待った対象とともにテスト出力に書き、タイムアウトには待機中に起きた例外の種類と回数を含める。各テストは起動したGUIのfixtureと結果ディレクトリをテスト出力に書く。
+各テストのGUIは、一意なfixtureをデータルート・`TMP`/`TEMP`・偽CLIシナリオにして起動する。全体の前後で利用者の `%LOCALAPPDATA%\unextract` が変わらないことを、読み取りだけで確認する。待機は期限付きの条件確認で、固定sleepは否定の確認の短い待ちだけに使う。入力は原則UIAのパターンで、実マウス・実キーはキーボード操作とクリックの確認 (モードのラジオボタンなど) に限り、効果が見えるまで再試行する。1秒を超えた待機は待った対象とともにテスト出力に書き、タイムアウトには待機中に起きた例外の種類と回数を含める。どちらにも確認の回数と1回の確認の最長時間を付け、UI Automationの呼び出しが長く止まったのか、短い確認が見つからないまま続いたのかを区別できるようにする。各テストは起動したGUIのfixtureと結果ディレクトリをテスト出力に書く。
 
 合否と失敗時の診断: UI E2Eは全件1回の成功で合格とし、再試行で合格にせず、1回の失敗も不具合として扱う。テスト本体が失敗すると ([UiFact/UiTheory](../tests/Unextract.Gui.UiTests/UiFact.cs) が本体の直後に呼ぶ)、GUIを閉じる前に、結果ディレクトリ (`run-gui-ui-tests.ps1` が渡す `UNEXTRACT_UI_RESULTS`。[標準の検証](#verify)) の `diagnostics\<テスト名>-<id>\` へ、デスクトップ全体の画面、GUIプロセスの全トップレベルウィンドウのUIAの木、偽CLIのシナリオと呼び出し記録、GUIのデータルート (設定・ログ) を保存する。後始末は、偽CLIの解放ファイルを作ってから通常終了を要求する。終了しなければテストを失敗にしてプロセスIDを報告し、診断を保存してから、そのテストが起動したプロセスツリーだけを強制終了して後続のテストへの影響を断つ。診断には期限があり、取得に失敗しても強制終了は省かない。終了を確認できなければ、残ったfixtureのパスも報告する。
 
-[偽CLI](../tests/Unextract.Gui.FakeCli)は、シナリオファイル (環境変数 `UNEXTRACT_FAKE_CLI_SCENARIO`) の応答をoperation・archive・targetで選び (`max_uses` あり)、JSONL v1の行をそのまま書く。解放ファイルを待つことで「実行中」を決定的に作り、受け取った引数とentriesの内容を記録する。ZIP・targetの読み書きと削除・改名は一切しない。`--log` が渡されたときは本物と同じく新規作成して同じ行を書く。シナリオ未指定、または一致する応答がなければ何も書かず終了コード3。配布物には入れない。[FakeCliTests](../tests/Unextract.Gui.UiTests/FakeCliTests.cs)は非UIで、偽CLIの正常系の出力 (Strict/Fastの解析、delete) が、同じ自作fixtureを同梱の実CLIで実行したJSONLと同じレコード (種別・フィールド・型・値) であることと、偽CLIの記録・解放待ち・ログを確認する。
+[偽CLI](../tests/Unextract.Gui.FakeCli)は、シナリオファイル (環境変数 `UNEXTRACT_FAKE_CLI_SCENARIO`) の応答をoperation・archive・targetで選び (`max_uses` あり)、JSONL v2の行をそのまま書く。解放ファイルを待つことで「実行中」を決定的に作り、受け取った引数とentriesの内容を記録する。ZIP・targetの読み書きと削除・改名は一切しない。`--log` が渡されたときは本物と同じく新規作成して同じ行を書く。シナリオ未指定、または一致する応答がなければ何も書かず終了コード3。配布物には入れない。[FakeCliTests](../tests/Unextract.Gui.UiTests/FakeCliTests.cs)は非UIで、偽CLIの正常系の出力 (Strict/Fastの解析、delete) が、同じ自作fixtureを同梱の実CLIで実行したJSONLと同じレコード (種別・フィールド・型・値) であること (`--prune-dirs` の `dir` を含む) と、偽CLIの記録・解放待ち・ログを確認する。
 
 UI E2Eは[標準の検証](#verify)の最後の段で、その前提 (ロックされていない対話デスクトップなど) に従う。通常の `dotnet test unextract.sln` では実行されず (`dotnet build unextract.sln` ではビルドされる)、次のスクリプトだけが実行する。スクリプトは配布物と偽CLI入りの複製をOS tempへ作り、パスを環境変数 (`UNEXTRACT_UI_GUI_PACKAGE`・`UNEXTRACT_UI_FAKE_PACKAGE`) で渡し、0件の実行を失敗とし、環境変数を復元して自作tempだけを後始末する。環境変数が無ければテストは失敗する (前提不成立にしない)。UI E2Eの合格は、色・フォーカス枠・省略表示・DPIの目視確認や、CLIの安全性・実データでの性能の代替ではない。
 
@@ -178,6 +180,9 @@ STA上でWPFのウィンドウを作るGui.Testsのクラス (AnalysisViewTests�
 | H3 / DuringCompare | 全バイト比較中、target最初のread直前 | Strictのみ |
 | H4 / BeforeFinalCheck | 最終確認直前 | Strict/Fast |
 | H5 / BeforeDisposition | 最終確認後、削除指示直前 | Strict/Fast。fixtureガードにも使う |
+| H6 / BeforeDirectoryOpen | ディレクトリ段階の解決・事前判定後、ディレクトリ削除用open直前 | `--prune-dirs` |
+| H7 / BeforeDirectoryFinalCheck | ディレクトリ段階の空の確認後、最終確認直前 | `--prune-dirs` |
+| H8 / BeforeDirectoryDisposition | ディレクトリ段階の最終確認後、削除指示直前 | `--prune-dirs`。fixtureガードにも使う |
 
 analyzeのAfterResultsは結果表示直後、deleteのAwaitingConfirmationは確認直前。偽FSでエラーコード・情報取得・削除API失敗を注入する。コード位置は[DeleteHooks](../src/Unextract.Core/Deletion/SequentialDeleter.cs)、[DeleteCommand](../src/Unextract.Core/Commands/DeleteCommand.cs)、[AnalyzeCommand](../src/Unextract.Core/Commands/AnalyzeCommand.cs)、[FakeFileSystem](../tests/Unextract.Core.Tests/Fakes/FakeFileSystem.cs)。
 

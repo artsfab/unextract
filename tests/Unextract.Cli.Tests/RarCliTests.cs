@@ -150,5 +150,7 @@ public class RarCliTests
         public ProbeResult<IDeletionHandle> OpenForDeletion(string path) => throw new InvalidOperationException("削除用に開いた");
 
         public ProbeResult<IdentityCheckInfo> CheckIdentity(string path) => throw new InvalidOperationException("識別確認をした");
+
+        public ProbeResult<IDirectoryDeletionHandle> OpenDirectoryForDeletion(string path) => throw new InvalidOperationException("ディレクトリ削除用に開いた");
     }
 }

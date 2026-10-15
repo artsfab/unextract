@@ -9,24 +9,25 @@
 
 ```text
 unextract analyze <archive> --target <dir> [--fast] [--jsonl]
-unextract delete  <archive> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
+unextract delete  <archive> --target <dir> [--fast] [--entries <file>] [--prune-dirs] [--yes|-y] [--jsonl] [--log <file>]
 ```
 
 - `<archive>` は ZIP または RAR のアーカイブ1つ ([対象](../SPEC.md#scope))。拡張子が `.rar` (大小文字を区別しない) なら RAR、それ以外は ZIP として扱う ([RARの形式の判定](rar.md#format))。
 - 第1引数はサブコマンドで、`analyze` または `delete` (小文字の完全一致) だけを受け付ける。サブコマンドが無い (旧形式 `unextract <archive> --target <dir>` を含む)、または不明なサブコマンドは入力エラーとし、削除処理を開始せず、両サブコマンドの使い方を表示する。
 - `--dry-run` は廃止した。どの位置にあっても入力エラーとし、削除処理を開始せず、結果の確認には `analyze` を使うよう案内する。互換動作 (別名) は設けない。
-- `analyze` が受け付けるオプションは `--target`、`--fast`、`--jsonl` だけ、`delete` は `--target`、`--fast`、`--entries`、`--yes`/`-y`、`--jsonl`、`--log` だけである。それ以外 (`analyze` に `--entries`・`--yes`・`-y`・`--log` を指定した場合を含む) は入力エラーとする。
+- `analyze` が受け付けるオプションは `--target`、`--fast`、`--jsonl` だけ、`delete` は `--target`、`--fast`、`--entries`、`--prune-dirs`、`--yes`/`-y`、`--jsonl`、`--log` だけである。それ以外 (`analyze` に `--entries`・`--prune-dirs`・`--yes`・`-y`・`--log` を指定した場合を含む) は入力エラーとする。
+- `--prune-dirs` は値を取らないフラグで、位置は自由、重複は入力エラー。指定すると、ファイルの処理が STOP なしで終わった後に、アーカイブ由来のパスにある空のディレクトリを削除する ([空ディレクトリ](filesystem.md#prune-dirs))。対象のパスは `--entries` の有無で変わる ([対象と順序](filesystem.md#prune-set))。
 - `--jsonl` は機械可読出力を選ぶ ([機械可読出力](machine-output.md))。機械モードの `delete` では `--yes`/`-y` が必須で、`--log <file>` (実行ログ) は機械モードの `delete` だけで受け付ける ([起動](machine-output.md#invocation))。`--jsonl` なしの実行には本書の規定がそのまま適用される。
 - `--target`、`--entries`、`--log` はオプション名と値を別々の引数で渡す形だけとし、`--target=dir` の形、値が無い・空、値が `-` で始まる、同じオプションの重複 (`--yes` と `-y` の併用を含む)、アーカイブの指定が無い・複数は、いずれも入力エラーとする。
 - `--target` は必須。既存ディレクトリ・NTFS・拒否位置・reparse・最終パスの検証は[FSのtargetルート](filesystem.md#target-root)による。
 - `--fast` を指定すると、その実行全体が Fast モードになる ([モード契約](../SPEC.md#modes))。指定しなければ Strict である。
 - `--entries <file>` は `delete` の処理対象を、ファイルに列挙した ZIP エントリに限定する ([entries](#entries))。安全性の判断を変えず、処理範囲を狭めるだけである。指定しなければ、全エントリが処理対象になる。
 - `delete` は、[確認](#confirmation) の時点で `[y/N]` を表示し、`y`/`Y` の明示入力だけで逐次処理を開始する。空入力、EOF、その他の入力は中止。標準入力が非対話で `--yes` がない場合も中止。`--yes` は確認のみを省略し、検証は省略しない。
-- 削除は通常の完全削除であり、ごみ箱は使わない。削除するのは検証済みの個別ファイルだけ。再帰削除はしない。
+- 削除は通常の完全削除であり、ごみ箱は使わない。削除するのは検証済みの個別ファイルと、`--prune-dirs` で空と確認したディレクトリだけ。再帰削除はしない。
 - **`analyze` の結果は削除の許可証ではない。** `delete` は `analyze` の結果を参照せず、必ず実行時点の状態を検証する。そのため、`analyze` と `delete` の分類が一致することは保証しない (間の変更、削除権限の有無 ([ハンドル構成](filesystem.md#handles))、共有違反の扱い ([失敗の境界](filesystem.md#failure-boundary))、[特殊ファイルと属性](filesystem.md#special-files) の事前判定による差があり得る)。
 - 終了状態は「成功」「利用者による中止」「エラー」の簡易区分とし、細分化した終了コード体系は設けない。プロセスの終了コードは成功 0、エラー 1、利用者による中止 2 とする。
   - `analyze`: 全エントリの分類を完走すれば成功。入力エラー、FATAL、内部エラーはエラー。中止は無い。
-  - `delete` の成功: 処理対象の逐次処理を最後まで行い、STOP がなく `DELETE_FAILED` が0件の場合。削除0件 (全て `MODIFIED`・`MISSING` など) も成功とする。
+  - `delete` の成功: 処理対象の逐次処理を最後まで行い (`--prune-dirs` ではディレクトリ段階まで)、STOP がなく `DELETE_FAILED` が0件の場合。削除0件 (全て `MODIFIED`・`MISSING` など) も成功とする。`DIR_KEPT`・`DIR_MISSING` は成功を妨げない。
   - `delete` の利用者による中止: 確認で `y`/`Y` 以外が入力された、または非対話で `--yes` がない場合 (削除0件)。
   - `delete` のエラー: 入力エラー、Prepare の FATAL、内部エラー、STOP ([失敗の境界](filesystem.md#failure-boundary)) に加え、**STOP はなかったが `DELETE_FAILED` が1件以上ある場合**。いずれの場合も終了時の要約に件数を表示する ([表示](#output))。
 
@@ -106,6 +107,7 @@ Prepare が全て成功した後、最初の target エントリの処理を始�
 - STOP した場合は、`STOPPED` の行を出し、停止の原因となったエントリと理由を表示する。停止の原因が削除の成立確認 ([削除順序](filesystem.md#delete-flow) の手順9) の場合などは、その対象を「削除された可能性あり」と表示する。
 - 終了時に、削除済み、`MODIFIED`、`MISSING`、`SKIPPED_SPECIAL_FILE`、`DIRECTORY`、`DELETE_FAILED`、処理対象外、未処理の件数を要約する。STOP した場合は、STOP より前に削除したファイルは元に戻らないこと、STOP の対象を削除していないこと (または削除された可能性があること)、未処理のエントリには触れていないことを明示する。`DELETE_FAILED` が1件以上あれば、STOP がなくてもエラーで終了すること ([引数と終了状態](#arguments)) を件数とともに表示する。
 - 確認プロンプト ([確認](#confirmation)) は、逐次処理で削除が1件ずつ行われること、途中で停止した場合それまでに削除したファイルは戻らないことを示す。
+- `--prune-dirs` では、ヘッダーに空のディレクトリも削除することと対象のディレクトリの件数を、確認プロンプトにその件数を示す。ファイルの結果行の後に、ディレクトリ段階の結果を処理した順に1件1行で表示する。状態名は `DIR_DELETED`、`DIR_KEPT`、`DIR_MISSING`、`STOPPED`。ディレクトリの行には Entry の列を置かず (`--entries` に使えないため)、Target だけを表示する。終了時の要約にディレクトリの件数を加える。
 
 
 具体的な表示:
@@ -119,9 +121,15 @@ Prepare が全て成功した後、最初の target エントリの処理を始�
   続行しますか? [y/N]
   ```
 
+  `--prune-dirs` では1行目の後に `ファイルの処理を最後まで終えた後、アーカイブ由来のパスにある空のフォルダー (最大 D 件) も1件ずつ検証して削除します。` を加える。
+
   中止: `中止しました。削除0件。` 非対話で `--yes` なし: `標準入力が対話的でなく --yes も無いため、確認できません。` の後に `中止しました。削除0件。`。
 - 要約: `要約: 削除済み a、MODIFIED b、MISSING c、SKIPPED_SPECIAL_FILE d、DIRECTORY e、DELETE_FAILED f、処理対象外 h、未処理 g`。処理対象外は `--entries` で選択されなかった ZIP エントリの件数、未処理は STOP により処理を完結しなかった選択対象 (STOP の対象を除く) の件数で、ZIP では STOP の対象より後ろの選択対象である (RAR で STOP の対象より前に未処理が生じる場合は [RARの読む範囲と順序](rar.md#session))。対象外の target は解決しない。
 - STOP した場合 (stdout): `途中で停止しました。それまでに削除した a 件は元に戻りません。<Entry> は削除していません。未処理の g 件には触れていません。` (成立確認の失敗などでは「削除していません」を「削除された可能性があります」にする)。stderr: `停止: エントリ #n "<名前>": <理由>[ (削除された可能性あり)]` と `以後の処理を停止しました (削除済み a、DELETE_FAILED f、未処理 g)。`
+- `--prune-dirs` のヘッダー: 対象の行の後に `フォルダー: 空のフォルダーも削除します (--prune-dirs、対象 D 件)`。
+- ディレクトリの結果行: `<状態名を 20 桁に左詰め>  <Target>`。Target はファイルの結果行と同じ規則 (target の最終パスに `\` と成分を連結し、同じ文字をエスケープする) で作る。`DIR_KEPT` の行末に理由を付ける: 空でない → `(空でない)`、親 reparse → `(親が reparse)`、reparse → `(reparse)`、属性 → `(属性)`、ADS → `(ADS)`、使用中 → `(使用中)`。
+- `--prune-dirs` の要約: 上の要約の次の行に `フォルダー: 削除済み a、DIR_KEPT b、DIR_MISSING c、未処理 d`。未処理は、ファイル段階の STOP によりディレクトリ段階を開始しなかった場合の全件と、ディレクトリ段階の STOP より後の件数。
+- ディレクトリ段階で STOP した場合 (stdout): `フォルダーの処理中に停止しました。それまでに削除したファイル a 件とフォルダー e 件は元に戻りません。<Target> は削除していません。未処理のフォルダー d 件には触れていません。` (成立確認の失敗などでは「削除していません」を「削除された可能性があります」にする)。stderr: `停止: フォルダー "<Target>": <理由>[ (削除された可能性あり)]` と `以後の処理を停止しました (削除済み a、DELETE_FAILED f、フォルダー削除済み e、フォルダー未処理 d)。`
 - STOP なしで `DELETE_FAILED` がある場合 (stderr): `DELETE_FAILED が f 件あるため、エラーとして終了します (削除済み a)。`
 - Prepare の失敗: stderr に `入力エラー: ...` または `FATAL: ...` と `削除開始前に中止しました。削除0件。`
 
@@ -133,8 +141,9 @@ Prepare が全て成功した後、最初の target エントリの処理を始�
 - 完全な結果行として報告した `DELETED` は削除済みである。
 - 最後に報告した結果の次に処理していた1件は、結果行が完結する前に削除されていることがある。これは最終確認 ([削除順序](filesystem.md#delete-flow)) まで通った候補 (Strict では全バイト一致) に限る。それより後のエントリには触れていない。
 - 最終確認を通っていないファイルは削除しない。
+- `--prune-dirs` で、処理対象の全ファイルの結果行の後に中断した場合は、ディレクトリ段階の順 ([対象と順序](filesystem.md#prune-set)) で最後に報告したディレクトリの次の1件 (ディレクトリの結果行が無ければ最初の1件) が、空の確認と最終確認を通って削除されていることがある。それより後のディレクトリには触れていない。
 
-結果行はそのファイルの削除用ハンドルを閉じた後に書き、書けなければ後続を処理しないことによる。読み手の消失、途中で捨てた出力、電源断には当てはめない。出力の失敗と「削除された可能性あり」の扱いは上の規定のとおり。`--jsonl` の同じ規則は[完了境界](machine-output.md#boundary)にある。
+結果行はそのファイルまたはディレクトリの削除用ハンドルを閉じた後に書き、書けなければ後続を処理しないことによる。読み手の消失、途中で捨てた出力、電源断には当てはめない。出力の失敗と「削除された可能性あり」の扱いは上の規定のとおり。`--jsonl` の同じ規則は[完了境界](machine-output.md#boundary)にある。
 
 <a id="streams"></a>
 ### 出力先と進捗
@@ -175,7 +184,7 @@ Fast の実行では、次の警告を (1) `analyze` の結果表示のヘッダ
 
   ```text
   使い方: unextract analyze <archive> --target <dir> [--fast] [--jsonl]
-          unextract delete <archive> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]
+          unextract delete <archive> --target <dir> [--fast] [--entries <file>] [--prune-dirs] [--yes|-y] [--jsonl] [--log <file>]
   ```
 
 - サブコマンドなし・旧形式: `入力エラー: サブコマンド (analyze または delete) を指定してください。旧形式 (unextract <archive> --target <dir>) は廃止しました。` + 使い方。

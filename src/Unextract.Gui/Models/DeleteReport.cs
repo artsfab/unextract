@@ -12,9 +12,11 @@ internal enum DeleteReportKind { Completed, NoRun, WithResult, Interrupted, Unkn
 // otherwise, no single entry is named and every approved candidate without an entry record is reported unknown.
 // An entry the CLI itself reports (result.error possibly_deleted + entry_name) takes precedence over the inference.
 // LogConfirmed: a received run proves the CLI created the log (it writes each record to the log first).
+// With --prune-dirs, an interruption after every approved candidate has its entry leaves the files final and puts the
+// one unknown in the directory stage (DirUnknown). The GUI does not reproduce that stage's order, so no folder is named.
 internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, string Detail, int DeletedCount,
     UInt128? DeletedLength, CliEntry? Unknown, int Unprocessed, int UnknownRemaining,
-    IReadOnlyList<CliEntry> PossiblyDeleted, bool LogConfirmed)
+    IReadOnlyList<CliEntry> PossiblyDeleted, bool LogConfirmed, bool DirUnknown = false)
 {
     public bool Succeeded => Kind == DeleteReportKind.Completed;
 
@@ -74,6 +76,7 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
                     .Where(p => counts.GetValueOrDefault(p.Item1) != 0).Select(p => $"{p.Item2} {counts[p.Item1]:N0}"));
                 if (others.Length != 0) lines.Add("削除されなかった件数: " + others);
             }
+            if (output.Run.PruneDirs == true) AddDirectories(lines, counts, output.Dirs);
             return new(DeleteReportKind.Completed, CompletedOutcome, string.Join("\n", lines), deleted.Length, length, null, 0, 0, [], logConfirmed);
         }
 
@@ -85,7 +88,8 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
         if (resultCounts is not null)
         {
             var parts = new[] { ("deleted", "削除成功"), ("delete_failed", "DELETE_FAILED"), ("modified", "MODIFIED"), ("missing", "MISSING"),
-                ("skipped_special_file", "SKIPPED_SPECIAL_FILE"), ("directory", "DIRECTORY"), ("not_selected", "処理対象外"), ("unprocessed", "未処理") }
+                ("skipped_special_file", "SKIPPED_SPECIAL_FILE"), ("directory", "DIRECTORY"), ("not_selected", "処理対象外"), ("unprocessed", "未処理"),
+                ("dir_deleted", "フォルダー削除済み"), ("dir_kept", "DIR_KEPT"), ("dir_missing", "DIR_MISSING"), ("dir_unprocessed", "フォルダー未処理") }
                 .Where(p => resultCounts.ContainsKey(p.Item1)).Select(p => $"{p.Item2} {resultCounts[p.Item1]:N0}");
             lines.Add("resultの件数: " + string.Join(" / ", parts));
         }
@@ -102,8 +106,9 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
             lines.Add($"DELETE_FAILED: #{entry.Index} {DisplayText.Escape(entry.Name)} [{DisplayText.Escape(entry.Reason?.Code ?? "")}]");
         if (failed.Length > ListLimit) lines.Add($"DELETE_FAILED: ほか {failed.Length - ListLimit:N0} 件");
         // The CLI's own report of the entry it may have deleted is used as given, with or without a name.
+        // A folder the CLI reports (dir_path) is not an entry; the folder lines below show it.
         string? reportedName = null;
-        if (output.Result?.Error is { PossiblyDeleted: true } error)
+        if (output.Result?.Error is { PossiblyDeleted: true, DirPath: null } error)
         {
             reportedName = error.EntryName;
             if (reportedName is null)
@@ -113,10 +118,39 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
         }
         foreach (var entry in possibly)
             lines.Add($"削除された可能性あり: #{entry.Index} {DisplayText.Escape(entry.Name)}");
+        var dirs = output.Dirs;
+        var stoppedDir = dirs.Count != 0 && dirs[^1].Status == "STOPPED" ? dirs[^1] : null;
+        if (stoppedDir is not null)
+            lines.Add($"停止したフォルダー: {DisplayText.Escape(stoppedDir.Path)} [{DisplayText.Escape(stoppedDir.Reason?.Code ?? "")}]" +
+                (stoppedDir.PossiblyDeleted == true ? "（削除された可能性あり）" : "（削除していません）"));
+        string? reportedDir = output.Result?.Error is { DirPath: { } dirPath, PossiblyDeleted: not null } && stoppedDir?.Path != dirPath
+            ? dirPath : null;
+        if (reportedDir is not null)
+            lines.Add($"CLIが報告したフォルダー: {DisplayText.Escape(reportedDir)}" +
+                (output.Result!.Error!.PossiblyDeleted == true ? "（削除された可能性あり）" : "（削除していません）"));
+        if (output.Run.PruneDirs == true && dirs.Count != 0)
+            lines.Add($"受信できたフォルダーの結果: {dirs.Count:N0} 件（DIR_DELETED {dirs.Count(d => d.Status == "DIR_DELETED"):N0} 件）");
+        // Every approved candidate has its entry and none stopped: the file results are final (docs/spec/machine-output.md#boundary).
+        bool filesDone = received.Count == approved.Count && received.All(e => e.Status != "STOPPED");
 
         CliEntry? unknown = null;
         int unprocessed = 0, unknownRemaining = 0;
-        if (interrupted && zipChanged)
+        bool dirUnknown = false;
+        if (interrupted && output.Run.PruneDirs == true && filesDone)
+        {
+            lines.Add("承認した全候補のファイルの結果を受信しています。ファイルの結果は確定しています。");
+            if (reportedDir is not null || stoppedDir is not null)
+                lines.Add("フォルダーの処理（ディレクトリ段階）は、CLIが報告した上記のフォルダーで停止しました。");
+            else if (dirs.Count < output.Run.DirsSelected)
+            {
+                dirUnknown = true;
+                lines.Add("空のフォルダー1件が削除された可能性があります（どのフォルダーかはGUIでは特定しません）。実行ログで確認してください。");
+                lines.Add(dirs.Count == 0 ? "フォルダーの結果は1件も受信していません。"
+                    : "最後に受信したフォルダー: " + DisplayText.Escape(dirs[^1].Path));
+            }
+            else lines.Add("フォルダーの処理（ディレクトリ段階）の結果もすべて受信しています。");
+        }
+        else if (interrupted && zipChanged)
         {
             // The delete-time order is not the analysis order, so "the next one" cannot be named safely.
             var seen = received.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
@@ -154,10 +188,36 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
             }
             else lines.Add("最後に受信したentryの次に承認した候補はありません。");
         }
+        if (interrupted && output.Run.PruneDirs == true && !filesDone)
+            lines.Add("フォルダーの処理（ディレクトリ段階）は開始していません。フォルダーは削除していません。");
         return new(interrupted ? DeleteReportKind.Interrupted : DeleteReportKind.WithResult,
             interrupted ? "エラー終了（結果が不完全）" : "エラー終了", string.Join("\n", lines), deleted.Length, null, unknown,
-            unprocessed, unknownRemaining, possibly, logConfirmed);
+            unprocessed, unknownRemaining, possibly, logConfirmed, dirUnknown);
     }
+
+    // The folder counts of a completed --prune-dirs run, and why the kept ones were kept (from the dir records).
+    private static void AddDirectories(List<string> lines, IReadOnlyDictionary<string, int>? counts, IReadOnlyList<CliDir> dirs)
+    {
+        if (counts is not null)
+            lines.Add(string.Create(CultureInfo.CurrentCulture,
+                $"空のフォルダー: 削除 {counts.GetValueOrDefault("dir_deleted"):N0} 件 / 残した {counts.GetValueOrDefault("dir_kept"):N0} 件 / 存在しない {counts.GetValueOrDefault("dir_missing"):N0} 件"));
+        var kept = dirs.Where(d => d.Status == "DIR_KEPT").GroupBy(d => d.KeepReason ?? "", StringComparer.Ordinal)
+            .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => $"{KeepReasonText(g.Key)} {g.Count():N0}").ToArray();
+        if (kept.Length != 0) lines.Add("残したフォルダーの理由: " + string.Join(" / ", kept));
+    }
+
+    // Display only; an unknown reason is shown as received.
+    private static string KeepReasonText(string reason) => reason switch
+    {
+        "NOT_EMPTY" => "空でない",
+        "PARENT_REPARSE" => "親が reparse",
+        "REPARSE" => "reparse",
+        "ATTRIBUTES" => "属性",
+        "ADS" => "ADS",
+        "IN_USE" => "使用中",
+        _ => DisplayText.Escape(reason),
+    };
 
     private static void AddResult(List<string> lines, CliResult? result, CliJobResult job)
     {
@@ -170,6 +230,7 @@ internal sealed record DeleteReport(DeleteReportKind Kind, string Outcome, strin
         if (error.Step is not null) detail.Add($"step={error.Step}");
         detail.Add($"code={error.Code}");
         if (error.EntryIndex is not null) detail.Add($"entry_index={error.EntryIndex}");
+        if (error.DirPath is not null) detail.Add($"dir_path={error.DirPath}");
         if (error.Line is not null) detail.Add($"line={error.Line}");
         if (error.Win32Error is not null) detail.Add($"win32_error={error.Win32Error}");
         if (error.PossiblyDeleted is not null) detail.Add($"possibly_deleted={Lower(error.PossiblyDeleted.Value)}");

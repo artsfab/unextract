@@ -60,7 +60,7 @@ public sealed class DeletionGuard
         }
     }
 
-    public void Check(Unextract.Core.Target.IComparisonHandle handle)
+    public void Check(Unextract.Core.Target.IHandleInformation handle)
     {
         var finalPath = handle.GetFinalPath();
         if (!finalPath.Succeeded)

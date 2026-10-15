@@ -55,6 +55,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <TextBlock Text="モード" Style="{StaticResource FieldLabel}" />
             <TextBlock x:Name="ModeText" Grid.Column="1" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,2" AutomationProperties.AutomationId="DeletionConfirmMode" />
@@ -66,6 +67,8 @@
             <TextBlock x:Name="SizeText" Grid.Row="3" Grid.Column="1" TextWrapping="Wrap" Margin="0,2" AutomationProperties.AutomationId="DeletionConfirmSize" />
             <TextBlock Grid.Row="4" Text="除外するTarget" Style="{StaticResource FieldLabel}" />
             <TextBlock x:Name="ExcludedCountText" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" Margin="0,2" AutomationProperties.AutomationId="DeletionConfirmExcludedCount" />
+            <TextBlock Grid.Row="5" Text="空のフォルダー" Style="{StaticResource FieldLabel}" />
+            <TextBlock x:Name="PruneDirsText" Grid.Row="5" Grid.Column="1" TextWrapping="Wrap" Margin="0,2" AutomationProperties.AutomationId="DeletionConfirmPruneDirs" />
         </Grid>
         <Border x:Name="HiddenPanel" Grid.Row="3" Background="{StaticResource WarningSoftBrush}" BorderBrush="#B07300" BorderThickness="2,1,1,1"
                 Padding="10,5" Margin="0,8,0,0" CornerRadius="3">

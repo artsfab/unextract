@@ -39,7 +39,7 @@ internal sealed partial class MainViewModel
                 items.Add(new(items.Count + 1, target, archive.Path, target.Path, _mode, snapshot, candidates, snapshot.CandidateLength,
                     !visible.Contains(archive)));
             }
-        return new(_mode, items, excluded);
+        return new(_mode, items, excluded, _pruneDirs);
     }
 
     private string? Exclusion(TargetViewModel target)
@@ -67,10 +67,15 @@ internal sealed partial class MainViewModel
             "途中で停止した場合も、それまでに削除したファイルは元に戻りません。",
         };
         if (plan.Mode == CliMode.Fast) text.Add(FastWarning);
+        text.Add(PruneDirsText(plan.PruneDirs));
         text.Add("");
         text.Add(ConfirmationListText(plan));
         return string.Join("\n", text);
     }
+
+    public static string PruneDirsText(bool pruneDirs) => pruneDirs
+        ? "空のフォルダーも削除します: 削除候補のファイルを含むフォルダーのうち、処理後に空になったもの（もとから空だったものを含む）も、CLIが1件ずつ検証して削除します。"
+        : "フォルダーは削除しません（空になったフォルダーも残します）。";
 
     // Every target that will be deleted is listed, including selected ones the display filter hides, then every
     // excluded target with its reason. Nothing is shortened.
@@ -136,7 +141,7 @@ internal sealed partial class MainViewModel
                 if (_exitRequested) { stop = DeletionStop.ExitRequested; break; }
                 position++;
                 SetProgress($"{position:N0} / {plan.Items.Count:N0} Targets", DisplayText.Escape(item.ArchivePath), item.Target.DisplayPath, "準備中");
-                var step = await DeleteOneAsync(item, batchStart);
+                var step = await DeleteOneAsync(item, batchStart, plan.PruneDirs);
                 if (step.Launched) launched++;
                 if (step.Completed) completed++;
                 else
@@ -163,7 +168,7 @@ internal sealed partial class MainViewModel
 
     private sealed record DeleteStep(bool Launched, bool Completed);
 
-    private async Task<DeleteStep> DeleteOneAsync(PlannedTarget item, DateTime batchStart)
+    private async Task<DeleteStep> DeleteOneAsync(PlannedTarget item, DateTime batchStart, bool pruneDirs)
     {
         var target = item.Target;
         string[] names = item.Candidates.Select(e => e.Name).ToArray();
@@ -188,7 +193,7 @@ internal sealed partial class MainViewModel
                 return NotStarted("一時entriesファイルを用意できないため、削除処理を開始できません。", DisplayText.Escape(entries.Error));
             }
             target.BeginDelete();
-            var job = new CliJob(CliOperation.Delete, item.Mode, item.ArchivePath, item.TargetPath, entries.Owned!.Path, log.Path);
+            var job = new CliJob(CliOperation.Delete, item.Mode, item.ArchivePath, item.TargetPath, entries.Owned!.Path, log.Path, pruneDirs);
             Task<CliJobResult> running;
             try { running = _runner.RunAsync(job, CancellationToken.None); }
             catch (InvalidOperationException e)

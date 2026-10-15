@@ -42,7 +42,7 @@ try {
     if (-not $cliProcess.WaitForExit(30000)) { throw 'Bundled CLI did not exit.' }
     $record = $stdout.GetAwaiter().GetResult() | ConvertFrom-Json
     $diagnostic = $stderr.GetAwaiter().GetResult()
-    if ($cliProcess.ExitCode -ne 1 -or $record.v -ne 1 -or $record.type -ne 'result' -or
+    if ($cliProcess.ExitCode -ne 1 -or $record.v -ne 2 -or $record.type -ne 'result' -or
         $record.outcome -ne 'input_error' -or $record.exit_code -ne 1) {
         throw "Bundled CLI usage smoke failed: $diagnostic"
     }

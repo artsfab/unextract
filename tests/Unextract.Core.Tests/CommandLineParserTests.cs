@@ -178,7 +178,7 @@ public class CommandLineParserTests
         Assert.Equal(
             [
                 "使い方: unextract analyze <archive.zip> --target <dir> [--fast] [--jsonl]",
-                "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--yes|-y] [--jsonl] [--log <file>]",
+                "        unextract delete <archive.zip> --target <dir> [--fast] [--entries <file>] [--prune-dirs] [--yes|-y] [--jsonl] [--log <file>]",
             ],
             CommandLineParser.UsageLines);
     }

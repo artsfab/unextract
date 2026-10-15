@@ -66,8 +66,8 @@ public interface IDirectoryHandle : IDisposable
     IDirectoryEnumeration Enumerate();
 }
 
-// 比較用ハンドル (docs/spec/filesystem.md#handles) の不透明な表現。情報取得と、先頭からの逐次読み取りができる。
-public interface IComparisonHandle : IDisposable
+// 開いたハンドルからの情報取得 (docs/spec/filesystem.md#handles)。比較用・削除用・ディレクトリ削除用ハンドルに共通。
+public interface IHandleInformation : IDisposable
 {
     ProbeResult<VolumeFileId> GetVolumeFileId();
 
@@ -84,7 +84,11 @@ public interface IComparisonHandle : IDisposable
 
     // GetFinalPathNameByHandleW(FILE_NAME_NORMALIZED | VOLUME_NAME_DOS) の \\?\ 形式のまま。
     ProbeResult<string> GetFinalPath();
+}
 
+// 比較用ハンドル (docs/spec/filesystem.md#handles) の不透明な表現。情報取得と、先頭からの逐次読み取りができる。
+public interface IComparisonHandle : IHandleInformation
+{
     // 内容を先頭から順に読む。0 は終端。
     ProbeResult<int> Read(Span<byte> buffer);
 }

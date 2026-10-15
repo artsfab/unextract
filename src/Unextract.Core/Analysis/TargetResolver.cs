@@ -36,28 +36,35 @@ internal readonly record struct Resolution(ResolutionKind Kind, DirectoryItem It
 // 実名の確認は RealNameResolver に委ね、同じディレクトリは1回の実行で1回だけ列挙する (delete でも結果を再利用する。docs/RATIONALE.md#current-state)。
 internal sealed class TargetResolver
 {
-    private const uint FileAttributeReparsePoint = 0x400;
-
     // 親成分の「想定外の種類」(docs/spec/filesystem.md#resolution の表): FILE_ATTRIBUTE_DEVICE を持つ項目は NTFS のディレクトリ項目として扱えない。
-    private const uint FileAttributeDevice = 0x40;
-    private const uint FileAttributeDirectory = 0x10;
+    internal const uint FileAttributeDevice = 0x40;
+    internal const uint FileAttributeDirectory = 0x10;
+
+    private const uint FileAttributeReparsePoint = 0x400;
 
     private readonly TargetRoot _root;
 
     // entries は処理対象のエントリ (analyze は全エントリ、delete は全エントリまたは --entries で選んだもの)。
     // 列挙で探す名前はこのファイルエントリからだけ集める (docs/spec/cli.md#entries、docs/spec/filesystem.md#real-names の 3)。
     public TargetResolver(IFileSystemProbe probe, TargetRoot root, IEnumerable<ValidatedZipEntry> entries)
+        : this(root, new RealNameResolver(probe, root, entries))
+    {
+    }
+
+    // ディレクトリ段階 (docs/spec/filesystem.md#prune-flow の手順1) は、対象のディレクトリのパスから探す名前を集めた別の実名確認を使う。
+    public TargetResolver(TargetRoot root, RealNameResolver names)
     {
         _root = root;
-        Names = new RealNameResolver(probe, root, entries);
+        Names = names;
     }
 
     internal RealNameResolver Names { get; }
 
-    public Resolution Resolve(ValidatedZipEntry entry)
-    {
-        var components = entry.Components;
+    public Resolution Resolve(ValidatedZipEntry entry) => Resolve(entry.Components);
 
+    // components は target ルートからの成分 (1つ以上)。最終成分の種類は判定せず、列挙項目をそのまま返す。
+    public Resolution Resolve(IReadOnlyList<string> components)
+    {
         // 手順1: 途中の親成分。最初に該当した成分で分類を確定し、その先を読まない。
         DirectoryItem? directoryItem = null;
         for (var depth = 0; depth < components.Count - 1; depth++)

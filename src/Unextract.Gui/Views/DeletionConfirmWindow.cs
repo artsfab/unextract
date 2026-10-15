@@ -34,6 +34,8 @@ public partial class DeletionConfirmWindow : Window
         FileCountText.Text = string.Create(CultureInfo.CurrentCulture,
             $"{plan.TotalCandidates:N0} ファイル（解析時点の最大件数）。実行時にCLIが再検証するため、解析後に変化したファイルなど、削除されないファイルがあり得ます。");
         SizeText.Text = SizeFormat.Bytes(plan.TotalLength) + "（論理サイズの合計。物理的に解放される容量ではありません）";
+        PruneDirsText.Text = MainViewModel.PruneDirsText(plan.PruneDirs);
+        if (plan.PruneDirs) PruneDirsText.FontWeight = FontWeights.SemiBold;
         ExcludedCountText.Text = plan.Excluded.Count == 0 ? "なし" : $"{plan.Excluded.Count:N0} 件（理由は下の一覧のとおり。削除しません）";
         HiddenPanel.Visibility = plan.HiddenCount != 0 ? Visibility.Visible : Visibility.Collapsed;
         HiddenText.Text = $"表示フィルタで非表示の選択済みTarget {plan.HiddenCount:N0} 件を含みます（対象から外していません）。一覧で［表示フィルタで非表示］の印が付いています。";

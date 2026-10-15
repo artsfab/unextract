@@ -86,14 +86,18 @@ public sealed record DeleteEntryResult(
 
 // delete の結果。Results は処理したファイルエントリの結果 (処理した順。STOP なら最後が STOPPED)。
 // DirectoryCount は処理したディレクトリエントリの件数 (結果行を出さない)。NotProcessedCount は STOP の後に処理しなかった件数。
-public sealed record DeleteReport(IReadOnlyList<DeleteEntryResult> Results, int DirectoryCount, int NotProcessedCount)
+// Prune は --prune-dirs のディレクトリ段階の結果 (指定しなければ null)。
+public sealed record DeleteReport(IReadOnlyList<DeleteEntryResult> Results, int DirectoryCount, int NotProcessedCount, PruneReport? Prune = null)
 {
     public DeleteEntryResult? Stop => Results.Count > 0 && Results[^1].Status == DeleteStatus.Stopped ? Results[^1] : null;
+
+    // ファイル段階またはディレクトリ段階の STOP。
+    public bool Stopped => Stop is not null || Prune?.Stop is not null;
 
     public int Count(DeleteStatus status) => Results.Count(r => r.Status == status);
 }
 
-// テスト用の差し込み口 (docs/TESTING.md#hooks の H1〜H5)。製品 CLI からは設定しない。handle は削除用ハンドルで、テストはこれを閉じない。
+// テスト用の差し込み口 (docs/TESTING.md#hooks の H1〜H8)。製品 CLI からは設定しない。handle は削除用ハンドルで、テストはこれを閉じない。
 public sealed class DeleteHooks
 {
     // H1: エントリの解決 (と事前判定) の後、削除用オープンの直前。引数は期待パス。
@@ -110,12 +114,22 @@ public sealed class DeleteHooks
 
     // H5: 削除の指示の直前 (最終確認の後)。
     public Action<ZipEntryRef, IDeletionHandle>? BeforeDisposition { get; init; }
+
+    // H6: ディレクトリ段階の解決 (と事前判定) の後、ディレクトリ削除用オープンの直前。引数は相対パスと期待パス。
+    public Action<string, string>? BeforeDirectoryOpen { get; init; }
+
+    // H7: ディレクトリ段階の空の確認の後、最終確認の直前。
+    public Action<string, IDirectoryDeletionHandle>? BeforeDirectoryFinalCheck { get; init; }
+
+    // H8: ディレクトリ段階の削除の指示の直前 (最終確認の後)。
+    public Action<string, IDirectoryDeletionHandle>? BeforeDirectoryDisposition { get; init; }
 }
 
 // 逐次削除の入力。Entries は処理対象 (全エントリ、または --entries で選んだエントリ。ZIP の順)。
 // Progress は (n, total) で各エントリの処理の前に呼ばれる (Processing n / total)。OnResult はファイルエントリの結果ごとに呼ばれる。
 // OnResult は ProcessFile の外で close 後に呼ぶ。OnDirectoryCount は完結した DIRECTORY の累計を渡す。
 // Session は Strict の RAR の内容読み取りのセッション (docs/spec/rar.md#session。Prepared が所有し、ここでは借用する)。ZIP と Fast では null。
+// PruneDirectories は --prune-dirs のディレクトリ段階の対象 (PruneSet の順。指定しなければ null)。OnDirectoryResult はディレクトリの結果ごとに close 後に呼ぶ。
 public sealed record DeleteRequest(
     IReadOnlyList<ValidatedZipEntry> Entries,
     IZipContentProvider Contents,
@@ -129,7 +143,9 @@ public sealed record DeleteRequest(
     Action<DeleteEntryResult>? OnResult = null,
     DeleteHooks? Hooks = null,
     Action<int>? OnDirectoryCount = null,
-    IRarReadSession? Session = null);
+    IRarReadSession? Session = null,
+    IReadOnlyList<PruneDirectory>? PruneDirectories = null,
+    Action<DirectoryResult>? OnDirectoryResult = null);
 
 // 削除用オープンの失敗の分類 (docs/spec/filesystem.md#open-errors の対応表)。表に無いコードは全て STOP とする。
 internal static class DeletionOpenErrors
@@ -242,7 +258,9 @@ internal sealed class DeleteRun
             _request.OnResult?.Invoke(result);
             if (result.Status == DeleteStatus.Stopped)
             {
-                return new DeleteReport(results, directories, entries.Count - i - 1 + pending.Count);
+                // ファイル段階の STOP ではディレクトリ段階を開始しない (全件が未処理)。
+                var notStarted = _request.PruneDirectories is { } targets ? new PruneReport([], targets.Count) : null;
+                return new DeleteReport(results, directories, entries.Count - i - 1 + pending.Count, notStarted);
             }
         }
 
@@ -252,7 +270,27 @@ internal sealed class DeleteRun
             CountDirectory();
         }
 
-        return new DeleteReport(results, directories, 0);
+        // ディレクトリ段階 (docs/spec/filesystem.md#prune-set): ファイル段階が STOP なしで終わった場合だけ1回行う (DELETE_FAILED があっても行う)。
+        return new DeleteReport(results, directories, 0, _request.PruneDirectories is { } directoryTargets ? Prune(directoryTargets) : null);
+    }
+
+    // 対象を順に1件ずつ処理し、結果をハンドルを閉じた後に通知する。STOP したら以後のディレクトリを処理しない。
+    private PruneReport Prune(IReadOnlyList<PruneDirectory> targets)
+    {
+        var run = new PruneRun(_request, _hooks, targets);
+        var results = new List<DirectoryResult>();
+        foreach (var directory in targets)
+        {
+            var result = run.Process(directory);
+            results.Add(result);
+            _request.OnDirectoryResult?.Invoke(result);
+            if (result.Status == DirectoryStatus.Stopped)
+            {
+                break;
+            }
+        }
+
+        return new PruneReport(results, targets.Count);
     }
 
     // 前進の失敗 (docs/spec/rar.md#session): 前進先の STOP。target の解決より前なので、削除用ハンドルを開いておらず削除された可能性は無い。
@@ -469,8 +507,8 @@ internal sealed class DeleteRun
     }
 
     // 識別確認の比較項目 (docs/spec/filesystem.md#failure-boundary): File ID とボリュームシリアル、親 File ID、最終パスを列挙由来の基準と比較し、
-    // ディレクトリでない、reparse でない、DeletePending が false であることを確かめる。
-    internal static string? IdentityMismatch(IdentityCheckInfo info, IdentityBaseline baseline)
+    // ディレクトリでない (ディレクトリ段階では expectDirectory でディレクトリである)、reparse でない、DeletePending が false であることを確かめる。
+    internal static string? IdentityMismatch(IdentityCheckInfo info, IdentityBaseline baseline, bool expectDirectory = false)
     {
         if (info.Id != baseline.Id)
         {
@@ -487,9 +525,9 @@ internal sealed class DeleteRun
             return "最終パス";
         }
 
-        if (info.IsDirectory)
+        if (info.IsDirectory != expectDirectory)
         {
-            return "ディレクトリ";
+            return expectDirectory ? "ディレクトリでない" : "ディレクトリ";
         }
 
         if (TargetResolver.IsReparse(info.Attributes, info.ReparseTag))

@@ -17,7 +17,7 @@
 
 ```text
 unextract analyze <archive> --target <dir> [--fast] --jsonl
-unextract delete  <archive> --target <dir> [--fast] [--entries <file>] --yes|-y --jsonl [--log <file>]
+unextract delete  <archive> --target <dir> [--fast] [--entries <file>] [--prune-dirs] --yes|-y --jsonl [--log <file>]
 ```
 
 - `--jsonl` は値を取らないフラグで、両操作で受け付ける。位置は自由で、重複は入力エラー ([引数](cli.md#arguments) の規則と同じ)。
@@ -54,12 +54,13 @@ unextract delete  <archive> --target <dir> [--fast] [--entries <file>] --yes|-y 
 <a id="records"></a>
 ## レコード
 
-全てのレコードに `v` (protocol version、整数、初版は `1`) と `type` を付ける。該当しないフィールドは省略し、null は使わない。
+全てのレコードに `v` (protocol version、整数、現行は `2`) と `type` を付ける。該当しないフィールドは省略し、null は使わない。
 
 | `type` | 書く時点 | フィールド |
 |---|---|---|
-| `run` | [Prepare](../SPEC.md#prepare) が成功した後、最初のエントリを処理する直前に1回だけ。書き込みが成功してから処理を始める | `operation` (`analyze` / `delete`)、`mode` (`strict` / `fast`)、`archive` (指定されたまま)、`target` (target の最終パス。`\\?\` を除いた、人間向けヘッダーと同じ値)、`entries_total` (ZIP の全エントリ数)、`selected` (処理対象の件数)、`entries_option` (bool、`--entries` の有無) |
+| `run` | [Prepare](../SPEC.md#prepare) が成功した後、最初のエントリを処理する直前に1回だけ。書き込みが成功してから処理を始める | `operation` (`analyze` / `delete`)、`mode` (`strict` / `fast`)、`archive` (指定されたまま)、`target` (target の最終パス。`\\?\` を除いた、人間向けヘッダーと同じ値)、`entries_total` (ZIP の全エントリ数)、`selected` (処理対象の件数)、`entries_option` (bool、`--entries` の有無)、`prune_dirs` (bool、`delete` だけ。`--prune-dirs` の有無)、`dirs_selected` (`prune_dirs` が true のときだけ。ディレクトリ段階の対象の件数) |
 | `entry` | 1エントリの処理が完結し、そのハンドルを閉じた後。書き込みが成功してから次のエントリへ進む | `index`、`name`、`directory` (bool)、`length`、`status`、`skip_reason`、`reason`、`possibly_deleted` |
+| `dir` | `--prune-dirs` のディレクトリ段階で、1ディレクトリの処理が完結し、そのハンドルを閉じた後。書き込みが成功してから次のディレクトリへ進む | `path`、`status`、`keep_reason`、`reason`、`possibly_deleted` |
 | `result` | 終了時に1回 (`run` がない場合を含む) | `outcome`、`exit_code`、`counts`、`error` |
 
 `entry` のフィールド:
@@ -77,6 +78,15 @@ unextract delete  <archive> --target <dir> [--fast] [--entries <file>] --yes|-y 
 - `analyze`: 判定した全エントリを ZIP の順に逐次出す (DIRECTORY を含む)。カテゴリー順の並べ替えは人間向け出力だけで行う。FATAL の原因エントリには `entry` を出さず、`result.error` で示す。
 - `delete`: 処理したファイルエントリだけを処理した順に出す。DIRECTORY と処理対象外は件数だけ。STOP した対象は `STOPPED` の `entry` として出す。
 
+`dir` のフィールド ([空ディレクトリ](filesystem.md#prune-dirs)):
+
+- `path`: target ルートからの相対パス。ZIP の成分を `\` で連結した文字列で、末尾に区切りを付けない。エントリ名ではないので `--entries` には使えない。
+- `status`: `DIR_DELETED`、`DIR_KEPT`、`DIR_MISSING`、`STOPPED`。
+- `keep_reason` (`DIR_KEPT` のとき): `NOT_EMPTY`、`PARENT_REPARSE`、`REPARSE`、`ATTRIBUTES`、`ADS`、`IN_USE`。
+- `reason`・`possibly_deleted` (`STOPPED` のとき): `entry` と同じ。
+
+`dir` はディレクトリ段階で処理した全ディレクトリ (`DIR_MISSING` を含む) を処理した順に出す。ディレクトリ段階を開始しなかった場合は出さない。
+
 <a id="result"></a>
 ## resultと終了コード
 
@@ -93,13 +103,13 @@ unextract delete  <archive> --target <dir> [--fast] [--entries <file>] --yes|-y 
 - エントリ内で捕捉した想定外の例外は既存どおり `STOPPED` / `stopped`、`stage=entry`、`code=UNEXPECTED_EXCEPTION` とする (削除指示後は `possibly_deleted=true`)。処理器外へ伝わる例外は `internal_error` とし、`analyze` では `deletion_started` を省略する。
 - `counts` には既存の合計・要約の項目を入れる。途中で終わった場合は確定している範囲だけを入れる。
   - `analyze`: `matched` (Strict)、`same_size` (Fast)、`modified`、`missing`、`skipped_special_file`、`directory`、`undetermined` (未判定)。
-  - `delete`: `deleted`、`modified`、`missing`、`skipped_special_file`、`directory`、`delete_failed`、`not_selected` (処理対象外)、`unprocessed` (未処理)。
+  - `delete`: `deleted`、`modified`、`missing`、`skipped_special_file`、`directory`、`delete_failed`、`not_selected` (処理対象外)、`unprocessed` (未処理)。`--prune-dirs` では加えて `dir_deleted`、`dir_kept`、`dir_missing`、`dir_unprocessed` (人間向けのフォルダーの要約と同じ)。
 - `counts` のキーは、その段階の人間向け表示が出す件数項目と同じ集合とし、usage・ログ作成失敗・`delete` のPrepare失敗では省略する。`analyze` のPrepare FATAL (targetルート確認後) は判明済みの判定済み・未判定の範囲とし、未取得の件数を0にしない。`delete` の `internal_error` は処理済みの事実を数え、出力に失敗したエントリも処理済み、それより後の選択対象は `unprocessed` とする。`STOPPED` の配送失敗では、その対象の `possibly_deleted` を `result.error` に付ける。
 - `error` (`completed` 以外) のフィールド:
-  - `stage`: 閉じた集合。`usage` (引数)、`prepare` (Prepare の入力エラー・FATAL)、`entry` (エントリの処理中の FATAL・STOP)、`internal` (想定外の例外、出力の失敗)。
-  - `step`: 開いた集合。`entry` の段階で分かる場合だけ付け、[失敗の境界](filesystem.md#failure-boundary) の段階を `resolve`、`open`、`verify`、`inspect`、`compare`、`final_check`、`dispose`、`confirm` で示す。
+  - `stage`: 閉じた集合。`usage` (引数)、`prepare` (Prepare の入力エラー・FATAL)、`entry` (エントリの処理中の FATAL・STOP と、`--prune-dirs` のディレクトリ段階の STOP。後者は `dir_path` を付け、`entry_index`・`entry_name` を付けない)、`internal` (想定外の例外、出力の失敗)。
+  - `step`: 開いた集合。`entry` の段階で分かる場合だけ付け、[失敗の境界](filesystem.md#failure-boundary) の段階を `resolve`、`open`、`verify`、`inspect`、`compare`、`final_check`、`dispose`、`confirm` で示す。ディレクトリ段階 ([失敗の境界](filesystem.md#prune-failures)) では同じ名前を手順1・3・4・7・8・9に使い、手順5 (検査) と手順6 (空の確認) はどちらも `inspect` とする。
   - `code`: 開いた集合 ([コード](#codes))。
-  - 付加情報 (該当する場合だけ): `entry_index`、`entry_name`、`line` (entries の行番号)、`win32_error`、`possibly_deleted`、`deletion_started` (`internal_error` で、逐次削除を開始していたか)、`message` (表示用)。
+  - 付加情報 (該当する場合だけ): `entry_index`、`entry_name`、`dir_path` (ディレクトリ段階の STOP の対象。`dir` の `path` と同じ形)、`line` (entries の行番号)、`win32_error`、`possibly_deleted`、`deletion_started` (`internal_error` で、逐次削除を開始していたか)、`message` (表示用)。
 
 <a id="boundary"></a>
 ## 完了境界と異常時の解釈
@@ -109,6 +119,7 @@ unextract delete  <archive> --target <dir> [--fast] [--entries <file>] --yes|-y 
 - `run` がなければ、削除は0件である。
 - `entry` があるエントリは、その結果で確定している。
 - `run` があり `result` がない場合 (クラッシュ、強制終了、出力の破損や途絶)、`delete` では、処理対象のファイルエントリのうち ZIP の順で最後の `entry` の次の1件 (`entry` が無ければ最初の1件) を「不明 (削除された可能性あり)」とし、それ以降を未処理 (触れていない) とする。`internal_error` で `deletion_started` が true の場合も同じ規則による。
+- `run` の `prune_dirs` が true で、処理対象の全ファイルエントリに `entry` があり `result` がない場合は、ファイルの結果は全て確定しており、ディレクトリ段階の順 ([対象と順序](filesystem.md#prune-set)) で最後の `dir` の次の1件 (`dir` が無ければ最初の1件) を「不明 (削除された可能性あり)」とし、それ以降を未処理とする。この1件が削除されているのは、空の確認と最終確認を通った場合に限る。
 - 判定の基準は受け取った完全なレコード (LF で終わるもの) とし、途中までのレコードは無いものとして扱う。`status` が `DELETED` の `entry` は削除済みである。「不明」の1件が削除されているのは、最終確認 ([削除順序](filesystem.md#delete-flow)) まで通った候補 (Strict では全バイト一致) の場合に限る。最終確認を通っていないファイルは削除しない。標準出力で受け取ったレコードはログにもあり ([実行ログ](#log))、ログの規則も同じである。人間向け出力の同じ規則は[中断時の表示と実削除](cli.md#interruption)にある。
 - CLI は異常終了の後に何も書けない。保証するのは、書いたレコードの意味と、書けなかったことを検出したら先へ進まないこと ([出力先と符号化](#destinations)) だけである。
 
@@ -137,12 +148,13 @@ unextract delete  <archive> --target <dir> [--fast] [--entries <file>] --yes|-y 
 - `delete` の STOP には、上表の target 側・内容検証のコードと、RAR のセッションの前進の失敗の `ARCHIVE_UNREADABLE` も使う (`analyze` の FATAL と同じ原因)。
 - `IDENTITY_CHECK_FAILED` の `win32_error` は識別確認自体の値とし、元のopenの32/5は `message` に残す。最終確認の情報取得失敗は `step=final_check`・`code=TARGET_INFO_FAILED` と元の `win32_error`、値の不一致は `FINAL_CHECK_MISMATCH` とし `win32_error` を付けない。
 - コードは追加してよい。利用側は未知のコードを一般的なエラーとして扱う。
-- 利用側が状態の分岐に使ってよいのは、`type`、`status`、`outcome`、`exit_code`、`possibly_deleted`、`deletion_started` だけである。`stage`、`step`、`code`、`skip_reason` は表示と診断に使い、`message` は表示だけに使う。
+- 利用側が状態の分岐に使ってよいのは、`type`、`status`、`outcome`、`exit_code`、`possibly_deleted`、`deletion_started` だけである。`stage`、`step`、`code`、`skip_reason`、`keep_reason` は表示と診断に使い、`message` は表示だけに使う。
+- ディレクトリ段階の STOP には、同じ原因のファイル段階のコード (列挙、識別確認、照合、最終確認、削除の指示・成立確認) を使う。`step` も同じ名前を使い、空の確認の列挙エラーは `inspect` とする。
 
 <a id="versioning"></a>
 ## 互換性と版
 
-- 版 `1` の中では、フィールドとコードの追加を互換とする。利用側は未知のフィールドを無視する。
+- 同じ版の中では、フィールドとコードの追加を互換とする。利用側は未知のフィールドを無視する。
 - `type`、`status`、`outcome`、`stage` の値の集合を変えるとき、既存フィールドの意味を変えるときは `v` を上げる。
 - 利用側は、未知の `v` のレコードを受け取ったら、その実行を非互換として失敗扱いにする。
 - 版を指定するフラグは設けない。CLI と利用側 (GUI) は同梱して配布する。

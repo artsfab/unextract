@@ -81,6 +81,27 @@ public sealed class FakeCliTests
     }
 
     [Fact]
+    public void FakePruneOutputHasTheSameRecordsAsTheRealCli()
+    {
+        string root = TestFixtures.Create();
+        string archive = Path.Combine(root, "a.zip");
+        Files.Zip(archive, ("d/sub/x.txt", "abc"), ("d/keep/y.txt", "abc"));
+        string target = Directory.CreateDirectory(Path.Combine(root, "target")).FullName;
+        Directory.CreateDirectory(Path.Combine(target, "d", "sub"));
+        Directory.CreateDirectory(Path.Combine(target, "d", "keep"));
+        File.WriteAllText(Path.Combine(target, "d", "sub", "x.txt"), "abc");
+        File.WriteAllText(Path.Combine(target, "d", "keep", "y.txt"), "xyz");
+        string list = Path.Combine(root, "entries.txt");
+        File.WriteAllText(list, "d/sub/x.txt\n");
+        var delete = Run(RealExe, ["delete", archive, "--target", target, "--entries", list, "--prune-dirs", "--yes", "--jsonl", "--log", Path.Combine(root, "delete.jsonl")]);
+        Assert.Equal(0, delete.ExitCode);
+        AssertSameRecords(FakeResults.Delete(archive, target, "strict", 2, 1, [new(1, "d/sub/x.txt", "DELETED", 3)], notSelected: 1,
+            dirs: [new(@"d\sub", "DIR_DELETED"), new("d", "DIR_KEPT", "NOT_EMPTY")]), delete.Lines);
+        Assert.False(Directory.Exists(Path.Combine(target, "d", "sub")));
+        Assert.True(File.Exists(Path.Combine(target, "d", "keep", "y.txt")));
+    }
+
+    [Fact]
     public void FakeWritesTheScenarioRecordsEntriesAndLogAndDoesNotTouchTheFiles()
     {
         string root = TestFixtures.Create();

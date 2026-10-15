@@ -2,7 +2,7 @@ using Unextract.Gui.Models;
 
 namespace Unextract.Gui.ViewModels;
 
-// Everything a delete batch may do, fixed when the plan is made: mode, targets, the analysis snapshot each
+// Everything a delete batch may do, fixed when the plan is made: mode, the empty-folder setting, targets, the analysis snapshot each
 // candidate list came from. Display filters, later selection changes and later analyses never alter it.
 // Hidden records only that the archive filter hid this selected target when planning, so the confirmation says so.
 internal sealed record PlannedTarget(int Number, TargetViewModel Target, string ArchivePath, string TargetPath,
@@ -10,9 +10,10 @@ internal sealed record PlannedTarget(int Number, TargetViewModel Target, string 
 
 internal sealed record ExcludedTarget(string ArchivePath, string TargetPath, string Reason);
 
-internal sealed class DeletionPlan(CliMode mode, IReadOnlyList<PlannedTarget> items, IReadOnlyList<ExcludedTarget> excluded)
+internal sealed class DeletionPlan(CliMode mode, IReadOnlyList<PlannedTarget> items, IReadOnlyList<ExcludedTarget> excluded, bool pruneDirs)
 {
     public CliMode Mode { get; } = mode;
+    public bool PruneDirs { get; } = pruneDirs;
     public IReadOnlyList<PlannedTarget> Items { get; } = items;
     public IReadOnlyList<ExcludedTarget> Excluded { get; } = excluded;
     public long TotalCandidates { get; } = items.Sum(i => (long)i.Candidates.Count);

@@ -454,7 +454,7 @@ public sealed class DeletionPreparationTests
         var counts = new Dictionary<string, int> { [job.Mode == CliMode.Strict ? "matched" : "same_size"] = 1, ["modified"] = 0,
             ["missing"] = 0, ["skipped_special_file"] = 0, ["directory"] = 0 };
         var run = new CliRun("analyze", job.ModeValue, job.Archive, job.Target, 1, 1, false);
-        var output = new CliOutput(run, entries, new("completed", 0, counts, null), ProtocolIssue.None, null);
+        var output = new CliOutput(run, entries, new("completed", 0, counts, null), ProtocolIssue.None, null, []);
         return new(CliStartState.Started, true, 0, true, true, false, output, "", false, null);
     }
 
@@ -470,14 +470,14 @@ public sealed class DeletionPreparationTests
         var counts = new Dictionary<string, int> { ["deleted"] = entries.Length, ["modified"] = 0, ["missing"] = 0,
             ["skipped_special_file"] = 0, ["directory"] = 0, ["delete_failed"] = 0, ["not_selected"] = total - entries.Length, ["unprocessed"] = 0 };
         var run = new CliRun("delete", job.ModeValue, job.Archive, job.Target, total, entries.Length, true);
-        var output = new CliOutput(run, entries, new("completed", 0, counts, null), ProtocolIssue.None, null);
+        var output = new CliOutput(run, entries, new("completed", 0, counts, null), ProtocolIssue.None, null, []);
         return new(CliStartState.Started, true, 0, true, true, false, output, "", false, null);
     }
 
     private static CliJobResult ErrorEnd(CliJob job)
     {
         var receiver = new JsonlReceiver(job);
-        receiver.Feed(Encoding.ASCII.GetBytes(Run(job, Analysis.Length, 2) + Line(new { v = 1, type = "result", outcome = "internal_error", exit_code = 1,
+        receiver.Feed(Encoding.ASCII.GetBytes(Run(job, Analysis.Length, 2) + Line(new { v = 2, type = "result", outcome = "internal_error", exit_code = 1,
             error = new { stage = "internal", code = "INTERNAL", deletion_started = true, message = "boom" },
             counts = new { deleted = 0, modified = 0, missing = 0, skipped_special_file = 0, directory = 0, delete_failed = 0, not_selected = 3, unprocessed = 2 } })));
         return new(CliStartState.Started, true, 1, true, true, false, receiver.Finish(), "", false, null);
@@ -643,7 +643,7 @@ public sealed class DeletionPreparationTests
         var g = await Fixture(@"D:\one");
         await g.Model.AnalyzeSelectedAsync();
         g.Runner.Handler = (job, _) => Task.FromResult(job.Operation == CliOperation.Analyze ? Ok(job, Analysis)
-            : Raw(job, 1, Line(new { v = 1, type = "result", outcome = "input_error", exit_code = 1,
+            : Raw(job, 1, Line(new { v = 2, type = "result", outcome = "input_error", exit_code = 1,
                 error = new { stage = "prepare", code = "LOG_ALREADY_EXISTS", message = "ログが既にあります" } })));
         await g.Model.DeleteAsync(g.Model.PlanDeletion()!, approved: true);
         var one = g.Model.Archives[0].Targets[0];

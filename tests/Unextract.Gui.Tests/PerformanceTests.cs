@@ -46,7 +46,7 @@ public sealed class PerformanceTests(ITestOutputHelper output)
         var map = new Dictionary<string, int> { [job.Mode == CliMode.Strict ? "matched" : "same_size"] = counts[0], ["modified"] = counts[1],
             ["missing"] = counts[2], ["skipped_special_file"] = 0, ["directory"] = 0 };
         var run = new CliRun("analyze", job.ModeValue, job.Archive, job.Target, total, total, false);
-        var result = new CliOutput(run, entries, new("completed", 0, map, null), ProtocolIssue.None, null);
+        var result = new CliOutput(run, entries, new("completed", 0, map, null), ProtocolIssue.None, null, []);
         return new(CliStartState.Started, true, 0, true, true, false, result, "", false, null);
     }
 

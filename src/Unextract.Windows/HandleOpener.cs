@@ -9,6 +9,9 @@ public static class HandleOpener
     // 表の「削除用」の行。1件の照合・検査・Strictの1回比較・最終確認・削除の間だけ開く。
     public static Win32Result<SafeFileHandle> OpenForDeletion(string path) => Open(path, HandleSpecs.Deletion);
 
+    // 表の「ディレクトリ削除用」の行 (delete --prune-dirs)。1件の照合・検査・空の確認・最終確認・削除の間だけ開く。
+    public static Win32Result<SafeFileHandle> OpenDirectoryForDeletion(string path) => Open(path, HandleSpecs.DirectoryDeletion);
+
     // docs/spec/filesystem.md#failure-boundary の識別確認。削除用オープンが共有違反・アクセス拒否で失敗したときだけ開く。このハンドルでは削除しない。
     public static Win32Result<SafeFileHandle> OpenForIdentityCheck(string path) => Open(path, HandleSpecs.IdentityCheck);
 
@@ -99,6 +102,14 @@ internal static class HandleSpecs
         GenericRead | Delete | FileReadAttributes | Synchronize,
         FileShareRead,
         FileFlagOpenReparsePoint | FileFlagOpenNoRecall);
+
+    // | ディレクトリ削除用 | DELETE | FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE | FILE_SHARE_READ | FILE_SHARE_WRITE (DELETE を共有しない)
+    // | FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL | 1件の照合・検査・空の確認・最終確認・削除の間だけ |
+    // FILE_SHARE_DELETE を含めないので、開いている間は他者がそのディレクトリを改名・削除のために開けない。
+    public static readonly HandleSpec DirectoryDeletion = new(
+        Delete | FileListDirectory | FileReadAttributes | Synchronize,
+        FileShareRead | FileShareWrite,
+        FileFlagBackupSemantics | FileFlagOpenReparsePoint | FileFlagOpenNoRecall);
 
     // docs/spec/filesystem.md#failure-boundary の識別確認: FILE_READ_ATTRIBUTES のみ、FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL。
     // データアクセスを持たないため共有モードの判定に参加しない (共有モードの値は他者に影響しない)。

@@ -9,7 +9,7 @@ internal static unsafe partial class Kernel32
 {
     private const string Library = "kernel32.dll";
 
-    // 削除の指示 (docs/spec/filesystem.md#delete-flow の削除指示) だけに使う。呼び出しは WindowsDeletionHandle.SetDispositionEx の1か所。
+    // 削除の指示 (docs/spec/filesystem.md#delete-flow の削除指示) だけに使う。呼び出しは Disposition.SetDispositionEx の1か所 (ファイルとディレクトリの削除で共有)。
     [LibraryImport(Library, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SetFileInformationByHandle(

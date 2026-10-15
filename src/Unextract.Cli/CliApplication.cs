@@ -88,7 +88,12 @@ internal static class CliApplication
                             progress.Observe(entry);
                             writer.WriteEntry(MachineOutput.Entry(entry));
                         },
-                        OnDirectoryCount: progress.ObserveDirectoryCount);
+                        OnDirectoryCount: progress.ObserveDirectoryCount,
+                        OnDirectoryResult: directory =>
+                        {
+                            progress.Observe(directory);
+                            writer.WriteDirectory(MachineOutput.Directory(directory));
+                        });
                     var context = new CommandContext(runtime.Probe, () =>
                     {
                         var locations = runtime.ResolveProtectedLocations();
@@ -102,7 +107,7 @@ internal static class CliApplication
                         : MachineOutput.Result(DeleteCommand.Run(new DeleteCommandRequest(
                             options.ArchivePath, options.TargetPath, options.Mode, options.EntriesPath,
                             options.AssumeYes, runtime.DeletionProbe, runtime.Prompt, context,
-                            DeletionStarting: () => deletionStarted = true)), prepared);
+                            DeletionStarting: () => deletionStarted = true, PruneDirs: options.PruneDirs)), prepared);
                 }
             }
         }
@@ -222,7 +227,8 @@ internal static class CliApplication
                 environment.DeletionProbe,
                 environment.Prompt,
                 context,
-                DeletionStarting: deletionStarting)).Status;
+                DeletionStarting: deletionStarting,
+                PruneDirs: options.PruneDirs)).Status;
     }
 }
 

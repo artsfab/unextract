@@ -52,7 +52,7 @@ public sealed class AnalysisQueueTests
         var model = await Prepared(runner, @"D:\one");
         var target = model.Archives[0].Targets[0];
         // Entries arrived, but there is no result and the exit is abnormal.
-        runner.Handler = (job, _) => Task.FromResult(Feed(job, 3, Line(new { v = 1, type = "run", operation = "analyze", mode = "strict",
+        runner.Handler = (job, _) => Task.FromResult(Feed(job, 3, Line(new { v = 2, type = "run", operation = "analyze", mode = "strict",
             archive = job.Archive, target = job.Target, entries_total = 2, selected = 2, entries_option = false }) + Entry("MATCHED", 1)));
         await model.AnalyzeTargetAsync(model.Archives[0], target);
         Assert.False(target.HasSuccessfulAnalysis);
@@ -67,13 +67,13 @@ public sealed class AnalysisQueueTests
         Assert.Contains("終了コード(1)とresult.exit_code(0)", target.AnalysisDetailText, StringComparison.Ordinal);
 
         // Incompatible output (unknown version) is an error even with exit 0.
-        runner.Handler = (job, _) => Task.FromResult(Feed(job, 0, Line(new { v = 2, type = "run" })));
+        runner.Handler = (job, _) => Task.FromResult(Feed(job, 0, Line(new { v = 3, type = "run" })));
         await model.AnalyzeTargetAsync(model.Archives[0], target);
         Assert.False(target.HasSuccessfulAnalysis);
         Assert.Contains("非互換な出力", target.AnalysisDetailText, StringComparison.Ordinal);
 
         // Unknown error codes are shown, never branched on.
-        runner.Handler = (job, _) => Task.FromResult(Feed(job, 1, Line(new { v = 1, type = "result", outcome = "input_error",
+        runner.Handler = (job, _) => Task.FromResult(Feed(job, 1, Line(new { v = 2, type = "result", outcome = "input_error",
             exit_code = 1, error = new { stage = "usage", code = "FUTURE_CODE", message = "未知\u202Eの説明" } })));
         await model.AnalyzeTargetAsync(model.Archives[0], target);
         Assert.Contains("code=FUTURE_CODE", target.AnalysisDetailText, StringComparison.Ordinal);
@@ -472,7 +472,7 @@ public sealed class AnalysisQueueTests
             text.Append(Entry(status, i + 1, entries[i].Length, entries[i].Name));
             counts[status.ToLowerInvariant()]++;
         }
-        text.Append(Line(new { v = 1, type = "result", outcome = "completed", exit_code = 0, counts }));
+        text.Append(Line(new { v = 2, type = "result", outcome = "completed", exit_code = 0, counts }));
         return Feed(job, 0, text.ToString());
     }
 
@@ -485,7 +485,7 @@ public sealed class AnalysisQueueTests
 
     internal static CliJobResult Failed(CliJob job) => Feed(job, 1, Line(new
     {
-        v = 1, type = "result", outcome = "input_error", exit_code = 1,
+        v = 2, type = "result", outcome = "input_error", exit_code = 1,
         error = new { stage = "prepare", code = "TARGET_NOT_FOUND", message = "Targetがありません" },
     }));
 
@@ -532,7 +532,7 @@ public sealed class AnalysisQueueTests
         for (int i = 1; i <= total; i++)
             entries.Add(new(i, $"dir{i % 100}/file{i}.bin", false, i, i % 3 == 0 ? "MODIFIED" : "MATCHED", null, null, null));
         var run = new CliRun("analyze", "strict", @"C:\a.zip", @"C:\t", total, total, false);
-        var output = new CliOutput(run, entries, new("completed", 0, null, null), ProtocolIssue.None, null);
+        var output = new CliOutput(run, entries, new("completed", 0, null, null), ProtocolIssue.None, null, []);
         var snapshot = AnalysisSnapshot.Create(CliMode.Strict, output);
         Assert.Equal(total - total / 3, snapshot.CandidateCount);
         var rows = new EntryRowList(snapshot.Entries, Enumerable.Range(0, total).Where(i => i % 1000 == 0).ToArray());

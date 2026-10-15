@@ -2,7 +2,7 @@
 
 役割: target確認、分類・特殊性、全ハンドル構成、逐次削除と失敗境界、安全上の限界の正本。対象解決・API・検査順序を変更するときに該当節を読む。
 
-[target](#target-root) / [分類](#classification) / [属性](#special-files) / [ハンドル](#handles) / [削除順序](#delete-flow) / [エラー](#open-errors) / [限界](#limitations)
+[target](#target-root) / [分類](#classification) / [属性](#special-files) / [ハンドル](#handles) / [削除順序](#delete-flow) / [エラー](#open-errors) / [空ディレクトリ](#prune-dirs) / [限界](#limitations)
 
 <a id="target-root"></a>
 ## targetルートと拒否位置
@@ -25,7 +25,7 @@ target ルートを確認して保持する。保持用ハンドルで開く**�
 | `MODIFIED` | 安全な通常ファイルだが、サイズが `Length` と異なる (内容を読まない)、またはサイズ一致で内容が異なる (Strict) | サイズ一致時のみ | 削除しない |
 | `MISSING` | 大小文字まで完全一致する名前のファイルがない。途中の親成分の扱いは [解決順序](#resolution) | 読まない | 削除しない |
 | `SKIPPED_SPECIAL_FILE` | 特殊な対象であると**判定できた**もの ([解決順序](#resolution)、[特殊ファイルと属性](#special-files)) | 読まない | 削除しない |
-| `DIRECTORY` | ZIP のディレクトリエントリ。ディレクトリは削除対象外 | — | 削除しない |
+| `DIRECTORY` | ZIP のディレクトリエントリ。ファイルとしては分類・削除しない | — | 削除しない (`--prune-dirs` の場合だけ、ファイル段階の後に[空ディレクトリ](#prune-dirs)の規則で扱う) |
 | FATAL / STOP | 特殊かどうか、存在するかどうかを**判定できなかった**もの。内容比較候補の [内容検証基準](zip.md#verification) の 1〜5 の違反 | — | `analyze` は FATAL で打ち切り、`delete` は STOP ([失敗の境界](#failure-boundary)) |
 
 「特殊だと判定できた」(`SKIPPED_SPECIAL_FILE`) と「判定できなかった」(FATAL / STOP) を混同しない。
@@ -68,7 +68,7 @@ target ルートを確認して保持する。保持用ハンドルで開く**�
 3. 列挙した各項目の名前を、そのディレクトリ直下で探している ZIP エントリの成分名の集合と照合する。探す名前の集合は処理対象のファイルエントリ (`delete` で `--entries` を指定した場合は選んだエントリだけ) から作る。**ディスク上の名前と ZIP の成分名が序数比較で完全に一致した項目だけ**を対応させ、その属性・reparse tag・File ID を [解決順序](#resolution) の表、analyzeの手順4、deleteの[削除順序](#delete-flow)の手順2・4で使う。
 4. 列挙は8.3 の短い名前を項目として返さないため、8.3 名だけで一致するものは対応せず `MISSING` になる。大小文字だけ違うものも序数比較で一致せず `MISSING` になる。ディレクトリごとに大文字小文字を区別する設定の NTFS ディレクトリでも同じ規則になる。
 5. 1回の列挙で同じ名前の項目が複数回返った場合は、**最初の1件を採用し、2件目以降は無視する**。採用した項目も、analyzeの[解決順序](#resolution)とdeleteの[削除順序](#delete-flow)にある、開いたハンドルのFile ID・親File ID (`delete`)・最終パスの確認で保護される。
-6. 照合しなかった項目は保持・表示・集計・分類しない ([対象と非目標](../SPEC.md#scope))。照合結果だけをそのディレクトリについて記録し、列挙を終えたら列挙用ハンドルを閉じる。**同じディレクトリは1回の実行で1回だけ列挙する** (`delete` でも同じ)。
+6. 照合しなかった項目は保持・表示・集計・分類しない ([対象と非目標](../SPEC.md#scope))。照合結果だけをそのディレクトリについて記録し、列挙を終えたら列挙用ハンドルを閉じる。**同じディレクトリは1回の実行で1回だけ列挙する** (`delete` でも同じ。ただし[ディレクトリ段階](#prune-flow)はファイル段階の列挙結果を使わず、解決のための列挙を段階の中で1回ずつやり直す。これとは別に、手順6の空の確認で対象のディレクトリを削除用ハンドルで列挙する)。
 7. 列挙用ハンドルのオープン、項目の列挙 (終端を示す `ERROR_NO_MORE_FILES` 以外のエラー)、ハンドルの検証のいずれかが失敗した場合は、`analyze` で FATAL、`delete` で STOP とする。
 
 **`delete`での列挙結果の再利用**: 後続も同じ列挙結果を使う。安全性と性能上の理由は[列挙の理由](../RATIONALE.md#real-names)にある。
@@ -123,6 +123,7 @@ target ファイルの内容は特殊判定の後でだけ読む。比較用・�
 | 列挙用 (target ルート以外のディレクトリ) | `FILE_LIST_DIRECTORY \| FILE_READ_ATTRIBUTES` | `FILE_SHARE_READ \| FILE_SHARE_WRITE` | `FILE_FLAG_BACKUP_SEMANTICS \| FILE_FLAG_OPEN_REPARSE_POINT` | そのディレクトリの検証と列挙の間だけ |
 | 比較用 (`analyze`) | `GENERIC_READ` | `FILE_SHARE_READ` | `FILE_FLAG_BACKUP_SEMANTICS \| FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_OPEN_NO_RECALL \| FILE_FLAG_SEQUENTIAL_SCAN` | `analyze` のそのエントリの判定中だけ |
 | 削除用 (`delete`) | `GENERIC_READ \| DELETE \| FILE_READ_ATTRIBUTES \| SYNCHRONIZE` | `FILE_SHARE_READ` | `FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_OPEN_NO_RECALL` | `delete` のそのエントリの検査・比較・最終確認・削除の間だけ |
+| ディレクトリ削除用 (`delete --prune-dirs`) | `DELETE \| FILE_LIST_DIRECTORY \| FILE_READ_ATTRIBUTES \| SYNCHRONIZE` | `FILE_SHARE_READ \| FILE_SHARE_WRITE` (DELETE を共有しない) | `FILE_FLAG_BACKUP_SEMANTICS \| FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_OPEN_NO_RECALL` | [ディレクトリ段階](#prune-flow)のそのディレクトリの照合・検査・空の確認・最終確認・削除の間だけ |
 
 - RAR では UnRAR.dll がパスでアーカイブを別に開く ([RARのDLL](rar.md#runtime))。これはアーカイブ側の読み取りであり、上表の target 側のハンドルには含めない。
 - `analyze` は比較用ハンドルだけを使い、削除用ハンドルを開かない。`delete` は削除用ハンドルだけを使い、比較用ハンドルを開かない。同じ対象に比較用と削除用を同時に開くことはしない (同時に開けるかどうかは未実測。[手動確認M09](../OPEN_ISSUES.md#manual-status))。
@@ -130,7 +131,8 @@ target ファイルの内容は特殊判定の後でだけ読む。比較用・�
 - 削除用ハンドルは `DELETE` アクセスを要求するため、読み取りはできても削除の権限が無い対象 (対象の DELETE と親の DELETE_CHILD の両方が拒否されている) は開けない。この場合 `analyze` は分類できるが、`delete` は [失敗の境界](#failure-boundary) の識別確認で扱う。
 - 共有モードの判定に参加するのは、読み取り・書き込み・削除のいずれかのデータアクセスを持つハンドルだけである。`FILE_READ_ATTRIBUTES` だけのハンドルを保持しても他者の改名を防げないため、target ルートは `FILE_LIST_DIRECTORY` を付けて開く。これで実行中の target ルートの改名・削除を防ぐ。途中のディレクトリは保持しないため改名され得るが、最終パスと親 File ID の比較で検出する。
 - target ルートの保持用ハンドルには `FILE_FLAG_OPEN_REPARSE_POINT` を付けない (最終成分の reparse をたどる)。そのため、最終成分の reparse の確認は [Prepare](../SPEC.md#prepare) の手順5の確認用ハンドル (`FILE_READ_ATTRIBUTES` のみ、`FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`) で行い、保持用ハンドルの File ID との一致で、確認した個体と保持した個体が同じであることを確かめる。
-- 比較用ハンドルの `FILE_FLAG_BACKUP_SEMANTICS` はディレクトリも開けるようにしてハンドル上で `Directory` を判定するためのもので、特権の有効化はしない。削除用ハンドルには付けない (ディレクトリは開けずアクセス拒否になる。`delete` では [特殊ファイルと属性](#special-files) の事前判定と [失敗の境界](#failure-boundary) の識別確認で扱う)。
+- ディレクトリ削除用ハンドルは、空の確認の列挙のために `FILE_LIST_DIRECTORY` を持ち、`FILE_SHARE_DELETE` を含めないので、開いている間は他者がそのディレクトリを改名・削除のために開けない。`FILE_SHARE_DELETE` を許さないハンドル (別プロセスの作業フォルダーなど) が既にあれば、こちらのオープンが共有違反になる。`FILE_SHARE_DELETE` を許すハンドル (変更通知の監視など) とは共存し、その場合も自分のハンドルを閉じた時点で名前が消える ([観測](../RATIONALE.md#prune-dirs))。
+- 比較用ハンドルの `FILE_FLAG_BACKUP_SEMANTICS` はディレクトリも開けるようにしてハンドル上で `Directory` を判定するためのもので、特権の有効化はしない (ディレクトリ削除用ハンドルでも同じ)。ファイルの削除用ハンドルには付けない (ディレクトリは開けずアクセス拒否になる。`delete` では [特殊ファイルと属性](#special-files) の事前判定と [失敗の境界](#failure-boundary) の識別確認で扱う)。
 - 最終パスは `GetFinalPathNameByHandleW(FILE_NAME_NORMALIZED | VOLUME_NAME_DOS)` で取得する。ディスク上の実際の大小文字が返るため、case strict と、途中の reparse point による経路のすり替えをこの序数比較で確認できる。
 - 最終パスは `GetFinalPathNameByHandleW` が返す形式 (`\\?\C:\...`) のまま保持・比較する。target の最終パスは保持用ハンドルから取得した値を使い、期待パスは「target の最終パス + `\` + ZIP の成分を `\` で連結したもの」で組み立てる。利用者が入力したパスの文字列を正規化して比較に使わない。`\\?\UNC\` で始まる最終パスの target は [targetルート](#target-root) の UNC 拒否として入力エラーとする。
 - 情報取得は `GetFileInformationByHandleEx` の `FileIdInfo`、`FileStandardInfo`、`FileBasicInfo`、`FileAttributeTagInfo`、`FileStreamInfo` と、親ディレクトリの File ID を返す `DeviceIoControl(FSCTL_READ_FILE_USN_DATA)` (USN_RECORD_V3 の `ParentFileReferenceNumber`) で行う。`FSCTL_READ_FILE_USN_DATA` は USN ジャーナルが非アクティブなボリュームでも親 File ID を返す ([USN観測の条件](../RATIONALE.md#current-state))。
@@ -212,6 +214,70 @@ target ファイルの内容は特殊判定の後でだけ読む。比較用・�
 | オープン  |  その他全て  |  STOP |
 | オープン成功  |  —  |  [削除順序](#delete-flow)の照合・検査へ |
 
+<a id="prune-dirs"></a>
+## 空のディレクトリの削除 (`--prune-dirs`)
+
+`delete` に `--prune-dirs` ([引数](cli.md#arguments)) を指定した場合だけ、ファイルの逐次処理 (以下、ファイル段階) の後に、アーカイブ由来のパスにある空のディレクトリを削除する段階 (以下、ディレクトリ段階) を1回行う。指定しなければディレクトリは削除しない ([対象](../SPEC.md#scope))。`analyze` には無い。ディレクトリ段階はアーカイブの内容を読まないため、Strict と Fast、ZIP と RAR で動作は同じである。「そのアーカイブから展開されたディレクトリ」であることは証明しない。実行前から空だったディレクトリも、対象のパスにあれば削除する。
+
+<a id="prune-set"></a>
+### 対象と順序
+
+- **対象のディレクトリ** (target ルートからの相対パスで、成分は ZIP の成分そのもの):
+  - `--entries` なし: 明示ディレクトリエントリのパスと、全エントリ (ファイル・ディレクトリ) の祖先成分 (暗黙ディレクトリ)。
+  - `--entries` あり: 選んだファイルエントリの祖先成分だけ。明示ディレクトリエントリと、選んだファイルの祖先でないパスは対象にしない。
+  - target ルート自身は対象にしない。同じパスは1回だけ数える。対象は [Prepare](../SPEC.md#prepare) を通過したエントリだけから作り、target に触れずに決まる (重複・大小文字の衝突は Prepare で FATAL になっている)。
+- **開始の条件**: ファイル段階が STOP なしで最後まで終わった場合だけ開始する。`DELETE_FAILED` があっても開始する。STOP した場合と、出力の失敗で後続を処理しない場合 ([出力先](machine-output.md#destinations)) は開始しない。
+- **順序**: 深い順 (成分数の多い順)。同じ深さでは、そのパスを最初に生じさせたエントリのアーカイブの順。子を削除して空になった親も、同じ段階で後から削除される。各ディレクトリについて、その祖先より先に処理を終え (削除用ハンドルを閉じ)、子孫より後に処理する。
+- 1件ずつ処理し、結果を1件ごとに表示する ([表示](cli.md#delete-output))。STOP したら以後のディレクトリを処理しない。
+
+<a id="prune-flow"></a>
+### ディレクトリ1件の順序
+
+[deleteの順序](#delete-flow)のディレクトリ版である。パスを使うのは手順3のオープンだけで、手順4〜9は全て同じハンドルに対して行う (手順3が失敗したときの識別確認だけは例外で、削除は行わない)。
+
+1. **解決**: [実名確認](#real-names)の方法で、target ルートから親成分と最終成分を1成分ずつ確認する。列挙はディレクトリ段階で新しく行い、ファイル段階の列挙結果を使わない (削除前の状態のため)。ディレクトリ段階の中では、解決のために同じディレクトリを1回だけ列挙する (手順6の空の確認の列挙はこれと別で、削除用ハンドルで行う)。各成分を[解決順序](#resolution)の手順1の表で分類し、最終成分にも同じ表を使う。
+   - 存在しない、大小文字だけ違う、通常ファイル (親成分・最終成分とも): `DIR_MISSING`。
+   - 親成分が reparse point: `DIR_KEPT` (親が reparse)。最終成分が reparse point: `DIR_KEPT` (reparse)。reparse 先をたどらない。
+   - 種類・属性を判定できない: STOP。
+   - 最終成分が完全一致する通常ディレクトリ: 手順2へ。
+2. **事前判定**: 最終成分の列挙項目の属性に、ディレクトリの許可集合 (`DIRECTORY` (0x10) と[ファイルの許可集合](#special-files)) 以外のビットがあれば、開かずに `DIR_KEPT` (属性) とする。`READONLY` の付いたディレクトリはこれに当たる (`IGNORE_READONLY_ATTRIBUTE` を使わないため、削除の指示が失敗する)。
+3. **オープン**: 期待パスをディレクトリ削除用ハンドル ([ハンドル構成](#handles)) で開く。
+4. **照合**: 同じハンドルで、ボリュームシリアルと File ID、親 File ID、最終パスを列挙由来の基準 ([列挙基準とM0](#baselines)と同じ項目) と照合し、`FILE_STANDARD_INFO` で `Directory` が true であることを確かめる。不一致・取得失敗は STOP。
+5. **検査と D0**: 同じハンドルで次を判定し、該当すればハンドルを閉じて `DIR_KEPT` とする。`DeletePending` が true なら STOP。
+   - reparse point (属性 0x400 または reparse tag が 0 でない): `DIR_KEPT` (reparse)。
+   - 属性が許可集合 (手順2) の外: `DIR_KEPT` (属性)。
+   - 名前付きデータストリーム (ADS) がある (`FileStreamInfo`): `DIR_KEPT` (ADS)。ストリームを持たないディレクトリでは `FileStreamInfo` が `ERROR_HANDLE_EOF` (38) で失敗するので、38 はストリームなしとする。それ以外の失敗は STOP。
+   - 該当しなければ、次の値を D0 として記録する: ボリュームシリアルと File ID、親 File ID、最終パス、属性、reparse tag、ストリームの有無。タイムスタンプは含めない (子の作成・削除で変わり、手順8が最後の防壁になるため)。
+6. **空の確認**: 同じハンドルで項目を列挙し (`FileIdExtdDirectoryRestartInfo / FileIdExtdDirectoryInfo`)、`.` と `..` 以外が1件でもあれば `DIR_KEPT` (空でない) としてハンドルを閉じる。見つけた名前は保持・表示しない。列挙のエラー (終端の `ERROR_NO_MORE_FILES` 以外) は STOP。
+7. **最終確認**: 同じハンドルで D0 の全項目を再取得して一致すること、`Directory` が true で `DeletePending` が false であることを確認する。不一致・取得失敗は STOP。
+8. **削除**: 同じハンドルに `SetFileInformationByHandle(FileDispositionInfoEx)` で削除を指示する。flags はファイルと同じ 0x3 (`FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS`) で、`IGNORE_READONLY_ATTRIBUTE` は指定しない。呼び出しはファイルの削除と同じ1か所の関数で行う。手順6の後に項目が作られていれば、NTFS が `ERROR_DIR_NOT_EMPTY` (145) で拒否する。
+9. **成立確認**: 同じハンドルで `DeletePending` が true であることを確認し、ハンドルを閉じて `DIR_DELETED` とする。閉じた時点で名前が消える。
+
+ディレクトリの削除にもパスベースの API (`RemoveDirectory`、`Directory.Delete` など) は使わない。再帰削除はしない。手順6で空であることを確かめたディレクトリだけを、そのハンドルで削除する。
+
+<a id="prune-failures"></a>
+### ディレクトリ段階の失敗の境界
+
+| 段階 | 状況 | 扱い |
+|---|---|---|
+| 1 (解決) | 列挙用ハンドルのオープン失敗・検証不一致・列挙エラー、想定外の種類 | STOP |
+| 3 (オープン) | 共有違反 (32)・アクセス拒否 (5) で、識別確認の時点で列挙由来の基準と一致する、削除保留でない通常のディレクトリに見える | `DIR_KEPT` (使用中)、続行 (別プロセスの作業フォルダーなど) |
+| 3 (オープン) | 共有違反・アクセス拒否で、識別確認が失敗・不一致・判定不能 (別の個体、reparse、削除保留中など) | STOP |
+| 3 (オープン) | 対象・途中のパスが見つからない (2・3)、その他の全てのエラー | STOP |
+| 4 (照合) | 不一致、情報取得の失敗、ディレクトリでない | STOP |
+| 5 (検査) | `DeletePending` が true、情報取得の失敗 (`FileStreamInfo` の 38 を除く) | STOP |
+| 6 (空の確認) | 項目がある | `DIR_KEPT` (空でない)、続行 |
+| 6 (空の確認) | 列挙のエラー | STOP |
+| 7 (最終確認) | D0 との不一致、取得失敗 | STOP |
+| 8 (削除) | `ERROR_DIR_NOT_EMPTY` (145) で、同じハンドルの `DeletePending` が false と確認できた | `DIR_KEPT` (空でない)、続行 |
+| 8 (削除) | その他の失敗、または 145 の後に `DeletePending` を確認できない・true | STOP (`DeletePending` が false と確認できなければ「削除された可能性あり」) |
+| 9 (成立確認) | 削除の成立を確認できない | STOP (「削除された可能性あり」) |
+| 任意 | 想定外の例外 | STOP (削除の指示の後なら「削除された可能性あり」) |
+
+**識別確認**は[ファイルの識別確認](#failure-boundary)と同じオープン (`FILE_READ_ATTRIBUTES` のみ) で、File ID とボリュームシリアル、親 File ID、最終パスを列挙由来の基準と比較し、ディレクトリであること、reparse でないこと、`DeletePending` が false であることを確かめる。限界も同じで、一致しても削除せず `DIR_KEPT` で続行するだけである。
+
+`DIR_KEPT` は削除の失敗ではなく、終了状態を変えない ([終了状態](cli.md#arguments))。ディレクトリ段階の STOP は `delete` の STOP であり、その時点でファイル段階は終わっている。
+
 <a id="limitations"></a>
 ## 既知の限界
 
@@ -222,6 +288,7 @@ target ファイルの内容は特殊判定の後でだけ読む。比較用・�
 - **削除用ハンドルを開いている間の属性変更・ADS 作成・hardlink 追加**: これらは共有モードでは拒否されない。unextract は削除の直前に最終確認 ([削除順序](#delete-flow) の手順7) を行うため、これらが問題になるのは最終確認から削除の指示までの短い間に限られる。その間に追加された ADS は、ファイルと一緒に削除される。追加された hardlink では、削除されるのは unextract が開いた名前だけで、データは他の名前に残る。read-only の付与は削除の失敗となり STOP する。
 - **祖先ディレクトリの改名**: 全祖先・別プロセス・全モードの改名可否は未確認である。限定付き観測は[OPEN_ISSUES](../OPEN_ISSUES.md#observations)による。改名できた場合でも、最終確認で最終パスの不一致として検出し STOP する。最終確認から削除の指示までの間の改名は検出できない。
 - **削除権限の差**: 読み取りはできるが削除の権限が無いファイルは、`analyze` では分類されるが、`delete` では削除用ハンドルを開けず `DELETE_FAILED` (内容比較なし) または STOP になる。
+- **空のディレクトリの削除 (`--prune-dirs`)**: 対象はアーカイブ由来のパスで決まり、来歴は証明しない。利用者が意図して作った空のディレクトリも、パスが一致すれば削除される (opt-in と確認で抑える)。空の確認から削除の指示までに作られた項目は NTFS が 145 で拒否するので、中身のあるディレクトリは削除されない。他者が削除済みのファイルを開いたままでも、そのファイルが POSIX semantics で削除されていれば親は空になるが、POSIX でない削除で保留中の名前が残っていれば空でないとして残る ([観測](../RATIONALE.md#prune-dirs))。
 - **性能**: Strict の `delete` は、削除するファイルについて ZIP エントリの展開と target の読み取りを1回行う。`analyze` の後に `delete` を実行すると、そのファイルの I/O は合計で約2倍になる。巨大なファイルでは削除用ハンドルを開いている時間が長くなり、その間そのファイルは他プロセスから書き込めない。
 
 Fastは内容比較だけを省き、その他の解決・照合・M0・最終確認・削除・成立確認を同じ順で実施する。同一性/API/検査順序の変更時は[理由](../RATIONALE.md#filesystem)と[未確認範囲](../OPEN_ISSUES.md#observations)も読む。

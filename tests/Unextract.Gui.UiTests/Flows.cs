@@ -137,11 +137,11 @@ internal static class Flows
     }
 
     public static string FakeDelete(this GuiSession ui, string archive, string target, string mode, int entriesTotal, int selected,
-        Item[] processed, int notSelected, bool wait = false, int waitAfter = 1)
+        Item[] processed, int notSelected, bool wait = false, int waitAfter = 1, DirItem[]? dirs = null)
     {
         // Like the real CLI, the process exit code equals result.exit_code (1 when an entry ends DELETE_FAILED).
         int exitCode = processed.Any(i => i.Status == "DELETE_FAILED") ? 1 : 0;
-        string release = ui.Scenario.Add("delete", FakeResults.Delete(archive, target, mode, entriesTotal, selected, processed, notSelected),
+        string release = ui.Scenario.Add("delete", FakeResults.Delete(archive, target, mode, entriesTotal, selected, processed, notSelected, dirs),
             exitCode: exitCode, archive: archive, target: target, wait: wait, waitAfterLines: waitAfter);
         ui.SaveScenario();
         return release;

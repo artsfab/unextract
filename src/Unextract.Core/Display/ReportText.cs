@@ -61,6 +61,10 @@ public static class ReportText
         return escaped ? line + EscapedMark : line;
     }
 
+    // ディレクトリ段階の結果行 (docs/spec/cli.md#delete-output): 状態名を 20 桁に左詰め + 空白2個 + Target + suffix。Target はファイルの結果行と同じ規則で表示する。
+    public static string TargetLine(string status, string target, string? suffix = null) =>
+        $"{status.PadRight(StatusWidth)}  {SafeDisplay.EscapeForList(WithoutDevicePrefix(target), out _)}{suffix}";
+
     // SKIPPED_SPECIAL_FILE の理由の表示 (docs/spec/cli.md#result-lines)。
     public static string Describe(SkipReason reason, ArchiveFormat format = ArchiveFormat.Zip) => reason switch
     {

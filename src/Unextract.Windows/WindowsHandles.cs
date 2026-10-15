@@ -44,25 +44,26 @@ internal sealed class WindowsDirectoryHandle(SafeFileHandle handle) : CoreTarget
             : volume.Fail<string, VolumeInformation>();
     }
 
-    public CoreTarget.IDirectoryEnumeration Enumerate() => new Enumeration(new DirectoryEnumerator(handle));
+    public CoreTarget.IDirectoryEnumeration Enumerate() => new WindowsDirectoryEnumeration(new DirectoryEnumerator(handle));
 
     public void Dispose() => handle.Dispose();
+}
 
-    private sealed class Enumeration(DirectoryEnumerator enumerator) : CoreTarget.IDirectoryEnumeration
+// DirectoryEnumerator の項目を Core の型に写す。列挙用・target ルート・ディレクトリ削除用ハンドルに共通。
+internal sealed class WindowsDirectoryEnumeration(DirectoryEnumerator enumerator) : CoreTarget.IDirectoryEnumeration
+{
+    private const string Operation = "GetFileInformationByHandleEx(FileIdExtdDirectoryInfo)";
+
+    public CoreTarget.DirectoryEnumerationStep Next()
     {
-        private const string Operation = "GetFileInformationByHandleEx(FileIdExtdDirectoryInfo)";
-
-        public CoreTarget.DirectoryEnumerationStep Next()
+        var step = enumerator.Next();
+        return step.Kind switch
         {
-            var step = enumerator.Next();
-            return step.Kind switch
-            {
-                DirectoryEnumerationStepKind.Entry => CoreTarget.DirectoryEnumerationStep.OfItem(new CoreTarget.DirectoryItem(
-                    step.Entry.Name, step.Entry.Attributes, step.Entry.ReparseTag, step.Entry.FileId.ToCore())),
-                DirectoryEnumerationStepKind.End => CoreTarget.DirectoryEnumerationStep.EndOfDirectory,
-                _ => CoreTarget.DirectoryEnumerationStep.Fail(step.Error, Operation),
-            };
-        }
+            DirectoryEnumerationStepKind.Entry => CoreTarget.DirectoryEnumerationStep.OfItem(new CoreTarget.DirectoryItem(
+                step.Entry.Name, step.Entry.Attributes, step.Entry.ReparseTag, step.Entry.FileId.ToCore())),
+            DirectoryEnumerationStepKind.End => CoreTarget.DirectoryEnumerationStep.EndOfDirectory,
+            _ => CoreTarget.DirectoryEnumerationStep.Fail(step.Error, Operation),
+        };
     }
 }
 
@@ -73,6 +74,21 @@ internal sealed class WindowsComparisonHandle(SafeFileHandle handle) : WindowsFi
 // 全てこのハンドルで行う (docs/spec/filesystem.md#delete-flow)。Dispose で閉じる。削除の指示が成立していれば、閉じた時点で名前が消える。
 internal sealed class WindowsDeletionHandle(SafeFileHandle handle) : WindowsFileHandle(handle), CoreTarget.IDeletionHandle
 {
+    public CoreTarget.ProbeResult<bool> SetDispositionEx(uint flags) => Disposition.SetDispositionEx(Handle, flags);
+}
+
+// ディレクトリ削除用ハンドル (docs/spec/filesystem.md#handles の表の「ディレクトリ削除用」の行)。照合・検査・空の確認 (同じハンドルでの列挙)・
+// 最終確認・削除の指示・成立確認を全てこのハンドルで行う (docs/spec/filesystem.md#prune-flow)。削除の指示はファイルと同じ関数を使う。
+internal sealed class WindowsDirectoryDeletionHandle(SafeFileHandle handle) : WindowsHandleInformation(handle), CoreTarget.IDirectoryDeletionHandle
+{
+    public CoreTarget.IDirectoryEnumeration Enumerate() => new WindowsDirectoryEnumeration(new DirectoryEnumerator(Handle));
+
+    public CoreTarget.ProbeResult<bool> SetDispositionEx(uint flags) => Disposition.SetDispositionEx(Handle, flags);
+}
+
+// 削除の指示 (docs/spec/filesystem.md#delete-flow の手順8、docs/spec/filesystem.md#prune-flow の手順8)。ファイルとディレクトリの両方の手順が共有する。
+internal static class Disposition
+{
     // FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS。これ以外の flags は API を呼ばずに失敗とする
     // (IGNORE_READONLY_ATTRIBUTE (0x10) を含む値を誤って渡さないための二重の確認。docs/spec/filesystem.md#delete-flow の削除指示)。
     internal const uint DeletePosixSemantics = 0x3;
@@ -81,7 +97,7 @@ internal sealed class WindowsDeletionHandle(SafeFileHandle handle) : WindowsFile
 
     // SetFileInformationByHandle(FileDispositionInfoEx) の唯一の呼び出し箇所。成功は削除の成立を意味しない
     // (成立は同じハンドルの DeletePending で確かめる。docs/spec/filesystem.md#delete-flow の成立確認)。
-    public unsafe CoreTarget.ProbeResult<bool> SetDispositionEx(uint flags)
+    public static unsafe CoreTarget.ProbeResult<bool> SetDispositionEx(SafeFileHandle handle, uint flags)
     {
         const string operation = "SetFileInformationByHandle(FileDispositionInfoEx)";
         if (flags != DeletePosixSemantics)
@@ -90,7 +106,7 @@ internal sealed class WindowsDeletionHandle(SafeFileHandle handle) : WindowsFile
         }
 
         var info = new FileDispositionInfoExNative { Flags = flags };
-        if (!Kernel32.SetFileInformationByHandle(Handle, FileInfoByHandleClass.FileDispositionInfoEx, &info, (uint)sizeof(FileDispositionInfoExNative)))
+        if (!Kernel32.SetFileInformationByHandle(handle, FileInfoByHandleClass.FileDispositionInfoEx, &info, (uint)sizeof(FileDispositionInfoExNative)))
         {
             return Win32Result<bool>.LastError(operation).Fail<bool, bool>();
         }
@@ -99,13 +115,44 @@ internal sealed class WindowsDeletionHandle(SafeFileHandle handle) : WindowsFile
     }
 }
 
-// 比較用・削除用ハンドルの共通部分。SafeFileHandle を所有し、Dispose で閉じる。
-// 内容は同じハンドルから RandomAccess で先頭から順に読む (パスで開き直さない)。
-internal abstract class WindowsFileHandle(SafeFileHandle handle) : CoreTarget.IComparisonHandle
+// 比較用・削除用ハンドルの共通部分。内容は同じハンドルから RandomAccess で先頭から順に読む (パスで開き直さない)。
+internal abstract class WindowsFileHandle(SafeFileHandle handle) : WindowsHandleInformation(handle), CoreTarget.IComparisonHandle
 {
     private const int ErrorInvalidData = 13;
     private long _position;
 
+    public CoreTarget.ProbeResult<int> Read(Span<byte> buffer)
+    {
+        int read;
+        try
+        {
+            read = RandomAccess.Read(Handle, buffer, _position);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return CoreTarget.ProbeResult<int>.Fail(Win32Code(ex), "ReadFile");
+        }
+
+        _position += read;
+        return CoreTarget.ProbeResult<int>.Ok(read);
+    }
+
+    // .NET の例外の HRESULT が Win32 エラー由来 (FACILITY_WIN32) ならそのコード。UnauthorizedAccessException は 5。
+    private static int Win32Code(Exception ex)
+    {
+        if (ex is UnauthorizedAccessException)
+        {
+            return 5;
+        }
+
+        var hresult = ex.HResult;
+        return (hresult & 0xFFFF0000) == 0x80070000 ? hresult & 0xFFFF : ErrorInvalidData;
+    }
+}
+
+// 比較用・削除用・ディレクトリ削除用ハンドルの情報取得。SafeFileHandle を所有し、Dispose で閉じる。
+internal abstract class WindowsHandleInformation(SafeFileHandle handle) : CoreTarget.IHandleInformation
+{
     protected SafeFileHandle Handle => handle;
 
     public CoreTarget.ProbeResult<CoreTarget.VolumeFileId> GetVolumeFileId()
@@ -140,8 +187,9 @@ internal abstract class WindowsFileHandle(SafeFileHandle handle) : CoreTarget.IC
             : info.Fail<CoreTarget.AttributeTagInformation, AttributeTagInformation>();
     }
 
-    // データストリームを持たないディレクトリでは ERROR_HANDLE_EOF (38) の失敗になる。Core は Directory を先に判定し、
-    // ディレクトリではこれを呼ばない (docs/spec/filesystem.md#special-files)。ファイルで 38 が返った場合はそのまま失敗として返す。
+    // データストリームを持たないディレクトリでは ERROR_HANDLE_EOF (38) の失敗になる。ファイルの検査では Core が Directory を先に判定し、
+    // ディレクトリではこれを呼ばない (docs/spec/filesystem.md#special-files)。ディレクトリ段階では Core が 38 をストリームなしと解釈する
+    // (docs/spec/filesystem.md#prune-flow の手順5)。ここでは 38 をそのまま失敗として返す。
     public CoreTarget.ProbeResult<IReadOnlyList<CoreTarget.StreamEntry>> GetStreams()
     {
         var streams = FileInformation.GetStreams(handle);
@@ -166,33 +214,5 @@ internal abstract class WindowsFileHandle(SafeFileHandle handle) : CoreTarget.IC
         return finalPath.Succeeded ? CoreTarget.ProbeResult<string>.Ok(finalPath.Value) : finalPath.Fail<string, string>();
     }
 
-    public CoreTarget.ProbeResult<int> Read(Span<byte> buffer)
-    {
-        int read;
-        try
-        {
-            read = RandomAccess.Read(handle, buffer, _position);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return CoreTarget.ProbeResult<int>.Fail(Win32Code(ex), "ReadFile");
-        }
-
-        _position += read;
-        return CoreTarget.ProbeResult<int>.Ok(read);
-    }
-
     public void Dispose() => handle.Dispose();
-
-    // .NET の例外の HRESULT が Win32 エラー由来 (FACILITY_WIN32) ならそのコード。UnauthorizedAccessException は 5。
-    private static int Win32Code(Exception ex)
-    {
-        if (ex is UnauthorizedAccessException)
-        {
-            return 5;
-        }
-
-        var hresult = ex.HResult;
-        return (hresult & 0xFFFF0000) == 0x80070000 ? hresult & 0xFFFF : ErrorInvalidData;
-    }
 }

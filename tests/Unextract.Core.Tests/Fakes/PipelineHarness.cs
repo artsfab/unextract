@@ -117,9 +117,10 @@ internal sealed class PipelineHarness : IDisposable
 
     public void Dispose() => _source.Dispose();
 
-    // 削除の能力を使う呼び出し (OpenForDeletion、CheckIdentity、SetDispositionEx) の記録か。
+    // 削除の能力を使う呼び出し (OpenForDeletion、OpenDirectoryForDeletion、CheckIdentity、SetDispositionEx) の記録か。
     public static bool IsDeletionCall(string call) =>
         call.StartsWith("OpenDeletion ", StringComparison.Ordinal)
+        || call.StartsWith("OpenDirectoryDeletion ", StringComparison.Ordinal)
         || call.StartsWith("CheckIdentity ", StringComparison.Ordinal)
         || call.StartsWith("Disposition ", StringComparison.Ordinal);
 

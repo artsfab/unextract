@@ -34,6 +34,12 @@ internal sealed class MachineOutputWriter(Stream stdout, ExecutionLog? log = nul
         Deliver(MachineOutput.Serialize(record));
     }
 
+    public void WriteDirectory(MachineDirRecord record)
+    {
+        CheckContinuing();
+        Deliver(MachineOutput.Serialize(record));
+    }
+
     // 失敗後の OUTPUT_FAILED もこの唯一の終端口から、失敗していない先だけへ送る。
     // false は終了コード1が必要。終端配送失敗で2個目の result を書かない。
     public bool WriteResult(MachineResultRecord record)

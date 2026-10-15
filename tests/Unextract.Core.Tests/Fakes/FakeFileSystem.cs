@@ -24,6 +24,7 @@ public enum FakeOp
     OpenDeletion,
     CheckIdentity,
     Disposition,
+    OpenDirectoryDeletion,
 }
 
 internal sealed class FakeNode
@@ -130,6 +131,10 @@ internal sealed class FakeFileSystem : IFileSystemProbe, IDeletionProbe
     public int MaxConcurrentDeletions { get; private set; }
 
     public int DeletionCloseCount { get; private set; }
+
+    public int OpenDirectoryDeletionHandleCount => _open.Count(h => h is FakeDirectoryDeletionHandle);
+
+    public int MaxConcurrentDirectoryDeletions { get; private set; }
 
     // 削除が成立した (削除用ハンドルのクローズで名前が消えた) ノード。
     public List<FakeNode> Deleted { get; } = [];
@@ -277,6 +282,27 @@ internal sealed class FakeFileSystem : IFileSystemProbe, IDeletionProbe
         return ProbeResult<IDeletionHandle>.Ok(handle);
     }
 
+    // ディレクトリ削除用オープン (docs/spec/filesystem.md#handles)。FILE_FLAG_BACKUP_SEMANTICS 付きなのでファイルも開ける (Directory で判定する)。
+    // 実機と同じく、削除保留中の対象は 5 (docs/RATIONALE.md#prune-dirs の観測)。
+    public ProbeResult<IDirectoryDeletionHandle> OpenDirectoryForDeletion(string path)
+    {
+        Calls.Add($"OpenDirectoryDeletion {path}");
+        var (node, error) = Open(path, FakeOp.OpenDirectoryDeletion, followFinal: false);
+        if (node is null)
+        {
+            return ProbeResult<IDirectoryDeletionHandle>.Fail(error, "OpenDirectoryDeletion");
+        }
+
+        if (node.DeletePending)
+        {
+            return ProbeResult<IDirectoryDeletionHandle>.Fail(5, "OpenDirectoryDeletion");
+        }
+
+        var handle = Track(new FakeDirectoryDeletionHandle(this, node));
+        MaxConcurrentDirectoryDeletions = Math.Max(MaxConcurrentDirectoryDeletions, OpenDirectoryDeletionHandleCount);
+        return ProbeResult<IDirectoryDeletionHandle>.Ok(handle);
+    }
+
     // 識別確認 (docs/spec/filesystem.md#failure-boundary)。削除保留中は実機と同じく識別確認のオープンも 5。
     public ProbeResult<IdentityCheckInfo> CheckIdentity(string path)
     {
@@ -310,13 +336,14 @@ internal sealed class FakeFileSystem : IFileSystemProbe, IDeletionProbe
             if (handle is FakeDeletionHandle)
             {
                 DeletionCloseCount++;
+            }
 
-                // POSIX semantics: 削除を指示したハンドルのクローズで名前が消える (他者の削除保留はこのハンドルでは消さない)。
-                if (handle is FakeDeletionHandle { DispositionSet: true } && handle.Node.DeletePending && handle.Node.Parent is not null)
-                {
-                    Remove(handle.Node);
-                    Deleted.Add(handle.Node);
-                }
+            // POSIX semantics: 削除を指示したハンドルのクローズで名前が消える (他者の削除保留はこのハンドルでは消さない)。
+            if (handle is FakeDeletionHandle { DispositionSet: true } or FakeDirectoryDeletionHandle { DispositionSet: true }
+                && handle.Node.DeletePending && handle.Node.Parent is not null)
+            {
+                Remove(handle.Node);
+                Deleted.Add(handle.Node);
             }
         }
     }
@@ -452,26 +479,72 @@ internal sealed class FakeDirectoryHandle(FakeFileSystem fs, FakeNode node, stri
     public IDirectoryEnumeration Enumerate()
     {
         FileSystem.Calls.Add($"Enumerate {Path}");
-        var items = Node.EnumerationOverride
-            ?? Node.Children.Select(c => new DirectoryItem(c.Name, c.Attributes, c.ReparseTag, c.Id)).ToList();
-        return new FakeEnumeration(items, Node);
+        return FakeEnumeration.Of(Node);
+    }
+}
+
+internal sealed class FakeEnumeration(List<DirectoryItem> items, FakeNode node) : IDirectoryEnumeration
+{
+    private int _index;
+
+    public static FakeEnumeration Of(FakeNode node) => new(
+        node.EnumerationOverride ?? node.Children.Select(c => new DirectoryItem(c.Name, c.Attributes, c.ReparseTag, c.Id)).ToList(), node);
+
+    public DirectoryEnumerationStep Next()
+    {
+        if (node.Errors.TryGetValue(FakeOp.Enumerate, out var error) && _index >= node.EnumerationFailAfter)
+        {
+            return DirectoryEnumerationStep.Fail(error, "Enumerate");
+        }
+
+        return _index < items.Count
+            ? DirectoryEnumerationStep.OfItem(items[_index++])
+            : DirectoryEnumerationStep.EndOfDirectory;
+    }
+}
+
+// ディレクトリ削除用ハンドル (docs/spec/filesystem.md#prune-flow)。空の確認の列挙と削除の指示を呼び出し記録に残す。
+// 子があれば削除の指示は実機と同じく 145 (ERROR_DIR_NOT_EMPTY)、READONLY は 5 で失敗する。
+internal sealed class FakeDirectoryDeletionHandle(FakeFileSystem fs, FakeNode node) : FakeFileHandle(fs, node, "dir-deletion"), IDirectoryDeletionHandle
+{
+    public bool DispositionSet { get; private set; }
+
+    public IDirectoryEnumeration Enumerate()
+    {
+        FileSystem.Calls.Add($"Enumerate {Path}");
+        return FakeEnumeration.Of(Node);
     }
 
-    private sealed class FakeEnumeration(List<DirectoryItem> items, FakeNode node) : IDirectoryEnumeration
+    public ProbeResult<bool> SetDispositionEx(uint flags)
     {
-        private int _index;
-
-        public DirectoryEnumerationStep Next()
+        FileSystem.Calls.Add($"{FakeOp.Disposition} 0x{flags:X} {Path}");
+        if (Node.Errors.TryGetValue(FakeOp.Disposition, out var error))
         {
-            if (node.Errors.TryGetValue(FakeOp.Enumerate, out var error) && _index >= node.EnumerationFailAfter)
-            {
-                return DirectoryEnumerationStep.Fail(error, "Enumerate");
-            }
-
-            return _index < items.Count
-                ? DirectoryEnumerationStep.OfItem(items[_index++])
-                : DirectoryEnumerationStep.EndOfDirectory;
+            return ProbeResult<bool>.Fail(error, "Disposition");
         }
+
+        if ((Node.Attributes & 0x1) != 0 && (flags & 0x10) == 0)
+        {
+            return ProbeResult<bool>.Fail(5, "Disposition");
+        }
+
+        if (Node.Children.Count > 0)
+        {
+            return ProbeResult<bool>.Fail(145, "Disposition");
+        }
+
+        if (!Node.DispositionHasNoEffect && (flags & 0x1) != 0)
+        {
+            Node.DeletePending = true;
+            DispositionSet = true;
+        }
+
+        if (Node.ThrowAfterDisposition)
+        {
+            throw new InvalidOperationException("injected after disposition");
+        }
+
+        return ProbeResult<bool>.Ok(true);
     }
 }
 
